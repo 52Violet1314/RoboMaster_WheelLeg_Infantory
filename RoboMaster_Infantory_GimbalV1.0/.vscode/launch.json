@@ -1,0 +1,46 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "stlinkgdbtarget",
+            "request": "launch",
+            "name": "STM32Cube: Launch ST-Link GDB Server",
+            "origin": "snippet",
+            "cwd": "${workspaceFolder}",
+            "preBuild": "${command:st-stm32-ide-debug-launch.build}",
+            "runEntry": "main",
+            "imagesAndSymbols": [
+                {
+                    "imageFileName": "${command:st-stm32-ide-debug-launch.get-projects-binary-from-context1}"
+                }
+            ]
+        },
+        {
+            "name": "Cortex-Debug DAPLink (SWD)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "cmsisDap": true,
+
+            "device": "STM32H723",
+            "executable": "${workspaceFolder}/build/Debug/RoboMaster_Infantory_Gimbal.elf",
+            "runToMain": true,
+            "showDevDebugOutput": "none",
+
+            "configFiles": [
+                "${workspaceFolder}/../OpenocdCfg/stm32h7x_cmsis-dap.cfg"
+            ],
+
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 10,
+                "expressions": [
+                    "hi14_rx_size",
+                    "Hipnuc_HI14.hi14data.roll",
+                    "Hipnuc_HI14.hi14data.pitch",
+                    "Hipnuc_HI14.hi14data.yaw"
+                ]
+            }
+        }
+    ]
+}

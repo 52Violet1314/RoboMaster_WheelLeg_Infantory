@@ -1,0 +1,32 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug (STM32H723ZGT6)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "cwd": "${workspaceFolder}",
+            "executable": "${command:st-stm32-ide-debug-launch.get-projects-binary-from-context1}",
+            "device": "STM32H723ZGT6",
+            "svdFile": "",
+            "runToEntryPoint": "main",
+            "armToolchainPath": "C:/ST/STM32CubeCLT_1.19.0/GNU-tools-for-STM32/bin",
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 6
+            },
+            "configFiles": [
+                "interface/cmsis-dap.cfg",
+                "target/stm32h7x.cfg"
+            ],
+            "openOCDLaunchCommands": [
+                "adapter speed 1000"
+            ],
+            "preLaunchCommands": [
+                "monitor reset init",
+                "monitor halt"
+            ]
+        }
+    ]
+}

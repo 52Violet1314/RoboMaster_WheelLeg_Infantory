@@ -1,0 +1,71 @@
+FDCAN数据接收问题分析与解决方案
+
+一、问题原因分析
+
+1. **FDCAN1过滤器配置错误**：
+   - 使用FDCAN_FILTER_MASK模式，但FilterID1=0x00，FilterID2=0x00
+   - 这意味着只有ID=0x00的消息才会被接受，其他ID（包括0x91-94）都会被过滤掉
+
+2. **全局过滤器配置不当**：
+   - FDCAN1和FDCAN2配置为FDCAN_REJECT，拒绝不匹配过滤器的消息
+   - 由于过滤器配置错误，实际上所有电机反馈消息都会被拒绝
+
+3. **FDCAN设备分配问题**：
+   - 电机反馈数据处理逻辑在fdcan1_rx_callback中，说明电机应连接到FDCAN1
+   - 但FDCAN1过滤器配置错误导致无法接收数据
+
+二、解决方案建议
+
+1. **修正FDCAN1过滤器配置**：
+   - 方法1：使用FDCAN_FILTER_RANGE模式，设置FilterID1=0x91，FilterID2=0x94
+   - 方法2：使用FDCAN_FILTER_MASK模式，设置FilterID1=0x90，FilterID2=0x0F（接受0x90-0x9F范围）
+
+2. **调整全局过滤器设置**：
+   - 将FDCAN1的全局过滤器配置为FDCAN_ACCEPT_IN_RX_FIFO0或FDCAN_ACCEPT_IN_RX_FIFO1
+   - 允许接受匹配过滤器的消息
+
+3. **检查FIFO配置**：
+   - 确保使用的FIFO（FIFO0/FIFO1）与过滤器配置一致
+   - 确保已激活正确FIFO的接收中断
+
+4. **物理层检查**：
+   - 检查CAN总线终端电阻（120Ω）是否正确连接
+   - 检查线缆连接质量，避免信号衰减
+   - 考虑使用屏蔽线缆减少干扰
+
+5. **波特率配置验证**：
+   - 确保电机控制器的波特率设置与STM32一致（数据域5M，仲裁域1M）
+   - 检查采样点设置是否匹配
+
+三、代码修改建议
+
+1. 修改FDCAN1过滤器配置：
+   ```c
+   fdcan_filter.IdType = FDCAN_STANDARD_ID;
+   fdcan_filter.FilterIndex = 0;
+   fdcan_filter.FilterType = FDCAN_FILTER_RANGE;
+   fdcan_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+   fdcan_filter.FilterID1 = 0x91;  // 起始ID
+   fdcan_filter.FilterID2 = 0x94;  // 结束ID
+   ```
+
+2. 调整FDCAN1全局过滤器：
+   ```c
+   HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_REJECT,
+                               FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
+   ```
+
+3. 确保中断正确激活：
+   ```c
+   HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
+   ```
+
+四、测试与验证步骤
+
+1. 修正代码后重新编译下载
+2. 使用示波器或逻辑分析仪监控CAN总线信号
+3. 检查是否能同时接收所有电机反馈数据（0x91-0x94）
+4. 验证控制命令（0x51-0x54）是否能正确发送到电机
+5. 测试系统在不同负载下的稳定性
+
+通过以上修改和验证，应该能够解决只能接收最低ID数据的问题。

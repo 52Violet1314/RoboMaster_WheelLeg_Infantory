@@ -1,0 +1,30 @@
+E_CMSIS_OS 0
+
+//发送协�?
+typedef struct
+
+{
+
+  uint8_t header[2];   /* 'Q','Y' ֡ͷ */
+
+   uint8_t mode;
+
+   float   roll;
+
+   float   pitch;
+
+   float   yaw;
+
+   float   crc;         /* ���ݲ����ֽں� */
+
+}GimbalState_Send_t;
+
+#define GIMBAL_CRC_OFFSET  offsetof(GimbalState_Send_t, crc)
+
+/* USER CODE END PD */
+
+
+
+/* Private macro -------------------------------------------------------------*/
+
+/* USER C

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /tmp)",
+      "Bash(curl -skL \"https://github.com/titanwings/colleague-skill/archive/refs/heads/main.zip\" -o colleague-skill.zip)",
+      "Bash(curl -skL -o /tmp/colleague-skill.zip \"https://api.github.com/repos/titanwings/colleague-skill/zipball/main\")",
+      "Read(//tmp/**)",
+      "Bash(rm -rf \"d:/STM32WorkSpace/RoboMaster_InfantoryV2.1.2/.claude/skills/create-colleague\")",
+      "Bash(mkdir -p \"d:/STM32WorkSpace/RoboMaster_InfantoryV2.1.2/.claude/skills/create-colleague\")",
+      "Bash(unzip -o /tmp/colleague-skill.zip -d /tmp/colleague-skill-extracted)",
+      "Bash(cp -r /tmp/colleague-skill-extracted/*/.* /tmp/colleague-skill-extracted/*/* \"d:/STM32WorkSpace/RoboMaster_InfantoryV2.1.2/.claude/skills/create-colleague/\")",
+      "Bash(pip3 install *)"
+    ]
+  }
+}
