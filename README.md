@@ -2,7 +2,7 @@
 
 RoboMaster 高校联盟赛轮腿步兵机器人嵌入式软件工程，基于 STM32H723VGT6 主控，采用 FreeRTOS 实时操作系统，C/C++ 混合开发。
 
-本仓库包含三个子工程：**底盘控制固件（V2.1.4）**、**云台控制固件（Gimbal V1.0）** 以及 **MATLAB 控制仿真（Simulation）**。
+本仓库包含三个子工程：**底盘控制固件（V2.1.4）**、**云台控制固件（Gimbal V1.0）** 以及 **MATLAB 控制仿真（Simulation）**，另附对标参考工程与项目文档。
 
 ## 目录结构
 
@@ -11,8 +11,21 @@ RoboMaster_Wheeleg_Infantory/
 ├── RoboMaster_InfantoryV2.1.4/       # 轮腿步兵底盘控制固件（主工程）
 ├── RoboMaster_Infantory_GimbalV1.0/  # 云台控制固件
 ├── Simmulation/                      # 腿长 LQR 求解 + 腿控仿真
+├── Example/SENTRY_LEG/               # 哨兵轮腿完整版参考工程（底盘+云台双板，F407）
+├── TASK_LOG.md                       # 任务日志 + 分阶段实施方案
+├── ARCHITECTURE.md                   # 当前任务架构梳理
+├── REQUIREMENTS.md                   # 项目需求表（按 RoboMaster 平衡步兵）
 └── README.md
 ```
+
+## 项目文档索引
+
+| 文档 | 内容 |
+|---|---|
+| `TASK_LOG.md` | 对标完整版差距分析、任务清单（T1-T9）、Phase 0-5 实施方案 |
+| `ARCHITECTURE.md` | 双板 FreeRTOS 任务架构、IPC、1ms 事件链数据流 |
+| `REQUIREMENTS.md` | 44 项需求表（底盘/云台/射击/裁判/通信/安全/工程），含验收指标与状态跟踪 |
+| `Example/SENTRY_LEG/` | 参考工程：云台+射击+裁判+自救援等模块移植来源 |
 
 ## 子工程说明
 
@@ -45,6 +58,8 @@ RoboMaster_Wheeleg_Infantory/
 | INS | 7 | 惯导数据采集与融合（IMU 信号量触发） |
 | Defalut | 2 | WS2812 灯效 + 任务栈水位监控 |
 
+> 详细任务架构（IPC、事件链数据流）见 `ARCHITECTURE.md`。
+
 ### 2. RoboMaster_Infantory_GimbalV1.0 — 云台控制固件
 
 云台独立控制板固件，与上位机（视觉/主控板）通过 **USB CDC 虚拟串口** 通信。
@@ -52,6 +67,7 @@ RoboMaster_Wheeleg_Infantory/
 - 自定义帧协议：帧头 `0x51 0x59` + 姿态数据 + CRC16 校验
 - 接收上位机云台指令帧（`CDC_Receive_HS` 回调解包），发送云台 Roll / Pitch / Yaw 姿态
 - 调试统计：收包次数、解包成功/失败计数、失败原因（长度/帧头/CRC）
+- 规划：启用 FreeRTOS，接管云台 Pitch + 射击电机控制（见 `TASK_LOG.md` Phase 0-1）
 
 ### 3. Simmulation — 控制仿真
 
@@ -87,3 +103,9 @@ cmake --build build/Debug
 - **腿长控制**：基于 MATLAB 求解的 LQR 增益实现定腿长与变腿长状态机（`LegLengthState_t`）
 - **地面检测**：轮速卡尔曼滤波 + 离地检测算法（`Ground_clearance_detection.c`）判断车轮离地状态
 - **失效保护**：遥控通道 10 触发紧急停车（Emergency Task），电源管理带软开关控制（POWER）
+
+## 开发规范
+
+- **Bug 记录**：`RoboMaster_InfantoryV2.1.4/Bug.MD/` 按 BUG-XXX 编号记录（含模板）
+- **任务跟踪**：完成后勾选 `TASK_LOG.md` / `REQUIREMENTS.md` 对应 checkbox
+- **提交规范**：提交说明写明改动内容（如 `修复FDCAN滤波器配置`、`新增裁判系统移植`）
