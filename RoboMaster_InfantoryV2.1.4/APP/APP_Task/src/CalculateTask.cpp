@@ -168,16 +168,41 @@ void CaculateTask(void *pvParameters) {
         float cal_dt = (float)(now_tick - last_cal_tick) * 1e-6f;
         if (cal_dt <= 0.0f || cal_dt > 0.1f) cal_dt = 0.001f;  // 1ms 默认值
         last_cal_tick = now_tick;
+        
+        if(DM_8009P1.Enable_Flag == 0)
+        {
+            DM_Motor_Enable(&DM_8009P1);
+        }
+        if(DM_8009P2.Enable_Flag == 0)
+        {
+            DM_Motor_Enable(&DM_8009P2);
+        }
+        if(DM_8009P3.Enable_Flag == 0)
+        {
+            DM_Motor_Enable(&DM_8009P3);
+        }
+        if(DM_8009P4.Enable_Flag == 0)
+        {
+            DM_Motor_Enable(&DM_8009P4);
+        }
+        if(DM_3519L.Enable_Flag == 0)
+        {
+            DM_Motor_Enable(&DM_3519L);
+        }
+        if(DM_3519R.Enable_Flag == 0)
+        {
+            DM_Motor_Enable(&DM_3519R);
+        }
 
         // ====== 原 Data Task：读取电机数据 ======
         pClassicData->Motor_Data.L1_Motor_POS =
-                (DM_8009P1.data.position_rad / 3.50f * 3.14f) + 3.14f;
+                DM_8009P1.data.position_rad + 3.14f;
         pClassicData->Motor_Data.L2_Motor_POS =
-                (DM_8009P2.data.position_rad / 3.50f * 3.14f) + 6.28f;
+                DM_8009P2.data.position_rad + 6.28f;
         pClassicData->Motor_Data.R1_Motor_POS =
-                -(DM_8009P4.data.position_rad / 3.50f * 3.14f) - 3.14f;
+                -DM_8009P4.data.position_rad- 3.14f;
         pClassicData->Motor_Data.R2_Motor_POS =
-                -(DM_8009P3.data.position_rad / 3.50f * 3.14f);
+                -DM_8009P3.data.position_rad;
         pClassicData->Motor_Data.L1_Motor_VEL = DM_8009P1.data.velocity_rad_s;
         pClassicData->Motor_Data.L2_Motor_VEL = DM_8009P2.data.velocity_rad_s;
         pClassicData->Motor_Data.R1_Motor_VEL = DM_8009P4.data.velocity_rad_s;

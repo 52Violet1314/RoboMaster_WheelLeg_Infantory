@@ -380,9 +380,40 @@ void MPU_Config(void)
   */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
+  static uint8_t CheckTimes = 0;
   /* USER CODE BEGIN Callback 0 */
   if (htim->Instance == TIM3) {
     // IMU_RequestEuler(&imu);
+  DM_8009P1.CheckTimes++;
+  DM_8009P2.CheckTimes++;
+  DM_8009P3.CheckTimes++;
+  DM_8009P4.CheckTimes++;
+  DM_3519L.CheckTimes++;
+  DM_3519R.CheckTimes++;
+  if(DM_8009P1.CheckTimes >= 100)
+  {
+    DM_8009P1.Enable_Flag = 0;
+  }
+  if(DM_8009P2.CheckTimes >= 100)
+  {
+    DM_8009P2.Enable_Flag = 0;
+  }
+  if(DM_8009P3.CheckTimes >= 100)
+  {
+    DM_8009P3.Enable_Flag = 0;
+  }
+  if(DM_8009P4.CheckTimes >= 100)
+  {
+    DM_8009P4.Enable_Flag = 0;
+  }
+  if(DM_3519L.CheckTimes >= 100)
+  {
+    DM_3519L.Enable_Flag = 0;
+  }
+  if(DM_3519R.CheckTimes >= 100)
+  {
+    DM_3519R.Enable_Flag = 0;
+  }
     //  uart_print("TIM3 Period Elapsed\r\n");
   }
   /* USER CODE END Callback 0 */

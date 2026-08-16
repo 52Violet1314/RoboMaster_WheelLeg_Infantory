@@ -49,26 +49,27 @@ void MotorControlTask(void *pvParameters) {
             // DM_Motor_Enable(&DM_8009P4);
             // DM_Motor_Enable(&DM_3519L);
             // DM_Motor_Enable(&DM_3519R);
-            // DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f,
-                                 ((Classic_Data->Contronller_Data.T1_L * 17.0f) / 19.0f));
-            DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f,
-                                 ((Classic_Data->Contronller_Data.T2_L * 17.0f) / 19.0f));
-            DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f,
-                                 ((-Classic_Data->Contronller_Data.T1_R * 17.0f) / 19.0f));
-            DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f,
-                                 ((-Classic_Data->Contronller_Data.T2_R * 17.0f) / 19.0f));
-            // DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            DM_Motor_MIT_Control(
-                &DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f,
-                ((Classic_Data->Contronller_Data.Fw_L / 15.8f) * 19.2f));
-            DM_Motor_MIT_Control(
-                &DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f,
-                -((Classic_Data->Contronller_Data.Fw_R / 15.8f) * 19.2f));
+            DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+            DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+            DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+            DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+            DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+            DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+
+            // DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f,
+            //                      Classic_Data->Contronller_Data.T1_L);
+            // DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f,
+            //                      Classic_Data->Contronller_Data.T2_L);
+            // DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f,
+            //                      -Classic_Data->Contronller_Data.T1_R);
+            // DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f,
+            //                      -Classic_Data->Contronller_Data.T2_R);
+            // DM_Motor_MIT_Control(
+            //     &DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f,
+            //     ((Classic_Data->Contronller_Data.Fw_L / 15.8f) * 19.2f));
+            // DM_Motor_MIT_Control(
+            //     &DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f,
+            //     -((Classic_Data->Contronller_Data.Fw_R / 15.8f) * 19.2f));
         }
         // uart_print("[%d]Cont\r\n", __HAL_TIM_GET_COUNTER(&htim5));
         xEventGroupSetBits(ControlEventGroup, Control_OK_BIT);

@@ -324,26 +324,32 @@ void fdcan1_rx_callback(void) {
     switch (rec_id) {
       case 0x091: //  8009电机1ID
         DM_Motor_8009_Data_Get(&DM_8009P1, buf);
+        DM_8009P1.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 0);
         break;
       case 0x092: //  8009电机2ID
         DM_Motor_8009_Data_Get(&DM_8009P2, buf);
+        DM_8009P2.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 1);
         break;
       case 0x093: //  8009电机3ID
         DM_Motor_8009_Data_Get(&DM_8009P3, buf);
+        DM_8009P3.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 2);
         break;
       case 0x094: //  8009电机4ID
         DM_Motor_8009_Data_Get(&DM_8009P4, buf);
+        DM_8009P4.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 3);
         break;
       case 0x095: //  8009电机5ID
         DM_Motor_3519_Data_Get(&DM_3519L, buf);
+        DM_3519L.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 4);
         break;
       case 0x096: //  8009电机6ID
         DM_Motor_3519_Data_Get(&DM_3519R, buf);
+        DM_3519R.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 5);
         break;
       default:
