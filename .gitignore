@@ -1,0 +1,23 @@
+# Keil MDK 编译产物
+*.o
+*.axf
+*.crf
+*.d
+*.dep
+*.htm
+*.lnp
+*.map
+*.lst
+*.uvguix
+*.scvd
+*.uvoptx.bak
+JLinkLog.txt
+JLinkSettings.ini
+
+# 固件/中间产物
+*.hex
+*.bin
+*.elf
+
+# 构建目录
+build/
