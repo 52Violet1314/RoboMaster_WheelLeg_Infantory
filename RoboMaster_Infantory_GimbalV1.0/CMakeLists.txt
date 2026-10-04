@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # App
     App/gimbal.c
+    App/BoardLinkTask.c
     # BSP (bsp_CAN.c / bsp_fdcan.c need APP headers not in this project)
     BSP/bsp_UART.c
     BSP/CRC.c
@@ -66,6 +67,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     App
     HardWare
     BSP
+    ../Common
     # CMSIS DSP (for arm_math.h used by PID.c)
     Drivers/CMSIS/DSP/Include
 )

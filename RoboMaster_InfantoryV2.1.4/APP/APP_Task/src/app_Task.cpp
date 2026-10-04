@@ -3,6 +3,7 @@
 #include "ControlTask.hpp"
 #include "app_INSTask.hpp"
 #include "app_Data_Task.hpp"
+#include "BoardLinkTask.hpp"
 #include "app_Remote_Task.hpp"
 #include "FreeRTOS.h"
 #include "WS2812.h"
@@ -121,6 +122,10 @@ void CreatTask(void) {
   res =xTaskCreate(CaculateTask, "Caculate", 256 * 6, &Classic_Data, 9, &CaculateHandle);
   if (res != pdPASS) {
     uart_print_blocking("CalculateTaskCreate fail\r\n");
+  }
+  res = xTaskCreate(BoardLinkTask, "BoardLink", 256 * 3, &Classic_Data, 4, NULL);
+  if (res != pdPASS) {
+    uart_print_blocking("BoardLinkTaskCreate fail\r\n");
   }
 }
 

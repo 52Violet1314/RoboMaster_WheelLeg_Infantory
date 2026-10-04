@@ -7,7 +7,6 @@
 #include "Power.h"
 #include "SBUS.h"
 #include "WS2812.h"
-#include "app_K_value.hpp"
 #include "app_Task.hpp"
 #include "app_Data_Task.hpp"
 #include "app_ins_cal.h"
@@ -29,25 +28,33 @@
 #include <type_traits>
 #include "wheel_kalman_fliter.h"
 #include "Ground_clearance_detection.h"
+#include "app_K_value.hpp"
 
 // 定义参考值（根据实际需求调整）
+float X_pos_ref = 0.0f; // 期望位置
 float d_X_ref = 0.0f; // 期望速度
 float theta_ref = 0.0f; // 期望整体角度
 float d_yaw_ref = 0.0f; // 期望整体角速度
 float yaw_ref = 0.0f; // 期望整体角速度
 float d_theta_ref = 0.0f; // 期望整体角速度
-float theta_L_ref = 0.0f; // 期望左腿角度
 float d_theta_L_ref = 0.0f; // 期望左腿角速度
-float theta_R_ref = 0.0f; // 期望右腿角度
 float d_theta_R_ref = 0.0f; // 期望右腿角速度
+float theta_L_ref = 0.0f; // 期望左腿角度
+float theta_R_ref = 0.0f; // 期望右腿角度
 
-Float_PID_Typedef LEG_PD_L_PID;
-Float_PID_Typedef LEG_PD_R_PID;
-Float_PID_Typedef LEG_PHI_PD_L_PID;
-Float_PID_Typedef LEG_PHI_PD_R_PID;
-Float_PID_Typedef LEG_DIFF_PID;
+/* 腿长力闭环：L0 由四连杆正运动学计算得到，PID 输出为腿向力修正量。 */
+static Float_PID_Typedef leg_length_pid_l;
+static Float_PID_Typedef leg_length_pid_r;
+static Float_PID_Typedef leg_phi_pid_l;
+static Float_PID_Typedef leg_phi_pid_r;
 
 bool StandUp_Flag = true;
+
+typedef enum
+{
+    StandState_Up,
+    StandState_NotUp,
+} StandState_t;
 
 uint8_t ControlState = 0;
 
@@ -56,24 +63,6 @@ uint8_t ControlState = 0;
 int task_time = 0;
 int last_task_time = 0;
 int Calculate_time;
-
-float Target_Leg_Long = 0.150f;
-
-typedef enum
-{
-  ChangingToHighLegLength,
-  ChangingToLowLegLength,
-  ApproachingLegLength,
-  StableLegLength,
-} LegLengthState_t;
-
-LegLengthState_t Left_LegLengthState = StableLegLength;
-LegLengthState_t Right_LegLengthState = StableLegLength;
-
-uint8_t LeftLegStableFlag = 0;
-uint8_t RightLegStableFlag = 0;
-
-
 
 void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
                    float TpR, float dt);
@@ -94,30 +83,25 @@ void Classic_Data_Update(Classic_Data_t *pClassicData);
 
 void IMU_Temp_Control(float Target_Temp);
 
-void LQR_K_Calculate350(Classic_Data_t *pClassicData);
-void LQR_K_Calculate250(Classic_Data_t *pClassicData);
 void LQR_K_Calculate150(Classic_Data_t *pClassicData);
+void LQR_K_Calculate250(Classic_Data_t *pClassicData);
+void LQR_K_Calculate350(Classic_Data_t *pClassicData);
 
 void Controler_Limit(Classic_Data_t *pClassicData);
 
 void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
-    float leg_l_int_max = 0.0f;
-    float leg_l_res_max = 0.0f;
-    float leg_r_int_max = 0.0f;
-    float leg_r_res_max = 0.0f;
-    float leg_l_err = 0.0f;
-    float leg_r_err = 0.0f;
     static float Max_F0 = 50.0f;
     static float Max_Tp = 1.8f;
-    uint16_t StandUp_Count = 0;
+    // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
+    // 任一侧超出阈值连续 1 s 才切换为未起身。
+    StandState_t stand_state = StandState_Up;
+    float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
-    Float_PID_Init(&LEG_PD_L_PID, 400.0f, 1.5f, 2.0f);
-    Float_PID_Init(&LEG_PD_R_PID, 400.0f, 1.5f, 2.0f);
-    Float_PID_Init(&LEG_PHI_PD_L_PID, 15.0f, 0.0f, 3.0f);
-    Float_PID_Init(&LEG_PHI_PD_R_PID, 15.0f, 0.0f, 3.0f);
-    Float_PID_Init(&LEG_DIFF_PID, 100.0f, 1.2f, 1.0f);
-
+    Float_PID_Init(&leg_length_pid_l, 1200.0f, 1.5f, 2.0f);
+    Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 4.0f);
+    Float_PID_Init(&leg_phi_pid_l, 15.0f, 0.0f, 3.0f);
+    Float_PID_Init(&leg_phi_pid_r, 15.0f, 0.0f, 3.0f);
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P2, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -142,6 +126,14 @@ void CaculateTask(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     uint32_t last_cal_tick = 0;  // 使用 htim5 微秒计数器跟踪真实 dt
     while (1) {
+        /* 独立于传感器事件的任务心跳，用于区分“任务未运行”和“无数据帧”。 */
+        static TickType_t xLastAlivePrint = 0;
+        TickType_t xAliveNow = xTaskGetTickCount();
+        if ((xAliveNow - xLastAlivePrint) > pdMS_TO_TICKS(1000)) {
+            uart_print_blocking("CAL_ALIVE bits=0x%02X\r\n",
+                               (unsigned)xEventGroupGetBits(DataGroup));
+            xLastAlivePrint = xAliveNow;
+        }
         // ====== 原 Data Task：等待传感器数据就绪（5ms 超时保护） ======
         EventBits_t uxBits = xEventGroupWaitBits(
             DataGroup, MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT,
@@ -149,6 +141,16 @@ void CaculateTask(void *pvParameters) {
 
         if ((uxBits & (MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT))
             != (MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT)) {
+            /* 传感器帧未成套到达时，禁止沿用上一周期的轮速控制量。
+             * 否则 ControlTask 仍会按旧的 Fw_R/Fw_L 发包，表现为单侧电机持续转动。 */
+            pClassicData->Contronller_Data.Fw_L = 0.0f;
+            pClassicData->Contronller_Data.Fw_R = 0.0f;
+            pClassicData->Contronller_Data.Tp_L = 0.0f;
+            pClassicData->Contronller_Data.Tp_R = 0.0f;
+            pClassicData->Contronller_Data.T1_L = 0.0f;
+            pClassicData->Contronller_Data.T2_L = 0.0f;
+            pClassicData->Contronller_Data.T1_R = 0.0f;
+            pClassicData->Contronller_Data.T2_R = 0.0f;
             /* 节流打印：每 500ms 最多输出一次，避免串口洪水拖慢调度 */
             static TickType_t xLastTimeoutPrint = 0;
             extern uint32_t fdcan_tx_fail_count;
@@ -196,11 +198,11 @@ void CaculateTask(void *pvParameters) {
 
         // ====== 原 Data Task：读取电机数据 ======
         pClassicData->Motor_Data.L1_Motor_POS =
-                DM_8009P1.data.position_rad + 3.14f;
+                DM_8009P1.data.position_rad + 3.1415926f;
         pClassicData->Motor_Data.L2_Motor_POS =
-                DM_8009P2.data.position_rad + 6.28f;
+                DM_8009P2.data.position_rad + 6.2831853f;
         pClassicData->Motor_Data.R1_Motor_POS =
-                -DM_8009P4.data.position_rad- 3.14f;
+                -DM_8009P4.data.position_rad - 3.1415926f;
         pClassicData->Motor_Data.R2_Motor_POS =
                 -DM_8009P3.data.position_rad;
         pClassicData->Motor_Data.L1_Motor_VEL = DM_8009P1.data.velocity_rad_s;
@@ -215,24 +217,14 @@ void CaculateTask(void *pvParameters) {
         // ====== 原 Data Task：计算状态变量 ======
         // pClassicData->States_Data.d_X =
         //         (pClassicData->Motor_Data.Left_Wheel_Motor_VEL * -0.05f);
-        pClassicData->States_Data.d_X = ((Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) / 2.0f);
-        Pos_INT += pClassicData->Target_Data.Target_X_vel / 1000.0f;
-                //  pClassicData->Motor_Data.Right_Wheel_Motor_VEL * -0.05f) / 2.0f;
-        pClassicData->States_Data.X_pos = ((Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) / 2.0f) - Pos_INT;
-        // if (pClassicData->States_Data.X_pos > -5.0f)
-        //   pClassicData->States_Data.X_pos = -5.0f;
-        // if (pClassicData->States_Data.X_pos < -15.0f)
-        //   pClassicData->States_Data.X_pos = -15.0f;
-        pClassicData->States_Data.d_x_err =
-                pClassicData->States_Data.d_X - pClassicData->Target_Data.Target_X_vel;
         pClassicData->States_Data.d_yaw_err =
                 pClassicData->Target_Data.Target_yaw_vel + pClassicData->IMU_Data.delta_yaw;
         pClassicData->States_Data.yaw_err +=
                 (pClassicData->States_Data.d_yaw_err) / 1000.f;
-        if (pClassicData->States_Data.yaw_err > 3.14f)
-          pClassicData->States_Data.yaw_err = 3.14f;
-        if (pClassicData->States_Data.yaw_err < -3.14f)
-          pClassicData->States_Data.yaw_err = -3.14f;
+        if (pClassicData->States_Data.yaw_err > 3.1415926f)
+          pClassicData->States_Data.yaw_err = 3.1415926f;
+        if (pClassicData->States_Data.yaw_err < -3.1415926f)
+          pClassicData->States_Data.yaw_err = -3.1415926f;
         pClassicData->States_Data.theta_L =
                 +1.5708f - pClassicData->Leg_Data.phi_0_L - pClassicData->IMU_Data.pitch;
         pClassicData->States_Data.d_theta_L = -pClassicData->Leg_Data.delta_phi_0_L -
@@ -260,165 +252,145 @@ void CaculateTask(void *pvParameters) {
             pClassicData->States_Data.d_last_d_theta_R = pClassicData->States_Data.d_theta_R;
         }
         
-        WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_h, cal_dt, -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L, pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
-        WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_h, cal_dt, -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R, pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
+        /* Kalman 的控制输入必须是带方向的前向加速度；accel_h 是幅值，
+         * 会在静止/转向时持续向位置状态注入正向偏置。 */
+        WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L, pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
+        WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R, pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
+
+        /* Kalman 校正完成后再生成公共底盘状态，供下游状态监视使用。 */
+        pClassicData->States_Data.d_X =
+                (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f;
+        Pos_INT += pClassicData->Target_Data.Target_X_vel / 1000.0f;
+        pClassicData->States_Data.X_pos =
+                (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f - Pos_INT;
+        pClassicData->States_Data.d_x_err =
+                pClassicData->States_Data.d_X - pClassicData->Target_Data.Target_X_vel;
         
         // WheelKalman_Print(&Wheel_Kalman_L, 'L');
         // WheelKalman_Print(&Wheel_Kalman_R, 'R');
         float Fn_Left = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_L,pClassicData->Contronller_Data.Tp_L, pClassicData->Leg_Data.L0_L,pClassicData->Leg_Data.d_L0_L,pClassicData->Leg_Data.dd_L0_L,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_L,pClassicData->States_Data.d_theta_L,pClassicData->States_Data.dd_theta_L);
         float Fn_Right = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_R,pClassicData->Contronller_Data.Tp_R, pClassicData->Leg_Data.L0_R,pClassicData->Leg_Data.d_L0_R,pClassicData->Leg_Data.dd_L0_R,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_R,pClassicData->States_Data.d_theta_R,pClassicData->States_Data.dd_theta_R);
-        // ====== LQR 平衡控制 / 腿长目标选择 ======
-        if (SBUS_Data.Channel[7] < -100) {
-            pClassicData->Contronller_Data.Tp_L = 0.0f;
-            pClassicData->Contronller_Data.Tp_R = 0.0f;
-            pClassicData->Contronller_Data.Fw_L = 0.0f;
-            pClassicData->Contronller_Data.Fw_R = 0.0f;
-            Target_Leg_Long = 0.150f;
-        }
-        else if (SBUS_Data.Channel[7] > 100) {
-            if (SBUS_Data.Channel[8] > 100) {
-                Target_Leg_Long = 0.35f;
-                LQR_K_Calculate350(pClassicData);
-            }
-            else if (SBUS_Data.Channel[8] < -100) {
-                Target_Leg_Long = 0.15f;
+        // ====== LQR + 腿长 PID + phi PID + roll 差分补偿 ======
+        /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
+        pClassicData->Contronller_Data.Fw_L = 0.0f;
+        pClassicData->Contronller_Data.Fw_R = 0.0f;
+        pClassicData->Contronller_Data.Tp_L = 0.0f;
+        pClassicData->Contronller_Data.Tp_R = 0.0f;
+
+        /* LQR 根据开关和腿长档位选择对应增益矩阵。 */
+        if (SBUS_Data.Channel[7] > 100) {
+            if (SBUS_Data.Channel[8] < -100) {
                 LQR_K_Calculate150(pClassicData);
-            }
-            else {
-                Target_Leg_Long = 0.25f;
+            } else if (SBUS_Data.Channel[8] > 100) {
+                LQR_K_Calculate350(pClassicData);
+            } else {
                 LQR_K_Calculate250(pClassicData);
             }
         }
-        leg_l_err = pClassicData->Leg_Data.L0_L - Target_Leg_Long;
-        leg_r_err = pClassicData->Leg_Data.L0_R - Target_Leg_Long;
-        if(leg_l_err > 0.050f)
-        {
-            Left_LegLengthState = ChangingToHighLegLength;
+
+        /* phi PID 暂不叠加到 LQR 的 Tp 输出。 */
+        // const float phi_ref = 1.5708f - pClassicData->IMU_Data.pitch - theta_ref;
+        // pClassicData->Contronller_Data.Tp_L +=
+        //         PID_Max_Float(&leg_phi_pid_l, phi_ref,
+        //                       pClassicData->Leg_Data.phi_0_L, 0.0f, 0.5f);
+        // pClassicData->Contronller_Data.Tp_R +=
+        //         PID_Max_Float(&leg_phi_pid_r, phi_ref,
+        //                       pClassicData->Leg_Data.phi_0_R, 0.0f, 0.5f);
+
+        /* roll 补偿在 F0 支撑力上实现左右差动，暂不叠加到 Tp。 */
+        constexpr float roll_kp = 40.0f;
+        constexpr float roll_kd = 2.5f;
+        if (SBUS_Data.Channel[8] < -100) {
+            pClassicData->Target_Data.Target_LegLong = 0.150f;
+        } else if (SBUS_Data.Channel[8] > 100) {
+            pClassicData->Target_Data.Target_LegLong = 0.350f;
+        } else {
+            pClassicData->Target_Data.Target_LegLong = 0.250f;
         }
-        else if(leg_l_err < -0.050f)
-        {
-            Left_LegLengthState = ChangingToLowLegLength;
+        /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
+        const float leg_target = pClassicData->Target_Data.Target_LegLong;
+        const float leg_err_l = leg_target - pClassicData->Leg_Data.L0_L;
+        const float leg_err_r = leg_target - pClassicData->Leg_Data.L0_R;
+        static float last_leg_target = 0.0f;
+        if (fabsf(leg_target - last_leg_target) > 0.001f) {
+            /* 切换腿长档位时丢弃上一目标的积分，避免换挡冲击。 */
+            leg_length_pid_l.Err_Int = 0.0f;
+            leg_length_pid_r.Err_Int = 0.0f;
+            leg_length_pid_l.Last_Error = leg_err_l;
+            leg_length_pid_r.Last_Error = leg_err_r;
+            leg_length_pid_l.Last_Dout = 0.0f;
+            leg_length_pid_r.Last_Dout = 0.0f;
+            last_leg_target = leg_target;
         }
-        if(leg_l_err < 0.030f && leg_l_err > -0.030f)
+        const float leg_l_int_limit = leg_err_l < -0.05f ? 1.0f : 5.0f;
+        const float leg_r_int_limit = leg_err_r < -0.05f ? 1.0f : 5.0f;
+        const float leg_l_out_limit = 8.0f;
+        const float leg_r_out_limit = 8.0f;
+        float leg_l_out = PID_Max_Float(&leg_length_pid_l, leg_target,
+                                              pClassicData->Leg_Data.L0_L,
+                                              leg_l_int_limit, leg_l_out_limit);
+        float leg_r_out = PID_Max_Float(&leg_length_pid_r, leg_target,
+                                              pClassicData->Leg_Data.L0_R,
+                                              leg_r_int_limit, leg_r_out_limit);
+        // pClassicData->Contronller_Data.F0_L = 15.5f + leg_l_out;
+        // pClassicData->Contronller_Data.F0_R = 15.5f + leg_r_out;
+        if(leg_l_out < -3.5f)
         {
-            if(leg_l_err < 0.010f && leg_l_err > -0.010f)
-            {
-                if(LeftLegStableFlag >= 10)
-                {
-                    Left_LegLengthState = StableLegLength;
-                }
-                else LeftLegStableFlag ++;
-            }
-            else
-            {
-                Left_LegLengthState = ApproachingLegLength;
-            }
+            leg_l_out = -3.5f;
         }
-        switch(Left_LegLengthState)
+        if(leg_r_out < -3.5f)
         {
-            case StableLegLength:
-                leg_l_int_max = 5.0f;
-                leg_l_res_max = 12.0f;
-                LEG_PD_L_PID.Kp = 1200.0f;
-                LEG_PD_L_PID.Ki = 1.5f;
-                break;
-            case ChangingToHighLegLength:
-                leg_l_int_max = 5.0f;
-                leg_l_res_max = 17.5f;
-                LEG_PD_L_PID.Kp = 1500.0f;
-                LEG_PD_L_PID.Ki = 2.0f;
-                break;
-            case ChangingToLowLegLength:
-                leg_l_int_max = 1.0f;
-                leg_l_res_max = 2.0f;
-                LEG_PD_L_PID.Kp = 200.0f;
-                LEG_PD_L_PID.Ki = 0.5f;
-                break;
-            case ApproachingLegLength:
-                leg_l_int_max = 5.0f;
-                leg_l_res_max = 15.5f;
-                LEG_PD_L_PID.Kp = 1200.0f;
-                LEG_PD_L_PID.Ki = 2.0f;
-                break;
+            leg_r_out = -3.5f;
         }
 
-        if(leg_r_err > 0.050f)
+        // ====== 起身状态机（左右腿共用一个状态）======
+        const float theta_l_abs = fabsf(pClassicData->States_Data.theta_L);
+        const float theta_r_abs = fabsf(pClassicData->States_Data.theta_R);
+        const bool both_legs_up = (theta_l_abs < 0.5f) && (theta_r_abs < 0.5f);
+        const bool either_leg_not_up = (theta_l_abs > 1.2f) || (theta_r_abs > 1.2f);
+        if (both_legs_up)
         {
-            Right_LegLengthState = ChangingToHighLegLength;
+          stand_state = StandState_Up;
+          stand_not_up_time = 0.0f;
         }
-        else if(leg_r_err < -0.050f)
+        else if (either_leg_not_up && stand_state != StandState_NotUp)
         {
-            Right_LegLengthState = ChangingToLowLegLength;
+          stand_not_up_time += cal_dt;
+          if (stand_not_up_time >= 1.0f)
+          {
+            stand_state = StandState_NotUp;
+            stand_not_up_time = 1.0f;
+          }
         }
-        if(leg_r_err < 0.030f && leg_r_err > -0.030f)
-        {
-            if(leg_r_err < 0.010f && leg_r_err > -0.010f)
-            {
-                if(RightLegStableFlag >= 10)
-                {
-                    Right_LegLengthState = StableLegLength;
-                }
-                else RightLegStableFlag ++;
-            }
-            else
-            {
-                Right_LegLengthState = ApproachingLegLength;
-            }
-        }
-        switch(Right_LegLengthState)
-        {
-            case StableLegLength:
-                leg_r_int_max = 5.0f;
-                leg_r_res_max = 12.0f;
-                LEG_PD_R_PID.Kp = 1000.0f;
-                LEG_PD_R_PID.Ki = 1.5f;
-                break;
-            case ChangingToHighLegLength:
-                leg_r_int_max = 5.0f;
-                leg_r_res_max = 17.5f;
-                LEG_PD_R_PID.Kp = 1500.0f;
-                LEG_PD_R_PID.Ki = 2.0f;
-                break;
-            case ChangingToLowLegLength:
-                leg_r_int_max = 1.0f;
-                leg_r_res_max = 2.0f;
-                LEG_PD_R_PID.Kp = 200.0f;
-                LEG_PD_R_PID.Ki = 0.5f;
-                break;
-            case ApproachingLegLength:
-                leg_r_int_max = 5.0f;
-                leg_r_res_max = 15.5f;
-                LEG_PD_R_PID.Kp = 1200.0f;
-                LEG_PD_R_PID.Ki = 2.0f;
-                break;
-        }
+        StandUp_Flag = (stand_state == StandState_Up);
 
-        PID_Max_Float(&LEG_PD_L_PID, Target_Leg_Long, pClassicData->Leg_Data.L0_L, leg_l_int_max, leg_l_res_max);
-        PID_Max_Float(&LEG_PD_R_PID, Target_Leg_Long, pClassicData->Leg_Data.L0_R, leg_r_int_max, leg_r_res_max);
+        const float stand_offset_l = StandUp_Flag ? 15.0f : -20.5f;
+        const float stand_offset_r = StandUp_Flag ? 12.5f : -20.5f;
+        pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
+        pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
 
-        // ====== 左右腿长差PID纠偏 ======
-        float leg_length_diff = pClassicData->Leg_Data.L0_L - pClassicData->Leg_Data.L0_R;
-        PID_Max_Float(&LEG_DIFF_PID, 0.0f, leg_length_diff, 5.0f, 10.0f);
+        /* roll 角及其差分形成左右反向的 F0 补偿，单侧限幅 ±2 N。 */
+        constexpr float roll_f0_limit = 8.0f;
+        float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
+                            + roll_kd * pClassicData->IMU_Data.delta_roll);
+        if (roll_comp > roll_f0_limit) {
+            roll_comp = roll_f0_limit;
+        } else if (roll_comp < -roll_f0_limit) {
+            roll_comp = -roll_f0_limit;
+        }
+        pClassicData->Contronller_Data.F0_L += roll_comp;
+        pClassicData->Contronller_Data.F0_R -= roll_comp;
 
-        // ====== 腿长力输出（重力补偿 + 差动纠偏）======
-        pClassicData->Contronller_Data.F0_L = LEG_PD_L_PID.Res + 25.5f + LEG_DIFF_PID.Res * 0.5f;
-        pClassicData->Contronller_Data.F0_R = LEG_PD_R_PID.Res + 25.5f - LEG_DIFF_PID.Res * 0.5f;
+        if (SBUS_Data.Channel[9] < 100) {
+            /* 电机失能期间不保留积分，重新上电时从当前腿长重新建立力。 */
+            leg_length_pid_l.Err_Int = 0.0f;
+            leg_length_pid_r.Err_Int = 0.0f;
+        //     leg_phi_pid_l.Last_Error = phi_ref - pClassicData->Leg_Data.phi_0_L;
+        //     leg_phi_pid_r.Last_Error = phi_ref - pClassicData->Leg_Data.phi_0_R;
+        //     leg_phi_pid_l.Last_Dout = 0.0f;
+        //     leg_phi_pid_r.Last_Dout = 0.0f;
+        }
        
-        if(SBUS_Data.Channel[9] < 100) 
-        {
-            StandUp_Flag = true;
-            // uart_print("StandUp_Flag = true\n");
-        }
-        else if(pClassicData->States_Data.theta_L < 0.2f && pClassicData->States_Data.theta_L > -0.2f)
-        {   
-            if(StandUp_Count >= 500)
-            {
-                StandUp_Flag = false;
-            // uart_print("StandUp_Flag = false\n");
-            }
-            else StandUp_Count ++;
-        }
-
         // ====== 输入限幅：VMC 之前，F0/Tp 必须在此限幅（Fw 不经过 VMC） ======
         if(StandUp_Flag == true)
         {
@@ -462,16 +434,12 @@ void CaculateTask(void *pvParameters) {
         {
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
-            if(SBUS_Data.Channel[7] > 100)
-            {
-               if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(50)) {
-                    State_Data_Print(pClassicData);
+            if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
+                State_Data_Print(pClassicData);
                 xLastPrintTick = xNow;
-            }
             }
 
         }
-        // uart_print("%d,%d,%d,%d,%d,%d,%d\r\n",(int)(Target_Leg_Long * 1000),(int)(pClassicData->Leg_Data.L0_L * 1000),(int)(leg_l_err * 1000),(int)(pClassicData->Contronller_Data.F0_L * 1000),(int)(pClassicData->Leg_Data.L0_R * 1000),(int)(leg_r_err * 1000),(int)(pClassicData->Contronller_Data.F0_R * 1000));
         xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
@@ -825,8 +793,8 @@ void Classic_Data_Update(Classic_Data_t *pClassicData) {
                       1e-6f;
     if (time_diff > 1e-6f) {
         // ====== 角速度计算（弧度制，带 ±π 跳变处理） ======
-        float roll_change =
-                pClassicData->IMU_Data.roll - pClassicData->IMU_Data.last_roll;
+        float roll_change = pClassicData->IMU_Data.roll -
+                            pClassicData->IMU_Data.last_roll;
         if (roll_change > 3.14159f)
             roll_change -= 6.28318f;
         else if (roll_change < -3.14159f)
@@ -834,7 +802,7 @@ void Classic_Data_Update(Classic_Data_t *pClassicData) {
         pClassicData->IMU_Data.delta_roll =
                 a * roll_change / time_diff +
                 (1 - a) * pClassicData->IMU_Data.delta_roll;
-
+        pClassicData->IMU_Data.last_roll = pClassicData->IMU_Data.roll;
         float pitch_change =
                 pClassicData->IMU_Data.pitch - pClassicData->IMU_Data.last_pitch;
         if (pitch_change > 3.14159f)
@@ -975,142 +943,47 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
                d_theta_dec);
 }
 
-void LQR_K_Calculate150(Classic_Data_t *pClassicData) {
-    static arm_matrix_instance_f32 K_Matrix = {4, 10, (float *) K_Fixed_Leg150};
-    static bool initialized = false;
-
-    if (!initialized) {
-        arm_mat_init_f32(&K_Matrix, 4, 10, (float *) K_Fixed_Leg150);
-        initialized = true;
-    }
-
-    // 状态向量：使用偏差而不是绝对值
+// 输出限幅（VMC 之后）：T1/T2；Fw 不经过 VMC，也在此限幅
+static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
+                                     K_Fixed_Leg_t gain) {
+    /* K 矩阵对应 [x, dx, yaw, dyaw, thetaL, dthetaL,
+     * thetaR, dthetaR, pitch, dpitch] 十维状态。 */
     float states[10] = {
-        pClassicData->States_Data.X_pos, // 0: 位置偏差
-        pClassicData->States_Data.d_x_err, // 1: 速度偏差
-        // 0.0f,
-        // 0.0f,
+        pClassicData->States_Data.X_pos,
+        pClassicData->States_Data.d_x_err,
         pClassicData->States_Data.yaw_err,
         pClassicData->States_Data.d_yaw_err,
-        // 0.0f,
-        // 0.0f,
-        pClassicData->States_Data.theta_L - theta_L_ref, // 2: 左腿角度偏差
-        pClassicData->States_Data.d_theta_L - d_theta_L_ref, // 3: 左腿角速度偏差
-        // 0.0f,
-        // 0.0f,
-        pClassicData->States_Data.theta_R - theta_R_ref, // 4:右腿角速度偏差
-        pClassicData->States_Data.d_theta_R - d_theta_R_ref, // 5: 右腿角速度偏差
-        // 0.0f,
-        // 0.0f,
-        -(pClassicData->States_Data.theta - theta_ref), // 6: 整体角度偏差
-        -(pClassicData->States_Data.d_theta - d_theta_ref) // 7: 整体角速度偏差
-        // 0.0f,
-        // 0.0f,
+        pClassicData->States_Data.theta_L - theta_L_ref,
+        pClassicData->States_Data.d_theta_L - d_theta_L_ref,
+        pClassicData->States_Data.theta_R - theta_R_ref,
+        pClassicData->States_Data.d_theta_R - d_theta_R_ref,
+        -(pClassicData->States_Data.theta - theta_ref),
+        -(pClassicData->States_Data.d_theta - d_theta_ref)
     };
+    float control[4] = {0.0f};
+    arm_matrix_instance_f32 K = {4, 10, &gain[0][0]};
+    arm_matrix_instance_f32 state = {10, 1, states};
+    arm_matrix_instance_f32 output = {4, 1, control};
+    arm_mat_mult_f32(&K, &state, &output);
 
-    float U_temp[4] = {0};
-    arm_matrix_instance_f32 U = {4, 1, U_temp};
+    pClassicData->Contronller_Data.Fw_L = control[0];
+    pClassicData->Contronller_Data.Fw_R = control[1];
+    pClassicData->Contronller_Data.Tp_L = control[2];
+    pClassicData->Contronller_Data.Tp_R = control[3];
+}
 
-    arm_matrix_instance_f32 S = {10, 1, states};
-
-    arm_mat_mult_f32(&K_Matrix, &S, &U);
-    pClassicData->Contronller_Data.Fw_L = U_temp[0];
-    pClassicData->Contronller_Data.Fw_R = U_temp[1];
-    pClassicData->Contronller_Data.Tp_L = U_temp[2];
-    pClassicData->Contronller_Data.Tp_R = U_temp[3];
+void LQR_K_Calculate150(Classic_Data_t *pClassicData) {
+    LQR_K_CalculateWithGain(pClassicData, K_Fixed_Leg150);
 }
 
 void LQR_K_Calculate250(Classic_Data_t *pClassicData) {
-    static arm_matrix_instance_f32 K_Matrix = {4, 10, (float *) K_Fixed_Leg250};
-    static bool initialized = false;
-
-    if (!initialized) {
-        arm_mat_init_f32(&K_Matrix, 4, 10, (float *) K_Fixed_Leg250);
-        initialized = true;
-    }
-
-    // 状态向量：使用偏差而不是绝对值
-    float states[10] = {
-        pClassicData->States_Data.X_pos, // 0: 位置偏差
-        pClassicData->States_Data.d_x_err, // 1: 速度偏差
-        // 0.0f,
-        // 0.0f,
-        pClassicData->States_Data.yaw_err,
-        pClassicData->States_Data.d_yaw_err,
-        // 0.0f,
-        // 0.0f,
-        pClassicData->States_Data.theta_L - theta_L_ref, // 2: 左腿角度偏差
-        pClassicData->States_Data.d_theta_L - d_theta_L_ref, // 3: 左腿角速度偏差
-        // 0.0f,
-        // 0.0f,
-        pClassicData->States_Data.theta_R - theta_R_ref, // 4:右腿角速度偏差
-        pClassicData->States_Data.d_theta_R - d_theta_R_ref, // 5: 右腿角速度偏差
-        // 0.0f,
-        // 0.0f,
-        -(pClassicData->States_Data.theta - theta_ref), // 6: 整体角度偏差
-        -(pClassicData->States_Data.d_theta - d_theta_ref) // 7: 整体角速度偏差
-        // 0.0f,
-        // 0.0f,
-    };
-
-    float U_temp[4] = {0};
-    arm_matrix_instance_f32 U = {4, 1, U_temp};
-
-    arm_matrix_instance_f32 S = {10, 1, states};
-
-    arm_mat_mult_f32(&K_Matrix, &S, &U);
-    pClassicData->Contronller_Data.Fw_L = U_temp[0];
-    pClassicData->Contronller_Data.Fw_R = U_temp[1];
-    pClassicData->Contronller_Data.Tp_L = U_temp[2];
-    pClassicData->Contronller_Data.Tp_R = U_temp[3];
+    LQR_K_CalculateWithGain(pClassicData, K_Fixed_Leg250);
 }
+
 void LQR_K_Calculate350(Classic_Data_t *pClassicData) {
-    static arm_matrix_instance_f32 K_Matrix = {4, 10, (float *) K_Fixed_Leg350};
-    static bool initialized = false;
-
-    if (!initialized) {
-        arm_mat_init_f32(&K_Matrix, 4, 10, (float *) K_Fixed_Leg350);
-        initialized = true;
-    }
-
-    // 状态向量：使用偏差而不是绝对值
-    float states[10] = {
-        pClassicData->States_Data.X_pos, // 0: 位置偏差
-        pClassicData->States_Data.d_x_err, // 1: 速度偏差
-        // 0.0f,
-        // 0.0f,
-        pClassicData->States_Data.yaw_err,
-        pClassicData->States_Data.d_yaw_err,
-        // 0.0f,
-        // 0.0f,
-        pClassicData->States_Data.theta_L - theta_L_ref, // 2: 左腿角度偏差
-        pClassicData->States_Data.d_theta_L - d_theta_L_ref, // 3: 左腿角速度偏差
-        // 0.0f,
-        // 0.0f,
-        pClassicData->States_Data.theta_R - theta_R_ref, // 4:右腿角速度偏差
-        pClassicData->States_Data.d_theta_R - d_theta_R_ref, // 5: 右腿角速度偏差
-        // 0.0f,
-        // 0.0f,
-        -(pClassicData->States_Data.theta - theta_ref), // 6: 整体角度偏差
-        -(pClassicData->States_Data.d_theta - d_theta_ref) // 7: 整体角速度偏差
-        // 0.0f,
-        // 0.0f,
-    };
-
-    float U_temp[4] = {0};
-    arm_matrix_instance_f32 U = {4, 1, U_temp};
-
-    arm_matrix_instance_f32 S = {10, 1, states};
-
-    arm_mat_mult_f32(&K_Matrix, &S, &U);
-    pClassicData->Contronller_Data.Fw_L = U_temp[0];
-    pClassicData->Contronller_Data.Fw_R = U_temp[1];
-    pClassicData->Contronller_Data.Tp_L = U_temp[2];
-    pClassicData->Contronller_Data.Tp_R = U_temp[3];
+    LQR_K_CalculateWithGain(pClassicData, K_Fixed_Leg350);
 }
 
-
-// 输出限幅（VMC 之后）：T1/T2；Fw 不经过 VMC，也在此限幅
 void Controler_Limit(Classic_Data_t *pClassicData) {
   // Fw 限幅：±6.0 N（轮子力，不经过 VMC）
   if (pClassicData->Contronller_Data.Fw_L > 6.0f)

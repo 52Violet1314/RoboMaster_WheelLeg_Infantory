@@ -80,6 +80,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     APP/APP_Task/inc
     APP/inc
     BSP
+    ${CMAKE_SOURCE_DIR}/../Common
     cmake/stm32cubemx/Core/Inc
 )
 

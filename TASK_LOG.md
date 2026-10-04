@@ -2,7 +2,33 @@
 
 > 基准工程：`C:\Users\14420\Downloads\UTF-8__SENTRY_LEG\SENTRY_LEG`（哨兵完整版，F407 双板）
 > 本仓库：STM32H723 双板（底盘 V2.1.4 + 云台 V1.0）
-> 更新时间：2026-08-16
+> 更新时间：2026-08-30
+
+## 2026-08-30 — 底盘控制工作区改动（待提交、待实车验收）
+
+本次本地改动尚未提交到 `main`，远程 `origin/main` 当前没有更新提交。底盘和云台工程均已通过 CMake Debug 编译，但尚未完成实车闭环验收。涉及文件集中在 `RoboMaster_InfantoryV2.1.4/APP/`、`RoboMaster_Infantory_GimbalV1.0/` 和 `Simmulation/`，主要内容如下：
+
+| 模块 | 改动 | 验证状态 |
+|---|---|---|
+| 任务调度 | 将电机数据搬运、状态估计和控制计算统一放入 `Caculate`；保留 `app_Data_Task` 空桩防止链接断裂；增加传感器超时清零和 `CAL_ALIVE` 心跳日志 | ✅ CMake Debug；实车待验证 |
+| 状态估计 | 新增 `IMU_Data.accel_x`，使用带符号前向加速度驱动轮速 Kalman；补齐 Kalman 后的位置、速度和速度误差更新 | ⬜ 实车待验证 |
+| 轮腿控制 | 独立左右腿长 PID、目标切换积分复位、左右腿共用起身状态机、roll 角/角速度差动力补偿；LQR 计算复用公共增益函数 | ⬜ 参数与稳定性待验证 |
+| 电机控制 | `ControlTask` 恢复 4 个 DM8009 与 2 个 DM3519 的 MIT/速度输出；增加 `Enable_Flag`、`CheckTimes`，失能后由计算任务重新使能 | ⬜ 通信与保护待验证 |
+| 启动与参数 | `app_main` 初始化 UART DMA 打印同步；提高电机位置常量精度；更新 150/250 档 LQR 增益与 MATLAB 权重 | ⬜ 参数效果待验证 |
+
+仿真生成的 `Simmulation/slprj/`、`*.slxc` 以及本机 `.claude/settings.local.json` 已加入 `.gitignore`，不纳入功能提交。
+
+## 2026-08-30 — 底盘 ↔ 云台 UART3 通信任务
+
+| 项目 | 实现 | 验证状态 |
+|---|---|---|
+| 物理层 | 两端 `USART3` 保持 RS485 硬件 DE，统一波特率 2 Mbps、8N1；同步更新两份 `.ioc` 和生成的 `usart.c` | ✅ 两工程编译通过 |
+| 接收路径 | `HAL_UARTEx_ReceiveToIdle_DMA` + 非 DTCM 对齐缓冲区；USART3 回调只作缓存复制和队列投递，错误时自动重启 DMA | ⬜ 实线待验证 |
+| 通信任务 | 底盘 `BoardLinkTask` 接入现有 FreeRTOS 任务表；云台启用 FreeRTOS 并创建同名任务，10 ms 周期双向发送 | ✅ 编译通过；周期待实测 |
+| 协议 | 新增 `Common/board_link_protocol.h`：`0xA5 0x5A` 帧头、版本/发送端/类型/长度/序号、CRC16；最大帧 75 字节 | ✅ 双端共用实现 |
+| 底盘→云台 | 时间戳、roll/pitch/yaw、俯仰/偏航角速度、左右腿长、左右轮速、目标速度、控制标志 | ⬜ 字段实测待确认 |
+| 云台→底盘 | 时间戳、HiPNUC roll/pitch/yaw、目标 Pitch、控制标志、状态字 | ⬜ 字段实测待确认 |
+| 联调指标 | 检查 `BoardLink_RxOkCount` / `BoardLink_RxErrorCount`，验证双板连续收发、CRC 丢帧和拔线恢复 | ⬜ 待硬件联调 |
 
 ## 状态约定
 
@@ -18,7 +44,7 @@
 - [ ] 移植 DM 电机驱动到云台板（pitch DM3519，FDCAN），参考 SENTRY `Gimbal_Task.c` 的 PID 结构
 - [ ] Pitch PID 闭环、重力补偿、限位（±30°/-24°）；yaw 电机硬件到位后补充
 - [ ] 零位回中、遥控/上位机双目标源
-- [ ] 启用 FreeRTOS 调度（当前裸机 while 循环，`USE_CMSIS_OS = 0`）
+- [x] 启用 FreeRTOS 调度基础（`USE_CMSIS_OS = 1`，已创建 `BoardLinkTask`；Gimbal/Shoot 任务仍待实现）
 - 验收：云台能稳定跟随目标角度，限位不失控
 
 ### T2. 射击控制
@@ -28,9 +54,9 @@
 - 验收：拨弹顺畅，卡弹能自动处理
 
 ### T3. 板间 UART 通信（底盘 ↔ 云台）
-- [ ] 云台板新增 UART（与下板通信），DMA+IDLE 双缓冲，帧头+长度+CRC16
-- [ ] 协议字段对齐 SENTRY `Board_Can_Task` 的 `Send_Message`：底盘→云台（车体姿态/模式/遥控/裁判数据），云台→底盘（云台角度/射击状态/上位机回传）
-- 验收：两板互发数据帧 1kHz 无丢包
+- [x] 云台板新增 UART3 RS485（2 Mbps），DMA+IDLE 接收，帧头+长度+CRC16
+- [x] 双端 `BoardLinkTask` 10 ms 周期双向收发；协议字段按当前底盘/云台状态定义（后续可扩展裁判和射击字段）
+- 验收：两板互发数据帧 100 Hz 无丢包；如提升到 1 kHz，需重新评估 2 Mbps 链路带宽和任务周期
 
 ---
 
@@ -105,9 +131,9 @@ T1 → T2 → T3 → T4/T5 → T6 → T7/T8 → T9
 1. 板间通信 UART（用户硬件要求）替代 SENTRY 板间 CAN
 2. 单轴 pitch + 射击起步，yaw 后续补电机（车体转向暂代）
 
-## Phase 0 — 云台板基础设施（先做）
+## Phase 0 — 云台板基础设施（历史方案，部分已完成）
 
-- [ ] CubeMX 打开 `USE_CMSIS_OS=1`，重写 `freertos.c` 任务表：Gimbal / Shoot / Limit / Board_UART / Check（对标 SENTRY Gimbal 6 线程）
+- [x] CubeMX/应用打开 `USE_CMSIS_OS=1`，接入 `BoardLinkTask`；Gimbal / Shoot / Limit / Check 任务仍待实现
 - [ ] 移植底盘板 `bsp_fdcan.c/h` 到云台板，波特率对齐 DM3519
 - [ ] 移植底盘板 `app_motor.c` 的 DM 电机部分（`DM_Motor_Init` / MIT / Speed 函数族），初始化 pitch(0x011) + Shoot L/R(0x012/0x013)
 - [ ] 改接线：3 个电机从底盘 FDCAN3 → 云台板 FDCAN；删除底盘板 `app_Remote_Task.cpp:21-25` 三行初始化

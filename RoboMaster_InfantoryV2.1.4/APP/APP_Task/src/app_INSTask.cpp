@@ -77,7 +77,7 @@ void app_INSTask(void *pvParameters) {
                     ClassData->Data_Time.last_imu_time) *
                    1e-6f;
     if (time_diff > 1e-6f) { // 确保时间差大于0
-      // 处理 roll 跳变
+      // 处理 roll 跳变，得到滤波后的 roll 角速度
       float roll_change = ClassData->IMU_Data.roll - ClassData->IMU_Data.last_roll;
       if (roll_change > 3.14159f)
           roll_change -= 6.28318f;
@@ -146,6 +146,7 @@ void app_INSTask(void *pvParameters) {
         float sqart = wx * wx + wy * wy;
 
         ClassData->IMU_Data.accel_v = wz - GRAVITY;         /* 竖直运动加速度，正值向下 */
+        ClassData->IMU_Data.accel_x = wx;
         arm_sqrt_f32(sqart, &ClassData->IMU_Data.accel_h); /* 水平加速度幅值 */
     }
 

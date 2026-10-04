@@ -1,11 +1,11 @@
 # 当前任务架构梳理
 
 > 仓库：RoboMaster_Wheeleg_Infantory（STM32H723 双板：底盘 V2.1.4 + 云台 V1.0）
-> 整理时间：2026-08-16
+> 整理时间：2026-08-30
 
 ---
 
-## 一、底盘板 V2.1.4（FreeRTOS，5 任务）
+## 一、底盘板 V2.1.4（FreeRTOS，6 任务）
 
 ### 任务列表
 
@@ -15,6 +15,7 @@
 | 8 | Control | 256×4 | DM 电机 MIT 力矩输出（FDCAN1） |
 | 8 | Remote | 256×4 | SBUS 遥控数据处理 |
 | 7 | INS | 256×4 | IMU 数据采集与融合 |
+| 4 | BoardLink | 256×3 | UART3 RS485 板间收发（DMA+IDLE、协议校验） |
 | 2 | Defalut | 256×2 | WS2812 灯效 + 任务栈水位监控 |
 
 ### IPC 资源（app_Task.cpp）
@@ -59,23 +60,23 @@ Control ── xEventGroupWaitBits(Calculate_OK_BIT)
 
 ---
 
-## 二、云台板 V1.0（无 RTOS，裸机）
+## 二、云台板 V1.0（FreeRTOS，2 任务）
 
-### 主循环数据流
+### 任务与数据流
 
 ```
 USART2 HiPNUC HI14 (DMA+IDLE 中断)
         │ 逐字节喂 hipnuc_input()
         ▼
-main() while(1) ──► 解包成功
+BoardLinkTask (10ms) ──► HiPNUC 解包成功
         │           ├─► printf 日志 (USART1 调试串口)
         │           └─► USB CDC 姿态帧 (0x51 0x59 + CRC16)
         ▲
 CDC_Receive_HS 回调 ── 上位机命令帧解包（帧头+CRC16 校验）
 ```
 
-- `USE_CMSIS_OS = 0`：FreeRTOS 已由 CubeMX 配置，但调度器未启动（裸机循环）
-- 角色：纯 IMU 姿态中继板，无电机控制
+- `USE_CMSIS_OS = 1`：`Default` 任务保留系统空转，`BoardLinkTask` 负责板间通信和 HiPNUC 数据处理
+- 角色：IMU 姿态中继板 + 底盘板通信基础设施，云台电机控制尚未迁入
 
 ### 硬件资源现状（main.c 已全部初始化）
 
@@ -84,7 +85,8 @@ CDC_Receive_HS 回调 ── 上位机命令帧解包（帧头+CRC16 校验）
 | FDCAN1 / FDCAN2 / FDCAN3 | 已初始化，未用（可接云台/射击电机） |
 | USART1 | 调试 printf |
 | USART2 | HiPNUC DMA+IDLE 接收 |
-| USART3 / UART5 / UART7 | 已初始化，空闲（可做板间通信/裁判系统） |
+| USART3 | RS485 板间通信，2 Mbps，DMA+IDLE，PD8/PD9，硬件 DE |
+| UART5 / UART7 | 已初始化，当前空闲 |
 | SPI2 / SPI6 | 已初始化（BMI088 备用） |
 | TIM3 / TIM5 / TIM12 | 已初始化 |
 | USB HS CDC | 与上位机通信 |
@@ -95,16 +97,16 @@ CDC_Receive_HS 回调 ── 上位机命令帧解包（帧头+CRC16 校验）
 
 | 维度 | SENTRY 完整版 | 当前工程 |
 |---|---|---|
-| 底盘任务数 | 6（含 Board_Can / Ref / Super_Cap / Check） | 5（缺板间通信、裁判、超电、链路检测） |
-| 云台任务数 | 6（Gimbal / Nuc / Limit / Board_Can / Check / Ins） | 0（裸机循环） |
+| 底盘任务数 | 6（含 Board_Can / Ref / Super_Cap / Check） | 6（已加入 BoardLink；缺裁判、超电、链路检测） |
+| 云台任务数 | 6（Gimbal / Nuc / Limit / Board_Can / Check / Ins） | 2（Default / BoardLink，电机任务待补） |
 | 1ms 事件同步链 | 有 | 有（设计一致，可直接沿用） |
 | IPC 机制 | 队列 + 事件组 | 同款（EnmegencyEventGroup 待启用） |
 
 ## 四、结论
 
 1. **底盘板**：1ms 事件链架构与 SENTRY 同思路，扩展新任务（Ref / Super_Cap / Board_UART / Check）直接挂在现有 IPC 上即可，无需重构
-2. **云台板**：需先补 FreeRTOS 任务框架（Phase 0，`USE_CMSIS_OS=1`），再挂 Gimbal / Shoot / Limit / Board_UART 任务
-3. **硬件**：云台板外设富余（3 路 FDCAN + 多路 UART 空闲），Phase 0 不用改 CubeMX 配置
+2. **云台板**：FreeRTOS 基础框架和 `BoardLinkTask` 已接入，后续再挂 Gimbal / Shoot / Limit / Check 任务
+3. **硬件**：USART3 已按 2 Mbps RS485 配置；云台板其余外设仍可按后续阶段接入
 
 ---
 

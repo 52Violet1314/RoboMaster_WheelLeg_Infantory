@@ -36,6 +36,7 @@
 #include "usbd_cdc_if.h"
 #include "CRC.h"
 #include "gimbal.h"
+#include "BoardLinkTask.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,7 +46,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define USE_CMSIS_OS 0
+#define USE_CMSIS_OS 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -279,6 +280,18 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     /* 3. 重新启动 DMA + IDLE 接收（HAL 内部会处�?BUSY 状态） */
     HAL_UARTEx_ReceiveToIdle_DMA(&huart2, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
   }
+  if (huart->Instance == USART3)
+  {
+    HAL_UART_RxEventTypeTypeDef event = HAL_UARTEx_GetRxEventType(huart);
+    if (Size > 0U && (event == HAL_UART_RXEVENT_IDLE ||
+                      event == HAL_UART_RXEVENT_TC))
+    {
+      SCB_InvalidateDCache_by_Addr((uint32_t *)BoardLink_DmaRxBuffer,
+                                    (Size + 31U) & ~31U);
+      BoardLink_OnRx(BoardLink_DmaRxBuffer, Size);
+      BoardLink_RestartRx();
+    }
+  }
 }
 
 /* DMA 错误回调：出错时自动恢复 */
@@ -290,6 +303,10 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         (uint32_t *)hi14_dma_rx_buf,
         (UART_RX_BUF_SIZE + 31) & ~31u);
     HAL_UARTEx_ReceiveToIdle_DMA(&huart2, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
+  }
+  if (huart->Instance == USART3)
+  {
+    BoardLink_RestartRx();
   }
 }
 /* USER CODE END 4 */

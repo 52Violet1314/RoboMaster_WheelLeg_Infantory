@@ -9,7 +9,7 @@
 #define V_MAX_RAD_S     30.0f   
 #define T_MAX_NM        10.0f   
 
-#define P_MAX_8009     3.50f
+#define P_MAX_8009     3.14f
 #define V_MAX_RAD_S_8009    45.0f
 #define T_MAX_NM_8009      54.0f   
 
@@ -42,6 +42,8 @@ typedef struct {
 typedef struct {
   uint16_t ID;
   uint8_t MODE;
+  uint8_t Enable_Flag;
+  uint8_t CheckTimes;
   FDCAN_HandleTypeDef *hcan;
   DM_Motor_Data_t data;
 } DM_Motor_t;

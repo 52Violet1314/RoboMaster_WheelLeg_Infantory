@@ -13,6 +13,8 @@
 
 void app_main(void) {
   uart_print_blocking("Running to app_main\r\n");
+  /* 初始化 UART DMA 打印信号量，避免任务启动后 uart_print() 没有发送完成同步。 */
+  bsp_UART_Init();
   bsp_fdcan_set_baud(&hfdcan1, CAN_FD_BRS, CAN_BR_5M);
   bsp_fdcan_set_baud(&hfdcan2, CAN_FD_BRS, CAN_BR_5M);
   bsp_fdcan_set_baud(&hfdcan3, CAN_FD_BRS, CAN_BR_2M);

@@ -21,3 +21,10 @@ JLinkSettings.ini
 
 # 构建目录
 build/
+
+# MATLAB/Simulink 本地生成物
+Simmulation/slprj/
+Simmulation/*.slxc
+
+# 本机工具配置
+.claude/settings.local.json

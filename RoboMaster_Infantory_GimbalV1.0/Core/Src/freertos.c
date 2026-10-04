@@ -25,6 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "BoardLinkTask.h"
 
 /* USER CODE END Includes */
 
@@ -49,10 +50,16 @@
 /* USER CODE END Variables */
 /* Definitions for Default */
 osThreadId_t DefaultHandle;
+osThreadId_t BoardLinkHandle;
 const osThreadAttr_t Default_attributes = {
   .name = "Default",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityHigh7,
+};
+const osThreadAttr_t BoardLink_attributes = {
+  .name = "BoardLink",
+  .stack_size = 1024,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,7 +69,6 @@ const osThreadAttr_t Default_attributes = {
 
 void Defalut_Task(void *argument);
 
-extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
 /**
@@ -94,6 +100,7 @@ void MX_FREERTOS_Init(void) {
   /* Create the thread(s) */
   /* creation of Default */
   DefaultHandle = osThreadNew(Defalut_Task, NULL, &Default_attributes);
+  BoardLinkHandle = osThreadNew(BoardLinkTask, NULL, &BoardLink_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -114,8 +121,6 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_Defalut_Task */
 __weak void Defalut_Task(void *argument)
 {
-  /* init code for USB_DEVICE */
-  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN Defalut_Task */
   /* Infinite loop */
   for(;;)

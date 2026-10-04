@@ -28,7 +28,10 @@ typedef struct {
         /* 世界系竖直加速度 (m/s²)，向上为正，已去除重力 */
         float accel_v;
 
-        /* 世界系水平加速度幅值 (m/s²) */
+        /* 世界系前向加速度（带符号，m/s²） */
+        float accel_x;
+
+        /* 世界系水平加速度幅值 (m/s²)，仅用于诊断 */
         float accel_h;
     } IMU_Data;
 
@@ -86,6 +89,7 @@ typedef struct {
 
     struct {
         float X_pos;
+        float X_pos_Err;
         float d_X;
         float theta_L;
         float d_theta_L;
@@ -111,7 +115,6 @@ typedef struct {
 } Classic_Data_t;
 
 extern Classic_Data_t Classic_Data;
-
 
 #ifdef __cplusplus
 extern "C" {
