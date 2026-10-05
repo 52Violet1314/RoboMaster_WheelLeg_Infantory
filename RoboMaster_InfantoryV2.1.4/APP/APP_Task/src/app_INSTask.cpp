@@ -165,11 +165,11 @@ float err = 0.0f, err_l = 0.0f, err_ll = 0.0f;
 
 void IMU_Temp_Control(float Target_Temp) {
   const uint16_t Kp = 10, Ki = 0, Kd = 0, MAX_OUT = 800;
-  uint16_t out = 0;
+  int32_t out = 0;
   err_ll = err_l;
   err_l = err;
   err = Target_Temp - BMI088.Temperature;
-  out = (uint16_t)(Kp * err + Ki * (err + err_l + err_ll) + Kd * (err - err_l));
+  out = (int32_t)(Kp * err + Ki * (err + err_l + err_ll) + Kd * (err - err_l));
   if (out > MAX_OUT)
     out = MAX_OUT;
   if (out < 0)

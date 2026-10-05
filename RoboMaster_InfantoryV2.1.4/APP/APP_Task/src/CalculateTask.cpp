@@ -270,6 +270,8 @@ void CaculateTask(void *pvParameters) {
         // WheelKalman_Print(&Wheel_Kalman_R, 'R');
         float Fn_Left = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_L,pClassicData->Contronller_Data.Tp_L, pClassicData->Leg_Data.L0_L,pClassicData->Leg_Data.d_L0_L,pClassicData->Leg_Data.dd_L0_L,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_L,pClassicData->States_Data.d_theta_L,pClassicData->States_Data.dd_theta_L);
         float Fn_Right = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_R,pClassicData->Contronller_Data.Tp_R, pClassicData->Leg_Data.L0_R,pClassicData->Leg_Data.d_L0_R,pClassicData->Leg_Data.dd_L0_R,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_R,pClassicData->States_Data.d_theta_R,pClassicData->States_Data.dd_theta_R);
+        (void)Fn_Left;
+        (void)Fn_Right;
         // ====== LQR + 腿长 PID + phi PID + roll 差分补偿 ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
         pClassicData->Contronller_Data.Fw_L = 0.0f;

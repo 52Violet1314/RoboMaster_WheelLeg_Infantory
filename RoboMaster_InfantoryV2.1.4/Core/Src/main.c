@@ -179,7 +179,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   }
   uart_print("进入主循环\r\n");
-  uint32_t debug_cnt = 0;
   while (1) {
     // 从环形缓冲区解析SBUS数据帧
 
@@ -397,7 +396,6 @@ void MPU_Config(void)
   */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-  static uint8_t CheckTimes = 0;
   /* USER CODE BEGIN Callback 0 */
   if (htim->Instance == TIM3) {
     // IMU_RequestEuler(&imu);

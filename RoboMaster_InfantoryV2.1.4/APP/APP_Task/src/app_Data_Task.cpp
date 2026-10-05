@@ -5,7 +5,7 @@
 #include "main.h"
 #include "app_motor.h"
 #include "tim.h"
-Classic_Data_t Classic_Data = {0};
+Classic_Data_t Classic_Data = {};
 
 // app_Data_Task 已合并到 CaculateTask，此函数保留为空桩以防链接引用
 void app_Data_Task(void *pvParameters) {

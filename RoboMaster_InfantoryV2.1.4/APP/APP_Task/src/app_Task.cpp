@@ -62,6 +62,8 @@ void DefaultTask(void *pvParameters) {
   while (1) {
     uint32_t RemoteStackHighWaterMark = uxTaskGetStackHighWaterMark(RemoteTaskHandle);
     uint32_t DefalutStackHighWaterMark = uxTaskGetStackHighWaterMark(DefalutHandle);
+    (void)RemoteStackHighWaterMark;
+    (void)DefalutStackHighWaterMark;
     switch (i) {
     case 0:
       WS2812_Ctrl(0, 0, 0);
