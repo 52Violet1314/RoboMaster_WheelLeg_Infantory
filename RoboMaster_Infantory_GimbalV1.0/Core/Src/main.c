@@ -18,25 +18,19 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "cmsis_os.h"
+#include "FreeRTOS.h"
+#include "cmsis_os2.h"
 #include "dma.h"
 #include "fdcan.h"
-#include "spi.h"
 #include "tim.h"
 #include "usart.h"
-#include "usb_device.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdint.h>
-#include <string.h>
-#include <stdio.h>
-#include "Hipnuv_hi14.h"
-#include "usbd_cdc_if.h"
-#include "CRC.h"
-#include "gimbal.h"
-#include "BoardLinkTask.h"
+#include "Interrupt.h"
+#include "Can_Motor.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,7 +40,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define USE_CMSIS_OS 1
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,12 +51,13 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* hi14_dma_rx_buf、hi14_uart_rx_buf、hi14_rx_size 定义�?Hipnuc_hi14.c �?*/
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void PeriphCommonClock_Config(void);
+static void MPU_Config(void);
 void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -71,15 +66,6 @@ void MX_FREERTOS_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/* printf 重定向到 USART1（调试串口） */
-int __io_putchar(int ch)
-{
-    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
-    return ch;
-}
-
-/* Hi14 解码日志缓冲�?*/
-static char hi14_log_buf[LOG_STRING_SIZE];
 /* USER CODE END 0 */
 
 /**
@@ -92,6 +78,9 @@ int main(void)
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
+
+  /* MPU Configuration--------------------------------------------------------*/
+  MPU_Config();
 
   /* Enable the CPU Cache */
 
@@ -126,22 +115,23 @@ int main(void)
   MX_FDCAN1_Init();
   MX_FDCAN2_Init();
   MX_FDCAN3_Init();
-  MX_USART1_UART_Init();
-  MX_USART2_UART_Init();
-  MX_UART5_Init();
-  MX_TIM12_Init();
-  MX_USART3_UART_Init();
-  MX_TIM3_Init();
-  MX_TIM5_Init();
-  MX_SPI2_Init();
-  MX_SPI6_Init();
   MX_UART7_Init();
+  MX_USART2_UART_Init();
+  MX_TIM7_Init();
+  MX_USART1_UART_Init();
+  MX_USART10_UART_Init();
+  MX_UART5_Init();
   /* USER CODE BEGIN 2 */
-  MX_USB_DEVICE_Init();
-  memset(&Hipnuc_HI14, 0, sizeof(Hipnuc_HI14));
-  /* 启动 UART DMA + IDLE 中断接收（变长帧通过 IDLE 中断定界�?*/
-  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
-  if (USE_CMSIS_OS) {
+
+  /* 两路 24V 可控电源：PC14=VCC_OUT1_EN，PC13=VCC_OUT2_EN。
+   * CubeMX 已将引脚初始设为低电平；此处在外设初始化完成后拉高，导通
+   * PMOS 高边开关。仅在 12~24V 输入、接线和负载均确认安全时使用。 */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_14 | GPIO_PIN_13 | GPIO_PIN_15, GPIO_PIN_SET);
+
+  if (HAL_TIM_Base_Start(&htim7) != HAL_OK)
+  {
+     Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -155,25 +145,11 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  }
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    /* 处理 DMA+IDLE 空闲中断收到的数�?*/
-    if (hi14_rx_size > 0) {
-        for (uint16_t i = 0; i < hi14_rx_size; i++) {
-            if (hipnuc_input(&Hipnuc_HI14, hi14_uart_rx_buf[i]) > 0) {
-                hipnuc_dump_packet(&Hipnuc_HI14,
-                    hi14_log_buf, LOG_STRING_SIZE);
-                printf("%s", hi14_log_buf);
-                /* USB 虚拟串口输出四元�?*/
-                usb_send_gimbal_state(Hipnuc_HI14.hi14data.roll, Hipnuc_HI14.hi14data.pitch, Hipnuc_HI14.hi14data.yaw);
-            }
-        }
-        hi14_rx_size = 0;
-    }
   }
   /* USER CODE END 3 */
 }
@@ -207,7 +183,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLM = 2;
   RCC_OscInitStruct.PLL.PLLN = 40;
   RCC_OscInitStruct.PLL.PLLP = 1;
-  RCC_OscInitStruct.PLL.PLLQ = 10;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
@@ -234,6 +210,10 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
+  /** Enables the Clock Security System
+  */
+  HAL_RCC_EnableCSS();
 }
 
 /**
@@ -248,9 +228,9 @@ void PeriphCommonClock_Config(void)
   */
   PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_FDCAN;
   PeriphClkInitStruct.PLL2.PLL2M = 2;
-  PeriphClkInitStruct.PLL2.PLL2N = 16;
-  PeriphClkInitStruct.PLL2.PLL2P = 1;
-  PeriphClkInitStruct.PLL2.PLL2Q = 2;
+  PeriphClkInitStruct.PLL2.PLL2N = 40;
+  PeriphClkInitStruct.PLL2.PLL2P = 2;
+  PeriphClkInitStruct.PLL2.PLL2Q = 6;
   PeriphClkInitStruct.PLL2.PLL2R = 2;
   PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_3;
   PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOWIDE;
@@ -263,57 +243,41 @@ void PeriphCommonClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-/* ===== V2.1.4 标准回调模式：DMA + IDLE 中断驱动接收 ===== */
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
-{
-  if (huart->Instance == USART2)
-  {
-    if (Size == 0)
-      return;
-    /* 1. 作废 D-Cache �?DMA 写入物理 RAM，CPU Cache 可能过期 */
-    SCB_InvalidateDCache_by_Addr(
-        (uint32_t *)hi14_dma_rx_buf,
-        (Size + 31) & ~31u);
-    /* 2. 拷贝�?CPU 专用处理缓冲�?*/
-    memcpy(hi14_uart_rx_buf, hi14_dma_rx_buf, Size);
-    hi14_rx_size = Size;
-    /* 3. 重新启动 DMA + IDLE 接收（HAL 内部会处�?BUSY 状态） */
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart2, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
-  }
-  if (huart->Instance == USART3)
-  {
-    HAL_UART_RxEventTypeTypeDef event = HAL_UARTEx_GetRxEventType(huart);
-    if (Size > 0U && (event == HAL_UART_RXEVENT_IDLE ||
-                      event == HAL_UART_RXEVENT_TC))
-    {
-      SCB_InvalidateDCache_by_Addr((uint32_t *)BoardLink_DmaRxBuffer,
-                                    (Size + 31U) & ~31U);
-      BoardLink_OnRx(BoardLink_DmaRxBuffer, Size);
-      BoardLink_RestartRx();
-    }
-  }
-}
 
-/* DMA 错误回调：出错时自动恢复 */
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-{
-  if (huart->Instance == USART2)
-  {
-    SCB_InvalidateDCache_by_Addr(
-        (uint32_t *)hi14_dma_rx_buf,
-        (UART_RX_BUF_SIZE + 31) & ~31u);
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart2, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
-  }
-  if (huart->Instance == USART3)
-  {
-    BoardLink_RestartRx();
-  }
-}
 /* USER CODE END 4 */
+
+ /* MPU Configuration */
+
+void MPU_Config(void)
+{
+  MPU_Region_InitTypeDef MPU_InitStruct = {0};
+
+  /* Disables the MPU */
+  HAL_MPU_Disable();
+
+  /** Initializes and configures the Region and the memory to be protected
+  */
+  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
+  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
+  MPU_InitStruct.BaseAddress = 0x0;
+  MPU_InitStruct.Size = MPU_REGION_SIZE_4GB;
+  MPU_InitStruct.SubRegionDisable = 0x87;
+  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
+  MPU_InitStruct.AccessPermission = MPU_REGION_NO_ACCESS;
+  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
+  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
+  MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
+  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+
+  HAL_MPU_ConfigRegion(&MPU_InitStruct);
+  /* Enables the MPU */
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+
+}
 
 /**
   * @brief  Period elapsed callback in non blocking mode
-  * @note   This function is called  when TIM2 interrupt took place, inside
+  * @note   This function is called  when TIM6 interrupt took place, inside
   * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
   * a global variable "uwTick" used as application time base.
   * @param  htim : TIM handle
@@ -324,7 +288,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE BEGIN Callback 0 */
 
   /* USER CODE END Callback 0 */
-  if (htim->Instance == TIM2)
+  if (htim->Instance == TIM6)
   {
     HAL_IncTick();
   }

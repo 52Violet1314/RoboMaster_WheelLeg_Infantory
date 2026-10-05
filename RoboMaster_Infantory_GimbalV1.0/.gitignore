@@ -1,3 +1,57 @@
-build
+# Build outputs and CMake-generated files
+build/
+.codex-arm-build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+# CMake
+cmake-build-*/
+compile_commands.json
+
+# IDE configurations
+.vscode/
+.settings/
+.mxproject
+.clangd
+.idea/
+*.code-workspace
+
+# STM32CubeIDE temporary files
 mx.scratch
-!.settings
+
+# Temporary/scratch files
+tmp/
+*.swp
+*.swo
+*.tmp
+*.bak
+*~
+
+# Compiled object files
+*.o
+*.obj
+
+# ELF / binary output
+*.elf
+*.hex
+*.bin
+*.map
+*.d
+
+# Tooling and dependency caches
+.claude/
+.cache/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+
+# Logs
+*.log
+
+# macOS
+.DS_Store

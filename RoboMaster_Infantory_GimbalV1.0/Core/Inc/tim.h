@@ -32,23 +32,25 @@ extern "C" {
 
 /* USER CODE END Includes */
 
-extern TIM_HandleTypeDef htim3;
-
-extern TIM_HandleTypeDef htim5;
-
-extern TIM_HandleTypeDef htim12;
+extern TIM_HandleTypeDef htim7;
 
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
 
-void MX_TIM3_Init(void);
-void MX_TIM5_Init(void);
-void MX_TIM12_Init(void);
-
-void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+void MX_TIM7_Init(void);
 
 /* USER CODE BEGIN Prototypes */
+
+/**
+ * @brief 读取 TIM7 扩展出的单调微秒时间戳。
+ * @note TIM7 以 1 MHz 工作；返回值为 uint32_t，会在约 71.6 min 回绕。
+ *       只要两个样本间隔远小于该回绕周期，unsigned 相减仍然正确。
+ */
+uint32_t TIM7_GetTimestampUs(void);
+
+/** @brief 由 HAL_TIM_PeriodElapsedCallback 在 TIM7 溢出时调用。 */
+void TIM7_TimestampOverflowCallback(void);
 
 /* USER CODE END Prototypes */
 
