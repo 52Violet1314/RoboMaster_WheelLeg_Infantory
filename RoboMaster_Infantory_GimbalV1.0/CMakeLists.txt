@@ -11,6 +11,8 @@ cmake_minimum_required(VERSION 3.22)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
 # Define the build type
@@ -19,7 +21,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Set the project name
-set(CMAKE_PROJECT_NAME RoboMaster_Infantory_Gimbal)
+set(CMAKE_PROJECT_NAME Robomaster_Infantary_Top)
 
 # Enable compile command to ease indexing with e.g. clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
@@ -29,7 +31,7 @@ project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
 # Enable CMake support for ASM and C languages
-enable_language(C ASM)
+enable_language(C CXX ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
@@ -44,32 +46,33 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # App
-    App/gimbal.c
-    App/BoardLinkTask.c
-    # BSP (bsp_CAN.c / bsp_fdcan.c need APP headers not in this project)
-    BSP/bsp_UART.c
-    BSP/CRC.c
-    BSP/bsp_fdcan.c
-    # HardWare
-    HardWare/BMI088driver.c
-    HardWare/BMI088Middleware.c
-    HardWare/Buzzer.c
-    HardWare/DMIMU.c
-    HardWare/Hipnuc_hi14.c
-    HardWare/PID.c
-    HardWare/POWER.c
-    HardWare/WS2812.c
+    User/Algorithm/src/s_curve.c
+    User/Algorithm/src/ESO.c
+    User/Algorithm/src/Pid.cpp
+    User/Communication/src/Remote.c
+    User/Communication/src/Vision.c
+    User/Communication/src/Refree.c
+    User/Communication/src/Imu.c
+    User/Communication/src/Hipnuc_Command.c
+    User/Communication/src/Can_Motor.c
+    User/Communication/src/Fric.c
+    User/Bsp/src/Can_Filter.c
+    User/Bsp/src/Ring_Buffer.c
+    User/Bsp/src/Interrupt.c
+    User/Application/src/Task_Debug.c
+    User/Application/src/Task_Imu.c
+    User/Application/src/Task_Input.c
+    User/Application/src/Task_Can.c
+    User/Application/src/Task_Mode.c
+    User/Application/src/Task_Gimbal.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    App
-    HardWare
-    BSP
-    ../Common
-    # CMSIS DSP (for arm_math.h used by PID.c)
-    Drivers/CMSIS/DSP/Include
+    User/Algorithm/inc
+    User/Communication/inc
+    User/Bsp/inc
+    User/Application/inc
 )
 
 # Add project symbols (macros)

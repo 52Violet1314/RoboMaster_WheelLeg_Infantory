@@ -1,0 +1,278 @@
+<mujoco model="wheelbipeV14_2">
+  <compiler angle="radian" meshdir="meshes" autolimits="true"/>
+  <option timestep="0.002" solver="Newton" iterations="60" cone="elliptic" jacobian="dense"/>
+  <default>
+    <joint armature="0.0005" damping="0.05"/>
+    <geom friction="1.2 0.002 0.0001" solref="0.02 1" solimp="0.9 0.95 0.001"/>
+    <motor ctrlrange="-100 100" ctrllimited="true"/>
+  </default>
+  <worldbody>
+    <geom name="floor" type="plane" size="6 6 0.1" pos="0 0 0" friction="1.5 0.002 0.0001" material="floor_mat"/>
+    <light pos="0 0 4" dir="0 0 -1"/>
+    <body name="base_link" pos="0 0 0.185">
+      <freejoint name="root"/>
+      <inertial pos="0.00582119 0.00168176 -0.0410921" mass="15.963" diaginertia="0.198673 0.298428 0.374185" quat="0.999816 0.00165489 0.0169649 0.00886142"/>
+      <geom type="mesh" mesh="base_link_mesh" contype="0" conaffinity="0" rgba="0.792157 0.819608 0.933333 1"/>
+      <body name="gimbal_yaw_link" pos="0 0 0.05495">
+        <inertial pos="-0.032712 0.039683 0.102088" mass="1.11359" diaginertia="0.0155639 0.0145411 0.00295741" quat="0.931851 -0.158178 -0.314033 -0.0895319"/>
+        <geom type="mesh" mesh="gimbal_yaw_link_mesh" contype="0" conaffinity="0" rgba="0.839216 0.913725 0.960784 1"/>
+        <joint name="gimbal_yaw_joint" type="hinge" axis="0 0 1" armature="0.0004"/>
+        <body name="gimbal_pitch_link" pos="-0.058485 -0.0553 0.18">
+          <inertial pos="0.077937 0.022206 -0.043928" mass="2.90948" diaginertia="0.00998505 0.0196515 0.0227442" quat="0.934939 0.0922202 0.327018 0.102192"/>
+          <geom type="mesh" mesh="gimbal_pitch_link_mesh" contype="0" conaffinity="0" rgba="0.839216 0.913725 0.960784 1"/>
+          <joint name="gimbal_pitch_joint" type="hinge" axis="0 1 0" range="-1.2 0" armature="0.0004"/>
+        </body>
+      </body>
+      <body name="left_bottom1_guide_link" pos="0.125 -0.146 -0.156996">
+        <inertial pos="0 0.283 -4.3e-06" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="left_bottom1_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="left_bottom1_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="left_bottom2_guide_link" pos="0.025 0.146 -0.159">
+        <inertial pos="0 -0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="left_bottom2_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="left_bottom2_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="left_bottom3_guide_link" pos="-0.025 0.146 -0.159">
+        <inertial pos="0 -0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="left_bottom3_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="left_bottom3_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="left_bottom4_guide_link" pos="-0.125 0.146 -0.157">
+        <inertial pos="0 -0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="left_bottom4_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="left_bottom4_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="left_front1_guide_link" pos="0.18571 0.115 -0.143725">
+        <inertial pos="0 -0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="left_front1_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="left_front1_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="left_front1_link" pos="0 0.1845 0">
+        <inertial pos="0.0253161 -0.014124 0.00293202" mass="0.136659" diaginertia="4.73239e-05 0.000239934 0.000223522" quat="0.99433 -0.00519866 -0.0574025 0.0893652"/>
+        <geom type="mesh" mesh="left_front1_link_mesh" contype="0" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
+        <joint name="left_front1_joint" type="hinge" axis="0 1 0" armature="0.0015"/>
+        <body name="left_front2_link" pos="0.11265 -0.00949999 0.013046">
+          <inertial pos="-0.0544 -0.0044715 -0.0399756" mass="0.0328941" diaginertia="1.42448e-06 8.24e-05 8.14755e-05" quat="0.950205 0 -0.311626 0"/>
+          <geom type="mesh" mesh="left_front2_link_mesh" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+          <joint name="left_front2_joint" type="hinge" axis="0 1 0" range="-1 0.1" armature="0.0004"/>
+          <body name="left_front3_link" pos="-0.10879 0.0065 -0.079941">
+            <inertial pos="-0.0844609 -0.002949 0.0515978" mass="0.044351" diaginertia="3.15397e-06 0.0001643 0.000161346" quat="0.958504 0 0.28508 0"/>
+            <geom type="mesh" mesh="left_front3_link_mesh" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+            <joint name="left_front3_joint" type="hinge" axis="0 1 0" range="-0.1 1" armature="0.0004"/>
+            <body name="left_front4_link" pos="-0.16505 -0.0065 0.11386">
+              <inertial pos="-0.0483173 -0.0045295 0" mass="0.0271098" diaginertia="1.3e-06 3.88e-05 3.79e-05" quat="1 0 0 0"/>
+              <geom type="mesh" mesh="left_front4_link_mesh" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+              <joint name="left_front4_joint" type="hinge" axis="0 1 0" range="-2 0.1" armature="0.0004"/>
+              <site name="left_f4r2_joint_s0" pos="-0.0966 0 0"/>
+            </body>
+            <site name="left_f3r1_joint_s0" pos="-0.11726 -0.0075 0.06689"/>
+          </body>
+        </body>
+      </body>
+      <body name="left_front_guide_link" pos="0.25549 0.115 -0.132">
+        <inertial pos="0 -0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="left_front_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="left_front_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="left_rear1_link" pos="0 0.174 0">
+        <inertial pos="-0.118781 -0.00279462 0.00086226" mass="0.382544" diaginertia="0.000122989 0.00274749 0.00266615" quat="0.999546 0.00577406 0.00673359 -0.0287833"/>
+        <geom type="mesh" mesh="left_rear1_link_mesh" contype="0" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
+        <joint name="left_rear1_joint" type="hinge" axis="0 1 0" armature="0.0015"/>
+        <body name="left_rear2_link" pos="-0.21 0.0145 0">
+          <inertial pos="0.0846462 -0.00523955 -0.0474341" mass="0.311357" diaginertia="0.00011697 0.00354878 0.00344484" quat="0.96249 -0.0105932 0.271105 -0.00171991"/>
+          <geom type="mesh" mesh="left_rear2_link_mesh" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+          <joint name="left_rear2_joint" type="hinge" axis="0 1 0" range="-0.02 1.2" armature="0.0004"/>
+          <body name="left_rear2_guide_link" pos="-0.037468 0.0065 -0.014006">
+            <inertial pos="0 -0.0125 0" mass="0.0099768" diaginertia="6e-07 1.2e-06 6e-07" quat="1 0 0 0"/>
+            <geom type="mesh" mesh="left_rear2_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+            <joint name="left_rear2_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+          </body>
+          <body name="left_wheel_link" pos="0.21661 0.03355 -0.12483">
+            <inertial pos="0.00015349 -0.0202192 -0.00011469" mass="0.512084" diaginertia="0.000390216 0.000633064 0.00038826" quat="0.95164 -0.000643603 0.307207 -0.00196029"/>
+            <geom type="cylinder" size="0.06 0.022" euler="1.5707963268 0 0" pos="0.00015349 -0.0202192 -0.00011469" rgba="0.08 0.08 0.08 0"/>
+            <geom type="mesh" mesh="left_wheel_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+            <joint name="left_wheel_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+          </body>
+          <site name="left_f4r2_joint_s1" pos="-0.04778 -0.0135 0.04696"/>
+          <site name="left_s2r2_joint_s1" pos="0.04758 -0.01405 -0.02292"/>
+        </body>
+        <body name="left_spring1_link" pos="0.0023551 -0.002 -0.044938">
+          <inertial pos="-0.0452477 -0.005217 0.0060453" mass="0.0305218" diaginertia="3.8846e-07 1.78025e-05 1.7709e-05" quat="0.995121 -0.0722434 0.0667596 0.00770626"/>
+          <geom type="mesh" mesh="left_spring1_link_mesh" contype="0" conaffinity="0" rgba="0.866667 0.866667 0.890196 1"/>
+          <joint name="left_spring1_joint" type="hinge" axis="0 1 0" range="-0.5 0.1" armature="0.0004"/>
+          <body name="left_spring2_link" pos="-0.03295 -0.0055 0.0044022" quat="0.997796 0 0.0663616 0">
+            <inertial pos="-0.0688384 0.0001674 0" mass="0.0923989" diaginertia="2.4999e-06 0.0001019 0.0001017" quat="1 0 0 -0.000503017"/>
+            <geom type="mesh" mesh="left_spring2_link_mesh" contype="0" conaffinity="0" rgba="0 0 0 1"/>
+            <joint name="left_spring2_joint" type="slide" axis="1 0 0" range="-0.015 0.065" stiffness="1800" damping="80" springref="0.025"/>
+            <site name="left_s2r2_joint_s0" pos="-0.133 0.00795 0"/>
+          </body>
+        </body>
+        <site name="left_f3r1_joint_s1" pos="-0.1134 0 0"/>
+      </body>
+      <body name="left_rear_guide_link" pos="-0.24047 0.099 -0.137">
+        <inertial pos="0 -0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="left_rear_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="left_rear_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="right_bottom1_guide_link" pos="0.125 -0.146 -0.156996">
+        <inertial pos="0 0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="right_bottom1_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="right_bottom1_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="right_bottom2_guide_link" pos="0.025 -0.146 -0.158996">
+        <inertial pos="0 0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="right_bottom2_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="right_bottom2_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="right_bottom3_guide_link" pos="-0.025 -0.146 -0.158996">
+        <inertial pos="0 0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="right_bottom3_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="right_bottom3_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="right_bottom4_guide_link" pos="-0.125 -0.146 -0.156996">
+        <inertial pos="0 0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="right_bottom4_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="right_bottom4_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="right_front1_guide_link" pos="0.18571 -0.115 -0.143725">
+        <inertial pos="0 0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="right_front1_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="right_front1_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="right_front1_link" pos="0 -0.1845 0">
+        <inertial pos="0.0285012 0.0106521 0.00330091" mass="0.121387" diaginertia="3.7476e-05 0.000221901 0.000198963" quat="0.996578 0.00348261 -0.0575249 -0.0592639"/>
+        <geom type="mesh" mesh="right_front1_link_mesh" contype="0" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
+        <joint name="right_front1_joint" type="hinge" axis="0 1 0" armature="0.0015"/>
+        <body name="right_front2_link" pos="0.11265 0.00949999 0.013046">
+          <inertial pos="-0.0543861 0.0044715 -0.0399654" mass="0.0328941" diaginertia="1.42448e-06 8.24e-05 8.14755e-05" quat="0.950205 0 -0.311626 0"/>
+          <geom type="mesh" mesh="right_front2_link_mesh" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+          <joint name="right_front2_joint" type="hinge" axis="0 1 0" range="-1 0.1" armature="0.0004"/>
+          <body name="right_front3_link" pos="-0.10879 -0.0065 -0.079941">
+            <inertial pos="-0.0844609 0.002949 0.0515978" mass="0.044351" diaginertia="3.15397e-06 0.0001643 0.000161346" quat="0.958504 0 0.28508 0"/>
+            <geom type="mesh" mesh="right_front3_link_mesh" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+            <joint name="right_front3_joint" type="hinge" axis="0 1 0" range="-0.1 1" armature="0.0004"/>
+            <body name="right_front4_link" pos="-0.16505 0.0065 0.11386">
+              <inertial pos="-0.0483173 0.0045295 0" mass="0.0271098" diaginertia="1.3e-06 3.88e-05 3.79e-05" quat="1 0 0 0"/>
+              <geom type="mesh" mesh="right_front4_link_mesh" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+              <joint name="right_front4_joint" type="hinge" axis="0 1 0" range="-2 0.1" armature="0.0004"/>
+              <site name="right_f4r2_joint_s0" pos="-0.0966 0 0"/>
+            </body>
+            <site name="right_f3r1_joint_s0" pos="-0.11726 0.0075 0.06689"/>
+          </body>
+        </body>
+      </body>
+      <body name="right_front_guide_link" pos="0.25549 -0.115 -0.132">
+        <inertial pos="0 0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="right_front_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="right_front_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+      <body name="right_rear1_link" pos="0 -0.174 0">
+        <inertial pos="-0.118781 0.00279462 0.00086226" mass="0.382544" diaginertia="0.000122989 0.00274749 0.00266615" quat="0.999546 -0.00577406 0.00673359 0.0287833"/>
+        <geom type="mesh" mesh="right_rear1_link_mesh" contype="0" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
+        <joint name="right_rear1_joint" type="hinge" axis="0 1 0" armature="0.0015"/>
+        <body name="right_rear2_link" pos="-0.21 -0.0145 0">
+          <inertial pos="0.0840113 0.00545683 -0.0469827" mass="0.30297" diaginertia="0.000115106 0.00353811 0.00343472" quat="0.962497 0.0113425 0.271051 0.00180938"/>
+          <geom type="mesh" mesh="right_rear2_link_mesh" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+          <joint name="right_rear2_joint" type="hinge" axis="0 1 0" range="-0.02 1.2" armature="0.0004"/>
+          <body name="right_rear2_guide_link" pos="-0.0374678 -0.0065 -0.0140058">
+            <inertial pos="0 0.0125 0" mass="0.0099768" diaginertia="6e-07 1.2e-06 6e-07" quat="1 0 0 0"/>
+            <geom type="mesh" mesh="right_rear2_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+            <joint name="right_rear2_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+          </body>
+          <body name="right_wheel_link" pos="0.21661 -0.03355 -0.12483">
+            <inertial pos="0.00017786 0.0202192 -7.128e-05" mass="0.512084" diaginertia="0.00039021 0.000633064 0.000388256" quat="0.98025 0.000392452 0.197751 0.00201145"/>
+            <geom type="cylinder" size="0.06 0.022" euler="1.5707963268 0 0" pos="0.00017786 0.0202192 -7.128e-05" rgba="0.08 0.08 0.08 0"/>
+            <geom type="mesh" mesh="right_wheel_link_mesh" contype="0" conaffinity="0" rgba="0.866667 0.866667 0.890196 1"/>
+            <joint name="right_wheel_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+          </body>
+          <site name="right_f4r2_joint_s1" pos="-0.04778 0.0135 0.04696"/>
+          <site name="right_s2r2_joint_s1" pos="0.04758 0.01405 -0.02292"/>
+        </body>
+        <body name="right_spring1_link" pos="0.0023551 0.00194999 -0.0449383">
+          <inertial pos="-0.0452477 0.005217 0.0060453" mass="0.0305218" diaginertia="3.8846e-07 1.78025e-05 1.7709e-05" quat="0.995121 0.0722434 0.0667596 -0.00770626"/>
+          <geom type="mesh" mesh="right_spring1_link_mesh" contype="0" conaffinity="0" rgba="0.866667 0.866667 0.890196 1"/>
+          <joint name="right_spring1_joint" type="hinge" axis="0 1 0" range="-0.5 0.1" armature="0.0004"/>
+          <body name="right_spring2_link" pos="-0.03295 0.0055 0.0044022" quat="0.997796 0 0.0663616 0">
+            <inertial pos="-0.0688384 -0.0001674 0" mass="0.0923989" diaginertia="2.4999e-06 0.0001019 0.0001017" quat="1 0 0 0.000503017"/>
+            <geom type="mesh" mesh="right_spring2_link_mesh" contype="0" conaffinity="0" rgba="0 0 0 1"/>
+            <joint name="right_spring2_joint" type="slide" axis="1 0 0" range="-0.015 0.065" stiffness="1800" damping="80" springref="0.025"/>
+            <site name="right_s2r2_joint_s0" pos="-0.133 -0.00795 0"/>
+          </body>
+        </body>
+        <site name="right_f3r1_joint_s1" pos="-0.1134 0 0"/>
+      </body>
+      <body name="right_rear_guide_link" pos="-0.24047 -0.099 -0.137">
+        <inertial pos="0 0.009 0" mass="0.0128115" diaginertia="1.1e-06 1.6e-06 1.1e-06" quat="1 0 0 0"/>
+        <geom type="mesh" mesh="right_rear_guide_link_mesh" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <joint name="right_rear_guide_joint" type="hinge" axis="0 1 0" armature="0.0004"/>
+      </body>
+    </body>
+  </worldbody>
+  <equality>
+    <connect name="left_f3r1_joint" site1="left_f3r1_joint_s0" site2="left_f3r1_joint_s1" solimp="0.99 0.995 0.0001" solref="0.004 1"/>
+    <connect name="left_f4r2_joint" site1="left_f4r2_joint_s0" site2="left_f4r2_joint_s1" solimp="0.99 0.995 0.0001" solref="0.004 1"/>
+    <connect name="left_s2r2_joint" site1="left_s2r2_joint_s0" site2="left_s2r2_joint_s1" solimp="0.99 0.995 0.0001" solref="0.004 1"/>
+    <connect name="right_f3r1_joint" site1="right_f3r1_joint_s0" site2="right_f3r1_joint_s1" solimp="0.99 0.995 0.0001" solref="0.004 1"/>
+    <connect name="right_f4r2_joint" site1="right_f4r2_joint_s0" site2="right_f4r2_joint_s1" solimp="0.99 0.995 0.0001" solref="0.004 1"/>
+    <connect name="right_s2r2_joint" site1="right_s2r2_joint_s0" site2="right_s2r2_joint_s1" solimp="0.99 0.995 0.0001" solref="0.004 1"/>
+  </equality>
+  <visual>
+    <global offwidth="1920" offheight="1080"/>
+    <headlight diffuse="0.75 0.75 0.75" ambient="0.35 0.38 0.42" specular="0.15 0.15 0.15"/>
+    <rgba haze="0.12 0.16 0.23 1"/>
+    <map znear="0.05" zfar="40" fogstart="4" fogend="14"/>
+  </visual>
+  <asset>
+    <texture name="sky" type="skybox" builtin="gradient" rgb1="0.08 0.11 0.17" rgb2="0.28 0.34 0.44" width="512" height="3072"/>
+    <texture name="floor_grid" type="2d" builtin="checker" rgb1="0.22 0.25 0.30" rgb2="0.30 0.34 0.40" width="512" height="512"/>
+    <material name="floor_mat" texture="floor_grid" texrepeat="8 8" texuniform="true" reflectance="0.08"/>
+    <mesh name="base_link_mesh" file="base_link.stl"/>
+    <mesh name="gimbal_yaw_link_mesh" file="gimbal_yaw_link.stl"/>
+    <mesh name="gimbal_pitch_link_mesh" file="gimbal_pitch_link.stl"/>
+    <mesh name="left_bottom1_guide_link_mesh" file="left_bottom1_guide_link.stl"/>
+    <mesh name="left_bottom2_guide_link_mesh" file="left_bottom2_guide_link.stl"/>
+    <mesh name="left_bottom3_guide_link_mesh" file="left_bottom3_guide_link.stl"/>
+    <mesh name="left_bottom4_guide_link_mesh" file="left_bottom4_guide_link.stl"/>
+    <mesh name="left_front1_guide_link_mesh" file="left_front1_guide_link.stl"/>
+    <mesh name="left_front1_link_mesh" file="left_front1_link.stl"/>
+    <mesh name="left_front2_link_mesh" file="left_front2_link.stl"/>
+    <mesh name="left_front3_link_mesh" file="left_front3_link.stl"/>
+    <mesh name="left_front4_link_mesh" file="left_front4_link.stl"/>
+    <mesh name="left_front_guide_link_mesh" file="left_front_guide_link.stl"/>
+    <mesh name="left_rear1_link_mesh" file="left_rear1_link.stl"/>
+    <mesh name="left_rear2_link_mesh" file="left_rear2_link.stl"/>
+    <mesh name="left_rear2_guide_link_mesh" file="left_rear2_guide_link.stl"/>
+    <mesh name="left_wheel_link_mesh" file="left_wheel_link.stl"/>
+    <mesh name="left_spring1_link_mesh" file="left_spring1_link.stl"/>
+    <mesh name="left_spring2_link_mesh" file="left_spring2_link.stl"/>
+    <mesh name="left_rear_guide_link_mesh" file="left_rear_guide_link.stl"/>
+    <mesh name="right_bottom1_guide_link_mesh" file="right_bottom1_guide_link.stl"/>
+    <mesh name="right_bottom2_guide_link_mesh" file="right_bottom2_guide_link.stl"/>
+    <mesh name="right_bottom3_guide_link_mesh" file="right_bottom3_guide_link.stl"/>
+    <mesh name="right_bottom4_guide_link_mesh" file="right_bottom4_guide_link.stl"/>
+    <mesh name="right_front1_guide_link_mesh" file="right_front1_guide_link.stl"/>
+    <mesh name="right_front1_link_mesh" file="right_front1_link.stl"/>
+    <mesh name="right_front2_link_mesh" file="right_front2_link.stl"/>
+    <mesh name="right_front3_link_mesh" file="right_front3_link.stl"/>
+    <mesh name="right_front4_link_mesh" file="right_front4_link.stl"/>
+    <mesh name="right_front_guide_link_mesh" file="right_front_guide_link.stl"/>
+    <mesh name="right_rear1_link_mesh" file="right_rear1_link.stl"/>
+    <mesh name="right_rear2_link_mesh" file="right_rear2_link.stl"/>
+    <mesh name="right_rear2_guide_link_mesh" file="right_rear2_guide_link.stl"/>
+    <mesh name="right_wheel_link_mesh" file="right_wheel_link.stl"/>
+    <mesh name="right_spring1_link_mesh" file="right_spring1_link.stl"/>
+    <mesh name="right_spring2_link_mesh" file="right_spring2_link.stl"/>
+    <mesh name="right_rear_guide_link_mesh" file="right_rear_guide_link.stl"/>
+  </asset>
+  <actuator>
+    <motor name="L_wheel" joint="left_wheel_joint" gear="1" ctrlrange="-6.0 6.0"/>
+    <motor name="R_wheel" joint="right_wheel_joint" gear="1" ctrlrange="-6.0 6.0"/>
+    <motor name="L_rear1" joint="left_rear1_joint" gear="1" ctrlrange="-40.0 40.0"/>
+    <motor name="R_rear1" joint="right_rear1_joint" gear="1" ctrlrange="-40.0 40.0"/>
+    <motor name="L_front1" joint="left_front1_joint" gear="1" ctrlrange="-40.0 40.0"/>
+    <motor name="R_front1" joint="right_front1_joint" gear="1" ctrlrange="-40.0 40.0"/>
+    <motor name="gimbal_yaw" joint="gimbal_yaw_joint" gear="1" ctrlrange="-2.0 2.0"/>
+    <motor name="gimbal_pitch" joint="gimbal_pitch_joint" gear="1" ctrlrange="-10.0 10.0"/>
+  </actuator>
+</mujoco>
