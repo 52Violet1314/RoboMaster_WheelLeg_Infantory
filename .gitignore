@@ -26,5 +26,10 @@ build/
 Simmulation/slprj/
 Simmulation/*.slxc
 
+# 串腿仿真的本地试验目录（保留在工作区，不提交）
+Simmulation/serial_leg_simulink/新版本k矩阵计算/simulation1/
+Simmulation/serial_leg_simulink/新版本k矩阵计算/simulation2/
+Simmulation/serial_leg_simulink/**/slprj/
+
 # 本机工具配置
 .claude/settings.local.json
