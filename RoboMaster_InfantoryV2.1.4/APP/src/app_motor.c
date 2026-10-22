@@ -19,7 +19,7 @@ DM_Motor_t DM_3507;
 DM_Motor_t DM_4310;
 
 static int16_t float_to_int16(float x, float x_min, float x_max, uint8_t bits);
-static float uint16_to_float(int16_t x, float x_min, float x_max, uint8_t bits);
+static float uint16_to_float(uint16_t x, float x_min, float x_max, uint8_t bits);
 static int16_t float_to_int12(float x, float x_min, float x_max);
 static float int12_to_float(int16_t x, float x_min, float x_max);
 static float AngleUnify(float angle);
@@ -119,7 +119,8 @@ void DM_Motor_Pos_Speed_Control(DM_Motor_t *motor, float Pos_Des,
 
 void DM_Motor_8009_Data_Get(DM_Motor_t *motor, uint8_t *data) {
   motor->data.err = (data[0] >> 4) & 0x0F;
-  int16_t pos_raw = (int16_t)((data[1] << 8) | data[2]);
+  /* 达妙反馈 POS 是 16 位无符号偏置编码，不能按 int16_t 符号扩展。 */
+  uint16_t pos_raw = (uint16_t)((data[1] << 8) | data[2]);
   int16_t vel_raw = (int16_t)((data[3] << 4) | (data[4] >> 4));
   int16_t tor_raw = (int16_t)(((data[4] & 0x0F) << 8) | data[5]);
 
@@ -134,7 +135,8 @@ void DM_Motor_8009_Data_Get(DM_Motor_t *motor, uint8_t *data) {
 
 void DM_Motor_3519_Data_Get(DM_Motor_t *motor, uint8_t *data) {
   motor->data.err = (data[0] >> 4) & 0x0F;
-  int16_t pos_raw = (int16_t)((data[1] << 8) | data[2]);
+  /* 达妙反馈 POS 是 16 位无符号偏置编码，不能按 int16_t 符号扩展。 */
+  uint16_t pos_raw = (uint16_t)((data[1] << 8) | data[2]);
   int16_t vel_raw = (int16_t)((data[3] << 4) | (data[4] >> 4));
   int16_t tor_raw = (int16_t)(((data[4] & 0x0F) << 8) | data[5]);
 
@@ -246,7 +248,7 @@ static int16_t float_to_int16(float x, float x_min, float x_max, uint8_t bits) {
     offset = span;
   return (int16_t)(offset / span * 65535);
 }
-static float uint16_to_float(int16_t x, float x_min, float x_max,
+static float uint16_to_float(uint16_t x, float x_min, float x_max,
                              uint8_t bits) {
   float span = x_max - x_min;
   return x_min + span * (float)x / ((1 << bits) - 1);
