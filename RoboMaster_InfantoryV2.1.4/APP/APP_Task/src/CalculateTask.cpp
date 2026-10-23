@@ -23,6 +23,7 @@
 #include "tim.h"
 #include "usart.h"
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <stdint.h>
 #include <type_traits>
@@ -901,6 +902,14 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
     int theta_dec = (int) (theta_abs * 1000) % 1000;
     int d_theta_dec = (int) (d_theta_abs * 1000) % 1000;
 
+    /* 后四列统一放在 State_Data_Print 的 CSV 行中，单位为度：
+     * P1/P2raw 是达妙直接反馈；phi1/phi4 是加偏置后送入 VMC 的角。 */
+    const float rad_to_cdeg = 18000.0f / PI;
+    const int p1_raw_cdeg = (int)lroundf(DM_8009P1.data.position_rad * rad_to_cdeg);
+    const int p2_raw_cdeg = (int)lroundf(DM_8009P2.data.position_rad * rad_to_cdeg);
+    const int phi1_cdeg = (int)lroundf(pClassicData->Motor_Data.L1_Motor_POS * rad_to_cdeg);
+    const int phi4_cdeg = (int)lroundf(pClassicData->Motor_Data.L2_Motor_POS * rad_to_cdeg);
+
     // 处理符号：当整数部分为0但原始值为负时，手动输出负号
     char x_pos_sign =
             (x_pos_int == 0 && pClassicData->States_Data.X_pos < 0.0f) ? '-' : ' ';
@@ -935,14 +944,18 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
 
     // 打印输出，手动处理负号
     uart_print("%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%"
-               "c%d.%d,%c%d.%d\r\n",
+               "c%d.%d,%c%d.%d,%c%d.%02d,%c%d.%02d,%c%d.%02d,%c%d.%02d\r\n",
                x_pos_sign, x_pos_int, x_pos_dec, d_x_sign, d_x_int, d_x_dec,
                yaw_sign, yaw_int, yaw_dec, d_yaw_sign, d_yaw_int, d_yaw_dec,
                theta_l_sign, theta_l_int, theta_l_dec, d_theta_l_sign,
                d_theta_l_int, d_theta_l_dec, theta_r_sign, theta_r_int,
                theta_r_dec, d_theta_r_sign, d_theta_r_int, d_theta_r_dec,
                theta_sign, theta_int, theta_dec, d_theta_sign, d_theta_int,
-               d_theta_dec);
+               d_theta_dec,
+               p1_raw_cdeg < 0 ? '-' : ' ', abs(p1_raw_cdeg) / 100, abs(p1_raw_cdeg) % 100,
+               p2_raw_cdeg < 0 ? '-' : ' ', abs(p2_raw_cdeg) / 100, abs(p2_raw_cdeg) % 100,
+               phi1_cdeg < 0 ? '-' : ' ', abs(phi1_cdeg) / 100, abs(phi1_cdeg) % 100,
+               phi4_cdeg < 0 ? '-' : ' ', abs(phi4_cdeg) / 100, abs(phi4_cdeg) % 100);
 }
 
 // 输出限幅（VMC 之后）：T1/T2；Fw 不经过 VMC，也在此限幅

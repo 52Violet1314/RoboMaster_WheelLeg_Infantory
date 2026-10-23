@@ -11,7 +11,7 @@
             "device": "STM32H723ZGT6",
             "svdFile": "",
             "runToEntryPoint": "main",
-            "armToolchainPath": "C:/ST/STM32CubeCLT_1.19.0/GNU-tools-for-STM32/bin",
+            "armToolchainPath": "D:/arm-none-eabi/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin",
             "liveWatch": {
                 "enabled": true,
                 "samplesPerSecond": 6
