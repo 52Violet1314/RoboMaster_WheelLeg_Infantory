@@ -757,20 +757,22 @@ void Control_Data_Print(Classic_Data_t *pClassicData) {
 }
 
 void IMU_Data_Print(Classic_Data_t *pClassicData) {
-    uart_print("roll:%d.%3d pitch:%d.%3d yaw:%d.%3d delta_roll:%d.%3d "
-               "delta_pitch:%d.%3d delta_yaw:%d.%3d\r\n ",
-               (int) (pClassicData->IMU_Data.roll * 1000) / 1000,
-               (int) (pClassicData->IMU_Data.roll * 1000) % 1000,
-               (int) (pClassicData->IMU_Data.pitch * 1000) / 1000,
-               (int) (pClassicData->IMU_Data.pitch * 1000) % 1000,
-               (int) (pClassicData->IMU_Data.yaw * 1000) / 1000,
-               (int) (pClassicData->IMU_Data.yaw * 1000) % 1000,
-               (int) (pClassicData->IMU_Data.delta_roll * 1000) / 1000,
-               (int) (pClassicData->IMU_Data.delta_roll * 1000) % 1000,
-               (int) (pClassicData->IMU_Data.delta_pitch * 1000) / 1000,
-               (int) (pClassicData->IMU_Data.delta_pitch * 1000) % 1000,
-               (int) (pClassicData->IMU_Data.delta_yaw * 1000) / 1000,
-               (int) (pClassicData->IMU_Data.delta_yaw * 1000) % 1000);
+    /* FireWater: 纯 CSV，依次为 roll,pitch,yaw,droll,dpitch,dyaw。 */
+    const int value_milli[6] = {
+        (int)lroundf(pClassicData->IMU_Data.roll * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.pitch * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.yaw * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.delta_roll * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.delta_pitch * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.delta_yaw * 1000.0f),
+    };
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               value_milli[0] < 0 ? '-' : ' ', abs(value_milli[0]) / 1000, abs(value_milli[0]) % 1000,
+               value_milli[1] < 0 ? '-' : ' ', abs(value_milli[1]) / 1000, abs(value_milli[1]) % 1000,
+               value_milli[2] < 0 ? '-' : ' ', abs(value_milli[2]) / 1000, abs(value_milli[2]) % 1000,
+               value_milli[3] < 0 ? '-' : ' ', abs(value_milli[3]) / 1000, abs(value_milli[3]) % 1000,
+               value_milli[4] < 0 ? '-' : ' ', abs(value_milli[4]) / 1000, abs(value_milli[4]) % 1000,
+               value_milli[5] < 0 ? '-' : ' ', abs(value_milli[5]) / 1000, abs(value_milli[5]) % 1000);
 }
 
 void Classic_Data_Update(Classic_Data_t *pClassicData) {
