@@ -154,7 +154,7 @@ int main(void)
   // HAL_TIM_Base_Start_IT(&htim3);
   // TIM5以1MHx计数
   HAL_TIM_Base_Start(&htim5);
-#ifdef USE_HIPNUC_HI14
+#if USE_HIPNUC_HI14
   memset(&Hipnuc_HI14, 0, sizeof(Hipnuc_HI14));
   HAL_UARTEx_ReceiveToIdle_DMA(&huart7, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
 #else

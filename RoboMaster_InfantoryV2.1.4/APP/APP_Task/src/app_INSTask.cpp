@@ -24,7 +24,7 @@ void app_INSTask(void *pvParameters) {
     uint32_t ulNotificationValue = 0;
     xEventGroupSetBits(ControlEventGroup,Control_OK_BIT);
     while (1) {
-#ifdef USE_HIPNUC_HI14
+#if USE_HIPNUC_HI14
     xTaskNotifyWait(0, 0, &ulNotificationValue, portMAX_DELAY);
     bool new_data = false;
     if (hi14_rx_size > 0) {
@@ -168,7 +168,7 @@ void app_INSTask(void *pvParameters) {
     }
 
     ClassData->Data_Time.last_imu_time = ClassData->Data_Time.imu_time;
-    #ifdef USE_HIPNUC_HI14
+    #if USE_HIPNUC_HI14
     htim3.Instance->CCR4 = 1;
     #else
     IMU_Temp_Control(40.0f);
