@@ -35,10 +35,11 @@ void app_INSTask(void *pvParameters) {
             {
                 /* HI14 输出的 roll/pitch/yaw 单位为度，需转换为弧度 */
                 ClassData->IMU_Data.roll  = angle_to_rad(Hipnuc_HI14.hi14data.roll);
-                /* HI14 陀螺仪角速度 (rad/s) 直接存储 */
-                ClassData->IMU_Data.gyro[0] = Hipnuc_HI14.hi14data.gyr[0];
-                ClassData->IMU_Data.gyro[1] = Hipnuc_HI14.hi14data.gyr[1];
-                ClassData->IMU_Data.gyro[2] = Hipnuc_HI14.hi14data.gyr[2];
+                /* HI14 原始陀螺仪单位为 deg/s，统一存为 rad/s。 */
+                const float deg_to_rad = 0.01745329251994329577f;
+                ClassData->IMU_Data.gyro[0] = Hipnuc_HI14.hi14data.gyr[0] * deg_to_rad;
+                ClassData->IMU_Data.gyro[1] = Hipnuc_HI14.hi14data.gyr[1] * deg_to_rad;
+                ClassData->IMU_Data.gyro[2] = Hipnuc_HI14.hi14data.gyr[2] * deg_to_rad;
                 /* HI14 加速度 (m/s²) 直接存储 */
                 ClassData->IMU_Data.accel[0] = Hipnuc_HI14.hi14data.acc[0];
                 ClassData->IMU_Data.accel[1] = Hipnuc_HI14.hi14data.acc[1];
@@ -73,6 +74,21 @@ void app_INSTask(void *pvParameters) {
     /* INS 路径下在上方已填，此处统一使用 */
 
     ClassData->Data_Time.imu_time = __HAL_TIM_GET_COUNTER(&htim5);
+#if USE_HIPNUC_GYRO_RATE
+    /*
+     * HI14 安装坐标：X 右、Y 前、Z 上。
+     * 与当前欧拉角处理保持一致：roll 不变、pitch = -raw_pitch、yaw 不变。
+     * 因此欧拉角速度映射为：roll<-gyro_y，pitch<- -gyro_x，yaw<-gyro_z。
+     */
+    ClassData->IMU_Data.delta_roll = ClassData->IMU_Data.gyro[1];
+    ClassData->IMU_Data.delta_pitch = -ClassData->IMU_Data.gyro[0];
+    ClassData->IMU_Data.delta_yaw = ClassData->IMU_Data.gyro[2];
+
+    /* 保持历史角度同步，切回旧差分路径时不会使用陈旧值。 */
+    ClassData->IMU_Data.last_roll = ClassData->IMU_Data.roll;
+    ClassData->IMU_Data.last_pitch = ClassData->IMU_Data.pitch;
+    ClassData->IMU_Data.last_yaw = ClassData->IMU_Data.yaw;
+#else
     float time_diff = (ClassData->Data_Time.imu_time -
                     ClassData->Data_Time.last_imu_time) *
                    1e-6f;
@@ -114,6 +130,7 @@ void app_INSTask(void *pvParameters) {
       ClassData->IMU_Data.delta_pitch = 0.0f;
       ClassData->IMU_Data.delta_yaw = 0.0f;
     }
+#endif
 
     // ================================================================
     // 向量旋转：机体加速度 → 世界系竖直/水平加速度

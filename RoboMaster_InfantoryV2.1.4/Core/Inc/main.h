@@ -42,6 +42,8 @@ extern "C" {
 /* USER CODE BEGIN ET */
 // void uart_print(const char *fmt, ...);
 #define USE_HIPNUC_HI14 1
+/* 1: 使用 HI14 实测陀螺仪角速度；0: 使用姿态角差分的旧实现。 */
+#define USE_HIPNUC_GYRO_RATE 1
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
