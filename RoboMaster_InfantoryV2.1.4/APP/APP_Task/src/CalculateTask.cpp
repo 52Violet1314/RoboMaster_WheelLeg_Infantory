@@ -370,7 +370,7 @@ void CaculateTask(void *pvParameters) {
         }
         StandUp_Flag = (stand_state == StandState_Up);
 
-        const float stand_offset_l = StandUp_Flag ? 15.0f : -20.5f;
+        const float stand_offset_l = StandUp_Flag ? 12.5f : -20.5f;
         const float stand_offset_r = StandUp_Flag ? 12.5f : -20.5f;
         pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
         pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
