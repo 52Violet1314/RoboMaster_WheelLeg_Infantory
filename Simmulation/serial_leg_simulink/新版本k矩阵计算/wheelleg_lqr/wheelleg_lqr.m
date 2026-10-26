@@ -98,8 +98,8 @@ rows = {
  'm_b',p.m_b,'kg','body equivalent mass';
  'I_b',p.I_b,'kg*m^2','body pitch inertia about its CoM';
  'I_zz',p.I_zz,'kg*m^2','whole robot yaw inertia';
- 'l_c',p.l_c,'m','body CoM to hip-midpoint signed distance';
- 'phi_c',p.phi_c,'rad','body CoM angular offset';
+ 'l_c',p.l_c,'m','hip-midpoint to body-CoM signed sagittal distance';
+ 'phi_c',p.phi_c,'rad','hip-to-CoM angle from body +z, in pitch plane';
  'm_l',p.m_l,'kg','left equivalent-leg mass';
  'm_r',p.m_r,'kg','right equivalent-leg mass';
  'I_l',p.I_l,'kg*m^2','left leg inertia about its CoM';

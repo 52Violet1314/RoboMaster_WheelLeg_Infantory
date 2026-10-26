@@ -7,7 +7,7 @@
 #define LEG_GRAVITY_TABLE_COUNT          41U
 #define LEG_GRAVITY_MIN_LENGTH_M         0.150f
 #define LEG_GRAVITY_LENGTH_STEP_M        0.005f
-/* 重力补偿自身的独立安全限幅；不参与 LQR Tp 的 ±1.8 N·m 限幅。 */
+/* 重力补偿自身的独立安全限幅；在 LQR Tp 完成其 2/4 N·m 限幅后叠加进入 VMC。 */
 #define LEG_GRAVITY_TP_LIMIT_NM          2.20f
 /* 安装方向修正。1 为表 x后/y下 转 VMC x前/y下 后的理论补偿方向。 */
 #define LEG_GRAVITY_TP_SIGN              1.0f

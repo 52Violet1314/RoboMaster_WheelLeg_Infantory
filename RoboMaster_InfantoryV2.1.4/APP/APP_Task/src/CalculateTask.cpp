@@ -278,7 +278,7 @@ void CaculateTask(void *pvParameters) {
         float Fn_Right = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_R,pClassicData->Contronller_Data.Tp_R, pClassicData->Leg_Data.L0_R,pClassicData->Leg_Data.d_L0_R,pClassicData->Leg_Data.dd_L0_R,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_R,pClassicData->States_Data.d_theta_R,pClassicData->States_Data.dd_theta_R);
         (void)Fn_Left;
         (void)Fn_Right;
-        // ====== LQR + 腿长 PID + phi PID + roll 差分补偿 ======
+        // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
         pClassicData->Contronller_Data.Fw_L = 0.0f;
         pClassicData->Contronller_Data.Fw_R = 0.0f;
@@ -401,7 +401,7 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
         pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
 
-        /* roll 角及其差分形成左右反向的 F0 补偿，单侧限幅 ±2 N。 */
+        /* roll 角及其角速度形成左右反向的 F0 补偿，单侧限幅 ±8 N。 */
         constexpr float roll_f0_limit = 8.0f;
         float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
                             + roll_kd * pClassicData->IMU_Data.delta_roll);
@@ -435,7 +435,7 @@ void CaculateTask(void *pvParameters) {
         Max_Tp = 4.0f;
         };
 
-        //F0 限幅：±50.0 N（腿长力，PID输出上限10 + 偏移10）
+        // F0 总限幅：起身后 ±30 N，未起身 ±60 N。
         if (pClassicData->Contronller_Data.F0_L > Max_F0)
             pClassicData->Contronller_Data.F0_L = Max_F0;
         if (pClassicData->Contronller_Data.F0_L < -Max_F0)
