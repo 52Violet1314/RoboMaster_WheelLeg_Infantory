@@ -1,0 +1,22 @@
+#ifndef __APP_LEG_ANGLE_TARGET_HPP__
+#define __APP_LEG_ANGLE_TARGET_HPP__
+
+/* 按实际腿长查询的腿摆角目标表。
+ * 角度单位为 rad；当前 41 个档位全部预设为 0 rad，后续可填入实测设计值。 */
+#define LEG_ANGLE_TARGET_TABLE_COUNT    41U
+#define LEG_ANGLE_TARGET_MIN_LENGTH_M   0.150f
+#define LEG_ANGLE_TARGET_LENGTH_STEP_M  0.005f
+
+typedef struct {
+    float leg_length_m;
+    float theta_target_rad;
+} LegAngleTargetParam_t;
+
+extern const LegAngleTargetParam_t
+        LegAngleTargetTable[LEG_ANGLE_TARGET_TABLE_COUNT];
+
+/* 越界腿长钳到表端点；表内腿长做线性插值。 */
+LegAngleTargetParam_t LegAngleTarget_GetParam(float leg_length_m);
+float LegAngleTarget_GetTheta(float leg_length_m);
+
+#endif

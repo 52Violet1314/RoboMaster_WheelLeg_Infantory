@@ -10,6 +10,7 @@
 #include "app_Task.hpp"
 #include "app_Data_Task.hpp"
 #include "app_ins_cal.h"
+#include "app_leg_angle_target.hpp"
 #include "app_leg_gravity_compensation.hpp"
 #include "app_motor.h"
 #include "arm_math.h"
@@ -41,8 +42,8 @@ float yaw_ref = 0.0f; // 期望整体角速度
 float d_theta_ref = 0.0f; // 期望整体角速度
 float d_theta_L_ref = 0.0f; // 期望左腿角速度
 float d_theta_R_ref = 0.0f; // 期望右腿角速度
-float theta_L_ref = 0.0f; // 期望左腿角度
-float theta_R_ref = 0.0f; // 期望右腿角度
+float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
+float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
 /* 腿长力闭环：L0 由四连杆正运动学计算得到，PID 输出为腿向力修正量。 */
 static Float_PID_Typedef leg_length_pid_l;
@@ -283,6 +284,10 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Contronller_Data.Fw_R = 0.0f;
         pClassicData->Contronller_Data.Tp_L = 0.0f;
         pClassicData->Contronller_Data.Tp_R = 0.0f;
+
+        /* 左右腿按各自实际 L0 查询角度目标；当前表全部为 0 rad。 */
+        theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
+        theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
         /* LQR 使能仍由 Channel[7] 控制；K 矩阵只由左右实际腿长均值选择。 */
         if (SBUS_Data.Channel[7] > 100) {
