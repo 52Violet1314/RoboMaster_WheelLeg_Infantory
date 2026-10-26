@@ -10,6 +10,7 @@
 #include "app_Task.hpp"
 #include "app_Data_Task.hpp"
 #include "app_ins_cal.h"
+#include "app_leg_gravity_compensation.hpp"
 #include "app_motor.h"
 #include "arm_math.h"
 #include "bsp_UART.h"
@@ -294,6 +295,16 @@ void CaculateTask(void *pvParameters) {
             }
         }
 
+        /* 重力补偿独立保存：LQR 的 Tp 先按原逻辑限幅，补偿在进入 VMC 时最后叠加。 */
+        float gravity_tp_l = 0.0f;
+        float gravity_tp_r = 0.0f;
+#if LEG_GRAVITY_COMPENSATION_ENABLE
+        gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
+                                        pClassicData->States_Data.theta_L);
+        gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
+                                        pClassicData->States_Data.theta_R);
+#endif
+
         /* phi PID 暂不叠加到 LQR 的 Tp 输出。 */
         // const float phi_ref = 1.5708f - pClassicData->IMU_Data.pitch - theta_ref;
         // pClassicData->Contronller_Data.Tp_L +=
@@ -437,8 +448,8 @@ void CaculateTask(void *pvParameters) {
         // ====== VMC 力矩分配 ======
         VMC_Calculate(pClassicData, pClassicData->Contronller_Data.F0_L,
                       pClassicData->Contronller_Data.F0_R,
-                      pClassicData->Contronller_Data.Tp_L,
-                      pClassicData->Contronller_Data.Tp_R, cal_dt);
+                      pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
+                      pClassicData->Contronller_Data.Tp_R + gravity_tp_r, cal_dt);
 
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
