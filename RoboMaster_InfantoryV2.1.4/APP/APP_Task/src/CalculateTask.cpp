@@ -284,11 +284,14 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Contronller_Data.Tp_L = 0.0f;
         pClassicData->Contronller_Data.Tp_R = 0.0f;
 
-        /* LQR 根据开关和腿长档位选择对应增益矩阵。 */
+        /* LQR 使能仍由 Channel[7] 控制；K 矩阵只由左右实际腿长均值选择。 */
         if (SBUS_Data.Channel[7] > 100) {
-            if (SBUS_Data.Channel[8] < -100) {
+            const float average_leg_length =
+                    (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
+            /* 150/250/350 mm 三套 K：在 200/300 mm 处切换到距离最近的档位。 */
+            if (average_leg_length < 0.200f) {
                 LQR_K_Calculate150(pClassicData);
-            } else if (SBUS_Data.Channel[8] > 100) {
+            } else if (average_leg_length >= 0.300f) {
                 LQR_K_Calculate350(pClassicData);
             } else {
                 LQR_K_Calculate250(pClassicData);
