@@ -370,8 +370,15 @@ void CaculateTask(void *pvParameters) {
         }
         StandUp_Flag = (stand_state == StandState_Up);
 
-        const float stand_offset_l = StandUp_Flag ? 12.5f : -20.5f;
-        const float stand_offset_r = StandUp_Flag ? 12.5f : -20.5f;
+        /* 悬空标定/倒地未起身时，不施加预设收腿力，也不让 LQR 驱动轮毂。
+         * 保留腿长 PID 与髋关节 Tp，便于在使能状态下观察腿部补偿。 */
+        if (!StandUp_Flag) {
+            pClassicData->Contronller_Data.Fw_L = 0.0f;
+            pClassicData->Contronller_Data.Fw_R = 0.0f;
+        }
+
+        const float stand_offset_l = StandUp_Flag ? 12.5f : 0.0f;
+        const float stand_offset_r = StandUp_Flag ? 12.5f : 0.0f;
         pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
         pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
 
