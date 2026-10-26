@@ -219,23 +219,23 @@ void CaculateTask(void *pvParameters) {
         // pClassicData->States_Data.d_X =
         //         (pClassicData->Motor_Data.Left_Wheel_Motor_VEL * -0.05f);
         pClassicData->States_Data.d_yaw_err =
-                pClassicData->Target_Data.Target_yaw_vel + pClassicData->IMU_Data.delta_yaw;
+                pClassicData->Target_Data.Target_yaw_vel + pClassicData->IMU_Data.delta_yaw;//计算yaw速度误差
         pClassicData->States_Data.yaw_err +=
-                (pClassicData->States_Data.d_yaw_err) / 1000.f;
+                (pClassicData->States_Data.d_yaw_err) / 1000.f;//计算目标yaw角度误差
         if (pClassicData->States_Data.yaw_err > 3.1415926f)
           pClassicData->States_Data.yaw_err = 3.1415926f;
         if (pClassicData->States_Data.yaw_err < -3.1415926f)
-          pClassicData->States_Data.yaw_err = -3.1415926f;
+          pClassicData->States_Data.yaw_err = -3.1415926f;//限制yaw的LQR角度差范围
         pClassicData->States_Data.theta_L =
-                +1.5708f - pClassicData->Leg_Data.phi_0_L - pClassicData->IMU_Data.pitch;
+                +1.5708f - pClassicData->Leg_Data.phi_0_L - pClassicData->IMU_Data.pitch;//（左腿）将相对于vmc坐标系的腿角度转化为相对于地面的供LQR使用
         pClassicData->States_Data.d_theta_L = -pClassicData->Leg_Data.delta_phi_0_L -
-                                              pClassicData->IMU_Data.delta_pitch;
+                                              pClassicData->IMU_Data.delta_pitch;//角速度
         pClassicData->States_Data.theta_R =
-                +1.5708f - pClassicData->Leg_Data.phi_0_R - pClassicData->IMU_Data.pitch;
+                +1.5708f - pClassicData->Leg_Data.phi_0_R - pClassicData->IMU_Data.pitch;//（右腿）将相对于vmc坐标系的腿角度转化为相对于地面的供LQR使用
         pClassicData->States_Data.d_theta_R = -pClassicData->Leg_Data.delta_phi_0_R -
-                                              pClassicData->IMU_Data.delta_pitch;
-        pClassicData->States_Data.theta = pClassicData->IMU_Data.pitch;
-        pClassicData->States_Data.d_theta = pClassicData->IMU_Data.delta_pitch;
+                                              pClassicData->IMU_Data.delta_pitch;//角速度
+        pClassicData->States_Data.theta = pClassicData->IMU_Data.pitch;//车身pitch角度
+        pClassicData->States_Data.d_theta = pClassicData->IMU_Data.delta_pitch;//车身pitch角速度
 
         /* theta_L / theta_R 二阶导（角加速度）：后向差分 + 一阶低通，使用定时器 dt */
         {
@@ -252,23 +252,26 @@ void CaculateTask(void *pvParameters) {
                     a * raw_dd_theta_R + (1 - a) * pClassicData->States_Data.dd_theta_R;
             pClassicData->States_Data.d_last_d_theta_R = pClassicData->States_Data.d_theta_R;
         }
+        //二阶导腿角加速度使用于离地检测
         
         /* Kalman 的控制输入必须是带方向的前向加速度；accel_h 是幅值，
          * 会在静止/转向时持续向位置状态注入正向偏置。 */
+        //上一次预测加速度，周期时间间隔，腿角，腿角速度，腿长，腿长变化速度，车身pitch角速度，轮毂电机角速度预测车位置速度
         WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L, pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
         WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R, pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
 
         /* Kalman 校正完成后再生成公共底盘状态，供下游状态监视使用。 */
         pClassicData->States_Data.d_X =
-                (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f;
-        Pos_INT += pClassicData->Target_Data.Target_X_vel / 1000.0f;
+                (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f;算出平均车身速度
+        Pos_INT += pClassicData->Target_Data.Target_X_vel / 1000.0f;//算出车身位移目标值（只有目标速度没输入的时候才会保持不变维持车身位置）
         pClassicData->States_Data.X_pos =
-                (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f - Pos_INT;
+                (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f - Pos_INT;//计算车身位移误差
         pClassicData->States_Data.d_x_err =
-                pClassicData->States_Data.d_X - pClassicData->Target_Data.Target_X_vel;
+                pClassicData->States_Data.d_X - pClassicData->Target_Data.Target_X_vel;//计算速度误差
         
         // WheelKalman_Print(&Wheel_Kalman_L, 'L');
         // WheelKalman_Print(&Wheel_Kalman_R, 'R');
+        //离地检测：识别腿支持力
         float Fn_Left = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_L,pClassicData->Contronller_Data.Tp_L, pClassicData->Leg_Data.L0_L,pClassicData->Leg_Data.d_L0_L,pClassicData->Leg_Data.dd_L0_L,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_L,pClassicData->States_Data.d_theta_L,pClassicData->States_Data.dd_theta_L);
         float Fn_Right = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_R,pClassicData->Contronller_Data.Tp_R, pClassicData->Leg_Data.L0_R,pClassicData->Leg_Data.d_L0_R,pClassicData->Leg_Data.dd_L0_R,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_R,pClassicData->States_Data.d_theta_R,pClassicData->States_Data.dd_theta_R);
         (void)Fn_Left;
@@ -315,18 +318,18 @@ void CaculateTask(void *pvParameters) {
         const float leg_err_l = leg_target - pClassicData->Leg_Data.L0_L;
         const float leg_err_r = leg_target - pClassicData->Leg_Data.L0_R;
         static float last_leg_target = 0.0f;
-        if (fabsf(leg_target - last_leg_target) > 0.001f) {
+        if (fabsf(leg_target - last_leg_target) > 0.001f) {//发生换档
             /* 切换腿长档位时丢弃上一目标的积分，避免换挡冲击。 */
             leg_length_pid_l.Err_Int = 0.0f;
-            leg_length_pid_r.Err_Int = 0.0f;
+            leg_length_pid_r.Err_Int = 0.0f;//清左右腿长积分
             leg_length_pid_l.Last_Error = leg_err_l;
-            leg_length_pid_r.Last_Error = leg_err_r;
+            leg_length_pid_r.Last_Error = leg_err_r;//更新误差长度
             leg_length_pid_l.Last_Dout = 0.0f;
-            leg_length_pid_r.Last_Dout = 0.0f;
+            leg_length_pid_r.Last_Dout = 0.0f;//清输出
             last_leg_target = leg_target;
         }
         const float leg_l_int_limit = leg_err_l < -0.05f ? 1.0f : 5.0f;
-        const float leg_r_int_limit = leg_err_r < -0.05f ? 1.0f : 5.0f;
+        const float leg_r_int_limit = leg_err_r < -0.05f ? 1.0f : 5.0f;//误差过大可能是腾空，防止力量输出过大
         const float leg_l_out_limit = 8.0f;
         const float leg_r_out_limit = 8.0f;
         float leg_l_out = PID_Max_Float(&leg_length_pid_l, leg_target,
