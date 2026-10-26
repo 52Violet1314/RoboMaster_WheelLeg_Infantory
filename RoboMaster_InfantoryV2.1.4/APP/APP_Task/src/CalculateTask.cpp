@@ -262,7 +262,7 @@ void CaculateTask(void *pvParameters) {
 
         /* Kalman 校正完成后再生成公共底盘状态，供下游状态监视使用。 */
         pClassicData->States_Data.d_X =
-                (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f;算出平均车身速度
+                (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f; // 算出平均车身速度
         Pos_INT += pClassicData->Target_Data.Target_X_vel / 1000.0f;//算出车身位移目标值（只有目标速度没输入的时候才会保持不变维持车身位置）
         pClassicData->States_Data.X_pos =
                 (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f - Pos_INT;//计算车身位移误差
@@ -441,7 +441,8 @@ void CaculateTask(void *pvParameters) {
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
-                State_Data_Print(pClassicData);
+                // State_Data_Print(pClassicData);
+                IMU_Data_Print(pClassicData);
                 xLastPrintTick = xNow;
             }
 
