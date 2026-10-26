@@ -990,7 +990,7 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
                phi4_cdeg < 0 ? '-' : ' ', abs(phi4_cdeg) / 100, abs(phi4_cdeg) % 100);
 }
 
-// 输出限幅（VMC 之后）：T1/T2；Fw 不经过 VMC，也在此限幅
+// 固定腿长 K 的状态反馈计算；输出限幅在 VMC 后的 Controler_Limit() 中执行。
 static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                                      K_Fixed_Leg_t gain) {
     /* K 矩阵对应 [x, dx, yaw, dyaw, thetaL, dthetaL,
