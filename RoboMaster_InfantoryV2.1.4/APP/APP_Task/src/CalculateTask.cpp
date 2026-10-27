@@ -100,7 +100,8 @@ void CaculateTask(void *pvParameters) {
     static float Max_Tp = 1.8f;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
     // 任一侧超出阈值连续 1 s 才切换为未起身。
-    StandState_t stand_state = StandState_Up;
+    /* 上电先等待腿角给出一次已起身判定，避免起身过程提前记录位置零点。 */
+    StandState_t stand_state = StandState_NotUp;
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     Float_PID_Init(&leg_length_pid_l, 1200.0f, 1.5f, 2.0f);
@@ -313,13 +314,14 @@ void CaculateTask(void *pvParameters) {
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
-        /* LQR 开关首次打开时记录当前位置；关闭后允许下次打开时重新记录。 */
+        /* 仅在 LQR 已开且腿角首次判定已起身时记录当前位置为位置零点。 */
         const bool lqr_enabled = (SBUS_Data.Channel[7] > 100);
-        if (lqr_enabled && !lqr_pos_ref_recorded) {
+        const bool pos_ref_ready = lqr_enabled && StandUp_Flag;
+        if (pos_ref_ready && !lqr_pos_ref_recorded) {
             Pos_INT = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
             pClassicData->States_Data.X_pos = 0.0f;
             lqr_pos_ref_recorded = true;
-        } else if (!lqr_enabled) {
+        } else if (!pos_ref_ready) {
             lqr_pos_ref_recorded = false;
         }
 
