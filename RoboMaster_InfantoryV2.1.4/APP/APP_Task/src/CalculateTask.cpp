@@ -285,7 +285,9 @@ void CaculateTask(void *pvParameters) {
         // ====== 起身状态机（左右腿共用一个状态）======
         const float theta_l_abs = fabsf(pClassicData->States_Data.theta_L);
         const float theta_r_abs = fabsf(pClassicData->States_Data.theta_R);
-        const bool both_legs_up = (theta_l_abs < 0.5f) && (theta_r_abs < 0.5f);
+        /* 收紧“已起身”门槛：两腿更接近竖直才切换到起身支撑力，
+         * 避免收腿过程经过 0.5 rad 时过早改为放长。 */
+        const bool both_legs_up = (theta_l_abs < 0.4f) && (theta_r_abs < 0.4f);
         const bool either_leg_not_up = (theta_l_abs > 1.2f) || (theta_r_abs > 1.2f);
         if (both_legs_up)
         {
@@ -320,6 +322,9 @@ void CaculateTask(void *pvParameters) {
         if (pos_ref_ready && !lqr_pos_ref_recorded) {
             Pos_INT = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
             pClassicData->States_Data.X_pos = 0.0f;
+            /* 与位置一样，起身后以当前车头朝向作为 yaw 工作点，
+             * 不带入起身过程中累计的航向误差。d_yaw_err 保留实时角速度。 */
+            pClassicData->States_Data.yaw_err = 0.0f;
             lqr_pos_ref_recorded = true;
         } else if (!pos_ref_ready) {
             lqr_pos_ref_recorded = false;
