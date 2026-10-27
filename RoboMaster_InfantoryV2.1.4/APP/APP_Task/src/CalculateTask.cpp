@@ -86,9 +86,8 @@ void Classic_Data_Update(Classic_Data_t *pClassicData);
 
 void IMU_Temp_Control(float Target_Temp);
 
-void LQR_K_Calculate150(Classic_Data_t *pClassicData);
-void LQR_K_Calculate250(Classic_Data_t *pClassicData);
-void LQR_K_Calculate350(Classic_Data_t *pClassicData);
+static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
+                                    K_Fixed_Leg_t gain);
 
 void Controler_Limit(Classic_Data_t *pClassicData);
 
@@ -312,7 +311,7 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Contronller_Data.Tp_L = 0.0f;
         pClassicData->Contronller_Data.Tp_R = 0.0f;
 
-        /* 左右腿按各自实际 L0 查询角度目标；当前表全部为 0 rad。 */
+        /* 左右腿按各自实际 L0 查询实车定义下的角度目标（rad）。 */
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
@@ -330,18 +329,13 @@ void CaculateTask(void *pvParameters) {
             lqr_pos_ref_recorded = false;
         }
 
-        /* LQR 仅由 Channel[7] 控制；K 矩阵只由左右实际腿长均值选择。 */
+        /* LQR 仅由 Channel[7] 控制；K 由左右实际腿长均值查 41 点表并线性插值。 */
         if (lqr_enabled) {
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
-            /* 150/250/350 mm 三套 K：在 200/300 mm 处切换到距离最近的档位。 */
-            if (average_leg_length < 0.200f) {
-                LQR_K_Calculate150(pClassicData);
-            } else if (average_leg_length >= 0.300f) {
-                LQR_K_Calculate350(pClassicData);
-            } else {
-                LQR_K_Calculate250(pClassicData);
-            }
+            K_Fixed_Leg_t scheduled_gain;
+            LQR_K_GetInterpolated(average_leg_length, scheduled_gain);
+            LQR_K_CalculateWithGain(pClassicData, scheduled_gain);
         }
 
         /* 重力补偿独立保存：LQR 的 Tp 先按原逻辑限幅，补偿在进入 VMC 时最后叠加。 */
@@ -1034,18 +1028,6 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
     pClassicData->Contronller_Data.Fw_R = control[1];
     pClassicData->Contronller_Data.Tp_L = control[2];
     pClassicData->Contronller_Data.Tp_R = control[3];
-}
-
-void LQR_K_Calculate150(Classic_Data_t *pClassicData) {
-    LQR_K_CalculateWithGain(pClassicData, K_Fixed_Leg150);
-}
-
-void LQR_K_Calculate250(Classic_Data_t *pClassicData) {
-    LQR_K_CalculateWithGain(pClassicData, K_Fixed_Leg250);
-}
-
-void LQR_K_Calculate350(Classic_Data_t *pClassicData) {
-    LQR_K_CalculateWithGain(pClassicData, K_Fixed_Leg350);
 }
 
 void Controler_Limit(Classic_Data_t *pClassicData) {
