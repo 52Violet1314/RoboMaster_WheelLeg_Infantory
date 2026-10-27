@@ -94,6 +94,8 @@ void Controler_Limit(Classic_Data_t *pClassicData);
 
 void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
+    /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
+    bool lqr_pos_ref_recorded = false;
     static float Max_F0 = 50.0f;
     static float Max_Tp = 1.8f;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
@@ -278,6 +280,28 @@ void CaculateTask(void *pvParameters) {
         float Fn_Right = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_R,pClassicData->Contronller_Data.Tp_R, pClassicData->Leg_Data.L0_R,pClassicData->Leg_Data.d_L0_R,pClassicData->Leg_Data.dd_L0_R,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_R,pClassicData->States_Data.d_theta_R,pClassicData->States_Data.dd_theta_R);
         (void)Fn_Left;
         (void)Fn_Right;
+
+        // ====== 起身状态机（左右腿共用一个状态）======
+        const float theta_l_abs = fabsf(pClassicData->States_Data.theta_L);
+        const float theta_r_abs = fabsf(pClassicData->States_Data.theta_R);
+        const bool both_legs_up = (theta_l_abs < 0.5f) && (theta_r_abs < 0.5f);
+        const bool either_leg_not_up = (theta_l_abs > 1.2f) || (theta_r_abs > 1.2f);
+        if (both_legs_up)
+        {
+          stand_state = StandState_Up;
+          stand_not_up_time = 0.0f;
+        }
+        else if (either_leg_not_up && stand_state != StandState_NotUp)
+        {
+          stand_not_up_time += cal_dt;
+          if (stand_not_up_time >= 1.0f)
+          {
+            stand_state = StandState_NotUp;
+            stand_not_up_time = 1.0f;
+          }
+        }
+        StandUp_Flag = (stand_state == StandState_Up);
+
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
         pClassicData->Contronller_Data.Fw_L = 0.0f;
@@ -289,8 +313,18 @@ void CaculateTask(void *pvParameters) {
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
-        /* LQR 使能仍由 Channel[7] 控制；K 矩阵只由左右实际腿长均值选择。 */
-        if (SBUS_Data.Channel[7] > 100) {
+        /* 仅在确认起身且 LQR 使能时记录当前位置；松开使能或未起身后允许下次重新记录。 */
+        const bool lqr_valid = (SBUS_Data.Channel[7] > 100) && StandUp_Flag;
+        if (lqr_valid && !lqr_pos_ref_recorded) {
+            Pos_INT = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
+            pClassicData->States_Data.X_pos = 0.0f;
+            lqr_pos_ref_recorded = true;
+        } else if (!lqr_valid) {
+            lqr_pos_ref_recorded = false;
+        }
+
+        /* K 矩阵只由左右实际腿长均值选择。 */
+        if (lqr_valid) {
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
             /* 150/250/350 mm 三套 K：在 200/300 mm 处切换到距离最近的档位。 */
@@ -367,27 +401,6 @@ void CaculateTask(void *pvParameters) {
         {
             leg_r_out = -3.5f;
         }
-
-        // ====== 起身状态机（左右腿共用一个状态）======
-        const float theta_l_abs = fabsf(pClassicData->States_Data.theta_L);
-        const float theta_r_abs = fabsf(pClassicData->States_Data.theta_R);
-        const bool both_legs_up = (theta_l_abs < 0.5f) && (theta_r_abs < 0.5f);
-        const bool either_leg_not_up = (theta_l_abs > 1.2f) || (theta_r_abs > 1.2f);
-        if (both_legs_up)
-        {
-          stand_state = StandState_Up;
-          stand_not_up_time = 0.0f;
-        }
-        else if (either_leg_not_up && stand_state != StandState_NotUp)
-        {
-          stand_not_up_time += cal_dt;
-          if (stand_not_up_time >= 1.0f)
-          {
-            stand_state = StandState_NotUp;
-            stand_not_up_time = 1.0f;
-          }
-        }
-        StandUp_Flag = (stand_state == StandState_Up);
 
         /* 悬空标定/倒地未起身时，不施加预设收腿力，也不让 LQR 驱动轮毂。
          * 保留腿长 PID 与髋关节 Tp，便于在使能状态下观察腿部补偿。 */
@@ -995,8 +1008,10 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                                      K_Fixed_Leg_t gain) {
     /* K 矩阵对应 [x, dx, yaw, dyaw, thetaL, dthetaL,
      * thetaR, dthetaR, pitch, dpitch] 十维状态。 */
+    /* 原始 X_pos 保留给状态记录；仅限制送入 K 矩阵的位置误差。 */
+    const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos, -0.30f), 0.30f);
     float states[10] = {
-        pClassicData->States_Data.X_pos,
+        x_pos_lqr,
         pClassicData->States_Data.d_x_err,
         pClassicData->States_Data.yaw_err,
         pClassicData->States_Data.d_yaw_err,
