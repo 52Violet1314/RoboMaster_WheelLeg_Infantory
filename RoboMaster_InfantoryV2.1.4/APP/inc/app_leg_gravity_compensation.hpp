@@ -2,7 +2,7 @@
 #define __APP_LEG_GRAVITY_COMPENSATION_HPP__
 
 /* 腿重力补偿常量：质心表以髋关节为原点，X 向后、Y 向下。 */
-#define LEG_GRAVITY_MASS_KG              1.328f
+#define LEG_GRAVITY_MASS_KG              1.050f
 #define LEG_GRAVITY_ACCELERATION_M_S2    9.81f
 #define LEG_GRAVITY_TABLE_COUNT          41U
 #define LEG_GRAVITY_MIN_LENGTH_M         0.150f
