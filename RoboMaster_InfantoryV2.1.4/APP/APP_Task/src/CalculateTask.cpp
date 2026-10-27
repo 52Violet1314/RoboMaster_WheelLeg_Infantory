@@ -313,18 +313,18 @@ void CaculateTask(void *pvParameters) {
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
-        /* 仅在确认起身且 LQR 使能时记录当前位置；松开使能或未起身后允许下次重新记录。 */
-        const bool lqr_valid = (SBUS_Data.Channel[7] > 100) && StandUp_Flag;
-        if (lqr_valid && !lqr_pos_ref_recorded) {
+        /* LQR 开关首次打开时记录当前位置；关闭后允许下次打开时重新记录。 */
+        const bool lqr_enabled = (SBUS_Data.Channel[7] > 100);
+        if (lqr_enabled && !lqr_pos_ref_recorded) {
             Pos_INT = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
             pClassicData->States_Data.X_pos = 0.0f;
             lqr_pos_ref_recorded = true;
-        } else if (!lqr_valid) {
+        } else if (!lqr_enabled) {
             lqr_pos_ref_recorded = false;
         }
 
-        /* K 矩阵只由左右实际腿长均值选择。 */
-        if (lqr_valid) {
+        /* LQR 仅由 Channel[7] 控制；K 矩阵只由左右实际腿长均值选择。 */
+        if (lqr_enabled) {
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
             /* 150/250/350 mm 三套 K：在 200/300 mm 处切换到距离最近的档位。 */
@@ -400,13 +400,6 @@ void CaculateTask(void *pvParameters) {
         if(leg_r_out < -3.5f)
         {
             leg_r_out = -3.5f;
-        }
-
-        /* 悬空标定/倒地未起身时，不施加预设收腿力，也不让 LQR 驱动轮毂。
-         * 保留腿长 PID 与髋关节 Tp，便于在使能状态下观察腿部补偿。 */
-        if (!StandUp_Flag) {
-            pClassicData->Contronller_Data.Fw_L = 0.0f;
-            pClassicData->Contronller_Data.Fw_R = 0.0f;
         }
 
         const float stand_offset_l = StandUp_Flag ? 12.5f : -20.5f;//起身前收腿20牛，起身后12.5牛
