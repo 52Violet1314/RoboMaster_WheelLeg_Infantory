@@ -3,8 +3,8 @@ function p = zju_parameters_template(leg_length)
 % Values come directly from D:\code\chuanlian_leg\get_K_jiao_LQR.m.
 % l_c and phi_c describe the vector from the hip midpoint to the body CoM
 % in the sagittal plane.  At theta_b=0: dy_forward=l_c*sin(phi_c),
-% dz_up=l_c*cos(phi_c).  Thus the current l_c=-0.03, phi_c=0 places the
-% CoM 30 mm below the hip midpoint, with no fore-aft offset.
+% dz_up=l_c*cos(phi_c).  The current vehicle setting is 20 mm forward,
+% with no vertical or lateral offset.
 %
 % Sign convention is intentionally the one used by the old K script and
 % the Simulink controller: body x=right, y=forward, z=up; +phi is a left
@@ -16,7 +16,11 @@ if nargin < 1 || isempty(leg_length), leg_length = 0.20; end
 validateattributes(leg_length, {'numeric'}, {'real','scalar','finite','positive'});
 
 g = 9.81; R_w = 0.0525; R_l = 0.20;
-m_w = 0.30; m_b = 15.75; l_c = -0.03; phi_c = 0;
+m_w = 0.30; m_b = 15.75;
+com_forward_m = 0.020;  % +body y: 20 mm ahead of hip midpoint
+com_up_m = 0.000;       % +body z: no vertical offset
+l_c = hypot(com_forward_m, com_up_m);
+phi_c = atan2(com_forward_m, com_up_m);
 I_w = 0.5*m_w*R_w^2;
 I_b = m_b*(0.485^2 + 0.152^2)/12.0;
 I_zz = 0.226;

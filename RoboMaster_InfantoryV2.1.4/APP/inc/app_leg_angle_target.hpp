@@ -1,8 +1,8 @@
 #ifndef __APP_LEG_ANGLE_TARGET_HPP__
 #define __APP_LEG_ANGLE_TARGET_HPP__
 
-/* 按实际腿长查询的腿摆角目标表。
- * 角度单位为 rad；当前 41 个档位全部预设为 0 rad，后续可填入实测设计值。 */
+/* 按单腿实际 L0 查询的腿摆角目标表。
+ * 角度单位为 rad；当前 41 档来自新版模型的静态平衡点：机身质心前 20 mm。 */
 #define LEG_ANGLE_TARGET_TABLE_COUNT    41U
 #define LEG_ANGLE_TARGET_MIN_LENGTH_M   0.150f
 #define LEG_ANGLE_TARGET_LENGTH_STEP_M  0.005f
