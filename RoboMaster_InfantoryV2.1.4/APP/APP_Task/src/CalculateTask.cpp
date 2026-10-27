@@ -343,10 +343,12 @@ void CaculateTask(void *pvParameters) {
         float gravity_tp_l = 0.0f;
         float gravity_tp_r = 0.0f;
 #if LEG_GRAVITY_COMPENSATION_ENABLE
-        gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
-                                        pClassicData->States_Data.theta_L);
-        gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
-                                        pClassicData->States_Data.theta_R);
+        if (StandUp_Flag) {
+            gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
+                                            pClassicData->States_Data.theta_L);
+            gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
+                                            pClassicData->States_Data.theta_R);
+        }
 #endif
 
         /* phi PID 暂不叠加到 LQR 的 Tp 输出。 */
