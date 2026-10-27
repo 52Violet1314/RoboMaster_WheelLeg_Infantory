@@ -4,8 +4,8 @@ function result = zju_firmware_schedule(Qdiag, Rdiag, print_report)
 % It intentionally keeps the deployed Q/R defaults unless values are supplied.
 %
 % result.gain(n,:,:) is the gain in the exact sign convention consumed by
-% CalculateTask.cpp. result.theta_ref_rad(n) is the per-leg zero-angle
-% target for the same leg length.  Both use 0.150:0.005:0.350 m.
+% CalculateTask.cpp. result.theta_ref_rad(n) is the per-leg target in the
+% real-firmware theta_L/theta_R convention. Both use 0.150:0.005:0.350 m.
 
 if nargin < 1 || isempty(Qdiag)
     Qdiag = [20 1 400 1 35000 10 35000 10 40000 1];
@@ -42,7 +42,10 @@ for index = 1:count
         'Closed loop is unstable at L0=%.3f m.', l0);
 
     gain(index,:,:) = firmware_sign .* lqr_result.K;
-    theta_ref_rad(index) = lqr_result.equilibrium.X(5);
+    % theta_l is the model's wheel-to-body pendulum angle.  Firmware
+    % theta_L/theta_R is the hip-to-wheel angle, so the same physical pose
+    % has the opposite small-angle sign.  Export the actual C target here.
+    theta_ref_rad(index) = -lqr_result.equilibrium.X(5);
     equilibrium_u_nm(index,:) = lqr_result.equilibrium.U.';
     care_residual(index) = lqr_result.care_residual_norm;
     max_closed_loop_real(index) = max(real(lqr_result.closed_loop_poles));

@@ -10,8 +10,9 @@ function equilibrium = zju_find_static_equilibrium(p)
 % 使七个未知量恰有七个方程。左右腿角和两侧髋关节力矩仍允许不同，
 % 因而左右不对称的实车参数也可直接使用。
 %
-% 角度取正与旧 get_K_jiao_LQR.m 的控制接口保持一致：
-% theta_l_l/theta_l_r 为二维腿模型的前摆正；phi 为车体左转正。
+% theta_l_l/theta_l_r 与旧 get_K_jiao_LQR.m 一致，均为二维模型的
+% 轮到车体摆杆角；它们不是实车 theta_L/theta_R 的有向腿矢量角。
+% phi 为车体左转正；向实车导出目标角时在 zju_firmware_schedule 中转换。
 % 返回值 equilibrium 同时包含：
 %   q,dq,U,X       平衡点的广义坐标、速度、输入和十阶状态；
 %   residual       五条静态方程残差；

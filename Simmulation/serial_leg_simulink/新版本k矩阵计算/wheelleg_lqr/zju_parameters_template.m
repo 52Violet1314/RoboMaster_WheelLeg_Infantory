@@ -6,11 +6,12 @@ function p = zju_parameters_template(leg_length)
 % dz_up=l_c*cos(phi_c).  The current vehicle setting is 20 mm forward,
 % with no vertical or lateral offset.
 %
-% Sign convention is intentionally the one used by the old K script and
-% the Simulink controller: body x=right, y=forward, z=up; +phi is a left
-% yaw about +z.  In the 2-D leg calculation x_leg=back=-y_body and
-% y_leg=down=-z_body; a forward leg swing is positive.  Do not add a
-% further sign inversion at deployment.
+% Body axes intentionally match the old K script and firmware: x=right,
+% y=forward, z=up; +phi is a left yaw about +z.  In the 2-D leg
+% calculation x_leg=back=-y_body and y_leg=down=-z_body.  theta_l is the
+% model's wheel-to-body pendulum angle; firmware theta_L/theta_R is the
+% hip-to-wheel angle.  Their small-angle signs are therefore opposite even
+% though the body axes are identical; zju_firmware_schedule exports -theta_l.
 
 if nargin < 1 || isempty(leg_length), leg_length = 0.20; end
 validateattributes(leg_length, {'numeric'}, {'real','scalar','finite','positive'});
