@@ -412,7 +412,7 @@ void CaculateTask(void *pvParameters) {
         }
 
         const float stand_offset_l = StandUp_Flag ? 12.5f : -20.5f;//起身前收腿20牛，起身后12.5牛
-        const float stand_offset_r = StandUp_Flag ? 12.5f : -20.5f;
+        const float stand_offset_r = StandUp_Flag ? 13.0f : -20.5f;
         pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
         pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
 
