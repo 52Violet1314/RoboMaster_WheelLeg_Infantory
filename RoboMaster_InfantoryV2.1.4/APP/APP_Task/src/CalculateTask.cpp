@@ -360,8 +360,8 @@ void CaculateTask(void *pvParameters) {
         //                       pClassicData->Leg_Data.phi_0_R, 0.0f, 0.5f);
 
         /* roll 补偿在 F0 支撑力上实现左右差动，暂不叠加到 Tp。 */
-        constexpr float roll_kp = 40.0f;
-        constexpr float roll_kd = 2.5f;
+        // constexpr float roll_kp = 40.0f;
+        // constexpr float roll_kd = 2.5f;
         if (SBUS_Data.Channel[8] < -100) {
             pClassicData->Target_Data.Target_LegLong = 0.150f;
         } else if (SBUS_Data.Channel[8] > 100) {
@@ -405,22 +405,24 @@ void CaculateTask(void *pvParameters) {
             leg_r_out = -3.5f;
         }
 
-        const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;//起身前收腿20牛，起身后12.5牛
-        const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
-        pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
-        pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
+        /* 台架气弹簧预压调试：取消起身状态机的固定收/放腿偏置。
+         * F0 仅保留腿长 PID；摆动方向仍由后面的重力补偿进入 VMC。 */
+        // const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
+        // const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
+        pClassicData->Contronller_Data.F0_L = leg_l_out;
+        pClassicData->Contronller_Data.F0_R = leg_r_out;
 
-        /* roll 角及其角速度形成左右反向的 F0 补偿，单侧限幅 ±8 N。 */
-        constexpr float roll_f0_limit = 8.0f;
-        float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
-                            + roll_kd * pClassicData->IMU_Data.delta_roll);
-        if (roll_comp > roll_f0_limit) {
-            roll_comp = roll_f0_limit;
-        } else if (roll_comp < -roll_f0_limit) {
-            roll_comp = -roll_f0_limit;
-        }
-        pClassicData->Contronller_Data.F0_L += roll_comp;
-        pClassicData->Contronller_Data.F0_R -= roll_comp;
+        /* 台架气弹簧预压调试：暂不施加 roll 左右差动补偿。 */
+        // constexpr float roll_f0_limit = 8.0f;
+        // float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
+        //                     + roll_kd * pClassicData->IMU_Data.delta_roll);
+        // if (roll_comp > roll_f0_limit) {
+        //     roll_comp = roll_f0_limit;
+        // } else if (roll_comp < -roll_f0_limit) {
+        //     roll_comp = -roll_f0_limit;
+        // }
+        // pClassicData->Contronller_Data.F0_L += roll_comp;
+        // pClassicData->Contronller_Data.F0_R -= roll_comp;
 
         if (SBUS_Data.Channel[9] < 100) {
             /* 电机失能期间不保留积分，重新上电时从当前腿长重新建立力。 */
