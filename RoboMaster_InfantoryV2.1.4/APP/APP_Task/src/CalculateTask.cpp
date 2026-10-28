@@ -88,8 +88,6 @@ void State_Data_Print(Classic_Data_t *pClassicData);
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
-/* FireWater CSV：腿长/腿角、四髋角、四髋速、左右轮速。 */
-void LegMotor_Data_Print(Classic_Data_t *pClassicData);
 
 void Classic_Data_Update(Classic_Data_t *pClassicData);
 
@@ -475,15 +473,18 @@ void CaculateTask(void *pvParameters) {
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
 
-        /* 打印节流：两次打印至少间隔 50ms，避免 DMA 串口跟不上导致 CalculateTask 阻塞超时 */
+        /* 打印节流：两次打印至少间隔 100ms，避免 DMA 串口跟不上导致 CalculateTask 阻塞超时 */
         {
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
-                // State_Data_Print(pClassicData);
+                /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
+                Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
+                // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
+                // LegLengthPID_Data_Print(pClassicData); // 目标腿长、实际腿长、误差、F0
                 // IMU_Data_Print(pClassicData);
-                // LegLengthPID_Data_Print(pClassicData);
-                LegMotor_Data_Print(pClassicData);
+                // Control_Data_Print(pClassicData);
+                // State_Data_Print(pClassicData);
                 xLastPrintTick = xNow;
             }
 
@@ -701,44 +702,71 @@ void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
 float angle_to_rad(float degrees) { return degrees * (PI / 180.0f); }
 
 void LEG_Data_Print(Classic_Data_t *pClassicData) {
-    uart_print("l0_L:%d.%3d, l0_R:%d.%3d,phi0_L:%d.%3d,phi0_R:%d.%3d",
-               (int) (pClassicData->Leg_Data.L0_L * 1000) / 1000,
-               (int) (pClassicData->Leg_Data.L0_L * 1000) % 1000,
-               (int) (pClassicData->Leg_Data.L0_R * 1000) / 1000,
-               (int) (pClassicData->Leg_Data.L0_R * 1000) % 1000,
-               (int) (pClassicData->Leg_Data.phi_0_L * 1000) / 1000,
-               (int) (pClassicData->Leg_Data.phi_0_L * 1000) % 1000,
-               (int) (pClassicData->Leg_Data.phi_0_R * 1000) / 1000,
-               (int) (pClassicData->Leg_Data.phi_0_R * 1000) % 1000);
+    /* FireWater 纯 CSV，依次为：
+     * L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,dphi0_L,dphi0_R。
+     * 单位依次为 m,m,m/s,m/s,rad,rad,rad/s,rad/s。 */
+    const float values[8] = {
+        pClassicData->Leg_Data.L0_L,
+        pClassicData->Leg_Data.L0_R,
+        pClassicData->Leg_Data.d_L0_L,
+        pClassicData->Leg_Data.d_L0_R,
+        pClassicData->Leg_Data.phi_0_L,
+        pClassicData->Leg_Data.phi_0_R,
+        pClassicData->Leg_Data.delta_phi_0_L,
+        pClassicData->Leg_Data.delta_phi_0_R,
+    };
+    int milli[8];
+    for (uint32_t index = 0; index < 8U; ++index)
+        milli[index] = (int)lroundf(values[index] * 1000.0f);
+
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
+               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
+               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
+               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
+               milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
+               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
+               milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000);
 }
 
 
 
 void Motor_Data_Print(Classic_Data_t *pClassicData) {
-    uart_print(
-        "phi1_L:%d.%3d phi4_L:%d.%3d phi1_R:%d.%3d phi4_R:%d.%3d d_phi1L:%d.%3d "
-        "d_phi4L:%d.%3d d_phi1_R:%d.%3d d_phi4R:%d.%3d L_wheel_VEL:%d.%3d "
-        "R_wheel_VEL:%d.%3d\r\n ",
-        (int) (pClassicData->Motor_Data.L1_Motor_POS * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.L1_Motor_POS * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.L2_Motor_POS * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.L2_Motor_POS * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.R1_Motor_POS * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.R1_Motor_POS * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.R2_Motor_POS * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.R2_Motor_POS * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.L1_Motor_VEL * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.L1_Motor_VEL * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.L2_Motor_VEL * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.L2_Motor_VEL * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.R1_Motor_VEL * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.R1_Motor_VEL * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.R2_Motor_VEL * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.R2_Motor_VEL * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.Left_Wheel_Motor_VEL * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.Left_Wheel_Motor_VEL * 1000) % 1000,
-        (int) (pClassicData->Motor_Data.Right_Wheel_Motor_VEL * 1000) / 1000,
-        (int) (pClassicData->Motor_Data.Right_Wheel_Motor_VEL * 1000) % 1000);
+    /* FireWater 纯 CSV，依次为：
+     * phi1_L,phi4_L,phi1_R,phi4_R,
+     * dphi1_L,dphi4_L,dphi1_R,dphi4_R,wheelVel_L,wheelVel_R。
+     * 前四列为映射后的关节角 rad；后六列为原始速度反馈 rad/s。 */
+    const float values[10] = {
+        pClassicData->Motor_Data.L1_Motor_POS,
+        pClassicData->Motor_Data.L2_Motor_POS,
+        pClassicData->Motor_Data.R1_Motor_POS,
+        pClassicData->Motor_Data.R2_Motor_POS,
+        pClassicData->Motor_Data.L1_Motor_VEL,
+        pClassicData->Motor_Data.L2_Motor_VEL,
+        pClassicData->Motor_Data.R1_Motor_VEL,
+        pClassicData->Motor_Data.R2_Motor_VEL,
+        pClassicData->Motor_Data.Left_Wheel_Motor_VEL,
+        pClassicData->Motor_Data.Right_Wheel_Motor_VEL,
+    };
+    int milli[10];
+    for (uint32_t index = 0; index < 10U; ++index)
+        milli[index] = (int)lroundf(values[index] * 1000.0f);
+
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d\r\n",
+               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
+               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
+               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
+               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
+               milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
+               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
+               milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000,
+               milli[8] < 0 ? '-' : ' ', abs(milli[8]) / 1000, abs(milli[8]) % 1000,
+               milli[9] < 0 ? '-' : ' ', abs(milli[9]) / 1000, abs(milli[9]) % 1000);
 }
 
 void Control_Data_Print(Classic_Data_t *pClassicData) {
@@ -842,53 +870,6 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
                milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
                milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
                milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
-}
-
-void LegMotor_Data_Print(Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV，依次为：
-     * L0_L,L0_R,phi0_L,phi0_R,
-     * phi1_L,phi4_L,phi1_R,phi4_R,
-     * dphi1_L,dphi4_L,dphi1_R,dphi4_R,wheelVel_L,wheelVel_R。
-     * 前两列单位 m；其余角/角速度列单位为 rad 或 rad/s。 */
-    const float values[14] = {
-        pClassicData->Leg_Data.L0_L,
-        pClassicData->Leg_Data.L0_R,
-        pClassicData->Leg_Data.phi_0_L,
-        pClassicData->Leg_Data.phi_0_R,
-        pClassicData->Motor_Data.L1_Motor_POS,
-        pClassicData->Motor_Data.L2_Motor_POS,
-        pClassicData->Motor_Data.R1_Motor_POS,
-        pClassicData->Motor_Data.R2_Motor_POS,
-        pClassicData->Motor_Data.L1_Motor_VEL,
-        pClassicData->Motor_Data.L2_Motor_VEL,
-        pClassicData->Motor_Data.R1_Motor_VEL,
-        pClassicData->Motor_Data.R2_Motor_VEL,
-        pClassicData->Motor_Data.Left_Wheel_Motor_VEL,
-        pClassicData->Motor_Data.Right_Wheel_Motor_VEL,
-    };
-    int milli[14];
-    for (uint32_t index = 0; index < 14U; ++index)
-        milli[index] = (int)lroundf(values[index] * 1000.0f);
-
-    uart_print(
-        "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-        "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-        "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-        "%c%d.%03d,%c%d.%03d\r\n",
-        milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
-        milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
-        milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
-        milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
-        milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
-        milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
-        milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
-        milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000,
-        milli[8] < 0 ? '-' : ' ', abs(milli[8]) / 1000, abs(milli[8]) % 1000,
-        milli[9] < 0 ? '-' : ' ', abs(milli[9]) / 1000, abs(milli[9]) % 1000,
-        milli[10] < 0 ? '-' : ' ', abs(milli[10]) / 1000, abs(milli[10]) % 1000,
-        milli[11] < 0 ? '-' : ' ', abs(milli[11]) / 1000, abs(milli[11]) % 1000,
-        milli[12] < 0 ? '-' : ' ', abs(milli[12]) / 1000, abs(milli[12]) % 1000,
-        milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000);
 }
 
 void Classic_Data_Update(Classic_Data_t *pClassicData) {
