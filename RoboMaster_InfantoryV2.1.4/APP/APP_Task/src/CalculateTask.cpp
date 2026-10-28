@@ -45,6 +45,9 @@ float d_theta_R_ref = 0.0f; // 期望右腿角速度
 float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
+/* 台架腿长 PID 测试目标：手动修改此值；暂时不再由遥控器 CH8 选择。 */
+static constexpr float kBenchLegLengthTargetM = 0.250f;
+
 /* 腿长力闭环：L0 由四连杆正运动学计算得到，PID 输出为腿向力修正量。 */
 static Float_PID_Typedef leg_length_pid_l;
 static Float_PID_Typedef leg_length_pid_r;
@@ -81,6 +84,9 @@ void Control_Data_Print(Classic_Data_t *pClassicData);
 void IMU_Data_Print(Classic_Data_t *pClassicData);
 
 void State_Data_Print(Classic_Data_t *pClassicData);
+
+/* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
+void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
 void Classic_Data_Update(Classic_Data_t *pClassicData);
 
@@ -127,18 +133,18 @@ void CaculateTask(void *pvParameters) {
     // 串口 DMA 接收初始化（从 Data Task 移入）
     HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE * 2);
 
-    uart_print("CaculateTask start\r\n");
+    // uart_print("CaculateTask start\r\n");
     TickType_t xLastWakeTime = xTaskGetTickCount();
     uint32_t last_cal_tick = 0;  // 使用 htim5 微秒计数器跟踪真实 dt
     while (1) {
-        /* 独立于传感器事件的任务心跳，用于区分“任务未运行”和“无数据帧”。 */
-        static TickType_t xLastAlivePrint = 0;
-        TickType_t xAliveNow = xTaskGetTickCount();
-        if ((xAliveNow - xLastAlivePrint) > pdMS_TO_TICKS(1000)) {
-            uart_print_blocking("CAL_ALIVE bits=0x%02X\r\n",
-                               (unsigned)xEventGroupGetBits(DataGroup));
-            xLastAlivePrint = xAliveNow;
-        }
+        /* 台架腿长 PID 测试：关闭任务心跳调试串口输出。 */
+        // static TickType_t xLastAlivePrint = 0;
+        // TickType_t xAliveNow = xTaskGetTickCount();
+        // if ((xAliveNow - xLastAlivePrint) > pdMS_TO_TICKS(1000)) {
+        //     uart_print_blocking("CAL_ALIVE bits=0x%02X\r\n",
+        //                        (unsigned)xEventGroupGetBits(DataGroup));
+        //     xLastAlivePrint = xAliveNow;
+        // }
         // ====== 原 Data Task：等待传感器数据就绪（5ms 超时保护） ======
         EventBits_t uxBits = xEventGroupWaitBits(
             DataGroup, MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT,
@@ -158,11 +164,11 @@ void CaculateTask(void *pvParameters) {
             pClassicData->Contronller_Data.T2_R = 0.0f;
             /* 节流打印：每 500ms 最多输出一次，避免串口洪水拖慢调度 */
             static TickType_t xLastTimeoutPrint = 0;
-            extern uint32_t fdcan_tx_fail_count;
+            // extern uint32_t fdcan_tx_fail_count;
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastTimeoutPrint) > pdMS_TO_TICKS(500)) {
-                uart_print("Cal: sensor timeout bits=0x%02X TX_fail=%lu\r\n",
-                           (unsigned)uxBits, fdcan_tx_fail_count);
+                // uart_print("Cal: sensor timeout bits=0x%02X TX_fail=%lu\r\n",
+                //            (unsigned)uxBits, fdcan_tx_fail_count);
                 xLastTimeoutPrint = xNow;
             }
             xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
@@ -359,16 +365,8 @@ void CaculateTask(void *pvParameters) {
         //         PID_Max_Float(&leg_phi_pid_r, phi_ref,
         //                       pClassicData->Leg_Data.phi_0_R, 0.0f, 0.5f);
 
-        /* roll 补偿在 F0 支撑力上实现左右差动，暂不叠加到 Tp。 */
-        // constexpr float roll_kp = 40.0f;
-        // constexpr float roll_kd = 2.5f;
-        if (SBUS_Data.Channel[8] < -100) {
-            pClassicData->Target_Data.Target_LegLong = 0.150f;
-        } else if (SBUS_Data.Channel[8] > 100) {
-            pClassicData->Target_Data.Target_LegLong = 0.350f;
-        } else {
-            pClassicData->Target_Data.Target_LegLong = 0.250f;
-        }
+        /* 台架腿长 PID 测试：目标腿长由顶部常量手动设定，不读取 CH8。 */
+        pClassicData->Target_Data.Target_LegLong = kBenchLegLengthTargetM;
         /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
         const float leg_target = pClassicData->Target_Data.Target_LegLong;
         const float leg_err_l = leg_target - pClassicData->Leg_Data.L0_L;
@@ -479,7 +477,8 @@ void CaculateTask(void *pvParameters) {
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
                 // State_Data_Print(pClassicData);
-                IMU_Data_Print(pClassicData);
+                // IMU_Data_Print(pClassicData);
+                LegLengthPID_Data_Print(pClassicData);
                 xLastPrintTick = xNow;
             }
 
@@ -810,6 +809,34 @@ void IMU_Data_Print(Classic_Data_t *pClassicData) {
                value_milli[3] < 0 ? '-' : ' ', abs(value_milli[3]) / 1000, abs(value_milli[3]) % 1000,
                value_milli[4] < 0 ? '-' : ' ', abs(value_milli[4]) / 1000, abs(value_milli[4]) % 1000,
                value_milli[5] < 0 ? '-' : ' ', abs(value_milli[5]) / 1000, abs(value_milli[5]) % 1000);
+}
+
+void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
+    /* FireWater 纯 CSV，单位依次为 m,m,m,m,m,N,N：
+     * target_L0, L0_L, L0_R, err_L, err_R, F0_L, F0_R。 */
+    const float target = pClassicData->Target_Data.Target_LegLong;
+    const float values[7] = {
+        target,
+        pClassicData->Leg_Data.L0_L,
+        pClassicData->Leg_Data.L0_R,
+        target - pClassicData->Leg_Data.L0_L,
+        target - pClassicData->Leg_Data.L0_R,
+        pClassicData->Contronller_Data.F0_L,
+        pClassicData->Contronller_Data.F0_R,
+    };
+    int milli[7];
+    for (uint32_t index = 0; index < 7U; ++index)
+        milli[index] = (int)lroundf(values[index] * 1000.0f);
+
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d\r\n",
+               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
+               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
+               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
+               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
+               milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
+               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
 }
 
 void Classic_Data_Update(Classic_Data_t *pClassicData) {
