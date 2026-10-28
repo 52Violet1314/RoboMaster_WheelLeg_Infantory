@@ -46,7 +46,7 @@ float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
 /* 台架腿长 PID 测试目标：手动修改此值；暂时不再由遥控器 CH8 选择。 */
-static constexpr float kBenchLegLengthTargetM = 0.250f;
+static constexpr float kBenchLegLengthTargetM = 0.350f;
 
 /* 腿长力闭环：L0 由四连杆正运动学计算得到，PID 输出为腿向力修正量。 */
 static Float_PID_Typedef leg_length_pid_l;
@@ -110,7 +110,7 @@ void CaculateTask(void *pvParameters) {
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     Float_PID_Init(&leg_length_pid_l, 1200.0f, 1.5f, 2.0f);
-    Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 4.0f);
+    Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     Float_PID_Init(&leg_phi_pid_l, 15.0f, 0.0f, 3.0f);
     Float_PID_Init(&leg_phi_pid_r, 15.0f, 0.0f, 3.0f);
     // --- DM 电机初始化（从 Data Task 移入） ---
@@ -384,8 +384,9 @@ void CaculateTask(void *pvParameters) {
         }
         const float leg_l_int_limit = leg_err_l < -0.05f ? 1.0f : 5.0f;
         const float leg_r_int_limit = leg_err_r < -0.05f ? 1.0f : 5.0f;//误差过大可能是腾空，防止力量输出过大
-        const float leg_l_out_limit = 8.0f;
-        const float leg_r_out_limit = 8.0f;
+        /* 台架气弹簧腿长测试：先保证 PID 有足够的收/放腿力。 */
+        const float leg_l_out_limit = 15.0f;
+        const float leg_r_out_limit = 15.0f;
         float leg_l_out = PID_Max_Float(&leg_length_pid_l, leg_target,
                                               pClassicData->Leg_Data.L0_L,
                                               leg_l_int_limit, leg_l_out_limit);
@@ -394,13 +395,13 @@ void CaculateTask(void *pvParameters) {
                                               leg_r_int_limit, leg_r_out_limit);
         // pClassicData->Contronller_Data.F0_L = 15.5f + leg_l_out;
         // pClassicData->Contronller_Data.F0_R = 15.5f + leg_r_out;
-        if(leg_l_out < -3.5f)
+        if(leg_l_out < -15.0f)
         {
-            leg_l_out = -3.5f;
+            leg_l_out = -15.0f;
         }
-        if(leg_r_out < -3.5f)
+        if(leg_r_out < -15.0f)
         {
-            leg_r_out = -3.5f;
+            leg_r_out = -15.0f;
         }
 
         /* 台架气弹簧预压调试：取消起身状态机的固定收/放腿偏置。
