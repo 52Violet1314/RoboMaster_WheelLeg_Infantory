@@ -736,9 +736,13 @@ void LEG_Data_Print(Classic_Data_t *pClassicData) {
 void Motor_Data_Print(Classic_Data_t *pClassicData) {
     /* FireWater 纯 CSV，依次为：
      * phi1_L,phi4_L,phi1_R,phi4_R,
-     * dphi1_L,dphi4_L,dphi1_R,dphi4_R,wheelVel_L,wheelVel_R。
-     * 前四列为映射后的关节角 rad；后六列为原始速度反馈 rad/s。 */
-    const float values[10] = {
+     * dphi1_L,dphi4_L,dphi1_R,dphi4_R,wheelVel_L,wheelVel_R,
+     * rawP1,rawP2,rawP4,rawP3。
+     * 前四列为送入 VMC 的映射角 rad；第 5~8 列为髋电机原始速度
+     * rad/s；第 9~10 列为处理后的轮速 rad/s；最后四列为达妙直接
+     * 回传的原始髋电机角度 rad。所有髋电机均按左后、左前、右后、
+     * 右前顺序排列。 */
+    const float values[14] = {
         pClassicData->Motor_Data.L1_Motor_POS,
         pClassicData->Motor_Data.L2_Motor_POS,
         pClassicData->Motor_Data.R1_Motor_POS,
@@ -749,12 +753,17 @@ void Motor_Data_Print(Classic_Data_t *pClassicData) {
         pClassicData->Motor_Data.R2_Motor_VEL,
         pClassicData->Motor_Data.Left_Wheel_Motor_VEL,
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL,
+        DM_8009P1.data.position_rad,
+        DM_8009P2.data.position_rad,
+        DM_8009P4.data.position_rad,
+        DM_8009P3.data.position_rad,
     };
-    int milli[10];
-    for (uint32_t index = 0; index < 10U; ++index)
+    int milli[14];
+    for (uint32_t index = 0; index < 14U; ++index)
         milli[index] = (int)lroundf(values[index] * 1000.0f);
 
     uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
                "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
                "%c%d.%03d,%c%d.%03d\r\n",
                milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
@@ -766,7 +775,11 @@ void Motor_Data_Print(Classic_Data_t *pClassicData) {
                milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
                milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000,
                milli[8] < 0 ? '-' : ' ', abs(milli[8]) / 1000, abs(milli[8]) % 1000,
-               milli[9] < 0 ? '-' : ' ', abs(milli[9]) / 1000, abs(milli[9]) % 1000);
+               milli[9] < 0 ? '-' : ' ', abs(milli[9]) / 1000, abs(milli[9]) % 1000,
+               milli[10] < 0 ? '-' : ' ', abs(milli[10]) / 1000, abs(milli[10]) % 1000,
+               milli[11] < 0 ? '-' : ' ', abs(milli[11]) / 1000, abs(milli[11]) % 1000,
+               milli[12] < 0 ? '-' : ' ', abs(milli[12]) / 1000, abs(milli[12]) % 1000,
+               milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000);
 }
 
 void Control_Data_Print(Classic_Data_t *pClassicData) {
