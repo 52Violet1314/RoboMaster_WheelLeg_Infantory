@@ -1,6 +1,32 @@
 #include "app_K_value.hpp"
 #include <math.h>
 
+/*
+ * 当前连续 LQR 代价函数（用于生成本文件全部 41 套 K）：
+ * J = integral(delta_X' * Q * delta_X + delta_U' * R * delta_U) dt
+ *
+ * Q = diag([20, 1, 400, 1, 35000, 10, 35000, 10, 40000, 1])。
+ * 状态 delta_X 的列顺序（也是下方 gain[row][column] 的 column 顺序）：
+ *   0 X_pos       : 车身前后位移误差，Q = 20
+ *   1 d_x_err     : 车身前后速度误差，Q = 1
+ *   2 yaw_err     : 航向角误差，Q = 400
+ *   3 d_yaw_err   : 航向角速度误差，Q = 1
+ *   4 theta_L-ref : 左腿摆角相对目标角误差，Q = 35000
+ *   5 dtheta_L-ref: 左腿摆角速度相对目标误差，Q = 10
+ *   6 theta_R-ref : 右腿摆角相对目标角误差，Q = 35000
+ *   7 dtheta_R-ref: 右腿摆角速度相对目标误差，Q = 10
+ *   8 -(pitch-ref): 车身 pitch 角误差（CalculateTask 已按此符号构造），Q = 40000
+ *   9 -(dpitch-ref):车身 pitch 角速度误差（CalculateTask 已按此符号构造），Q = 1
+ *
+ * R = diag([10, 10, 1, 1])，输入/行顺序：
+ *   0 Fw_L：左轮等效力/力矩输出，R = 10
+ *   1 Fw_R：右轮等效力/力矩输出，R = 10
+ *   2 Tp_L：左腿摆动关节等效力矩输出，R = 1
+ *   3 Tp_R：右腿摆动关节等效力矩输出，R = 1
+ *
+ * 注意：修改 Q/R 后必须重新运行 MATLAB 的 zju_firmware_schedule /
+ * zju_emit_firmware_schedule，并同步更新这 41 套表；不要手改单个 K 系数。
+ */
 const LQR_K_Schedule_t LQR_K_Schedule[LQR_K_SCHEDULE_COUNT] = {
     {0.150f, {
         {+0.752686248f, +3.110384079f, +3.131339230f, +0.459620126f, -45.489995187f, -1.103279776f, -3.162438883f, -0.293414820f, -29.443621098f, -2.022338851f},
