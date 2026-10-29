@@ -3,7 +3,7 @@ function p = zju_parameters_template(leg_length)
 % Values come directly from D:\code\chuanlian_leg\get_K_jiao_LQR.m.
 % l_c and phi_c describe the vector from the hip midpoint to the body CoM
 % in the sagittal plane.  At theta_b=0: dy_forward=l_c*sin(phi_c),
-% dz_up=l_c*cos(phi_c).  The current vehicle setting is 2 mm forward,
+% dz_up=l_c*cos(phi_c).  The current vehicle setting is centred,
 % with no vertical or lateral offset.
 %
 % Body axes intentionally match the old K script and firmware: x=right,
@@ -18,7 +18,7 @@ validateattributes(leg_length, {'numeric'}, {'real','scalar','finite','positive'
 
 g = 9.81; R_w = 0.0525; R_l = 0.20;
 m_w = 0.30; m_b = 15.75;
-com_forward_m = 0.002;  % +body y: 2 mm ahead of hip midpoint
+com_forward_m = 0.000;  % +body y: centred at hip midpoint
 com_up_m = 0.000;       % +body z: no vertical offset
 l_c = hypot(com_forward_m, com_up_m);
 phi_c = atan2(com_forward_m, com_up_m);
