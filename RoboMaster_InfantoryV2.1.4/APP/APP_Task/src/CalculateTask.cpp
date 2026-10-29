@@ -100,12 +100,14 @@ void Controler_Limit(Classic_Data_t *pClassicData);
 
 void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
+    /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
+    bool lqr_pos_ref_recorded = false;
     static float Max_F0 = 50.0f;
     static float Max_Tp = 1.8f;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
     // 任一侧超出阈值连续 1 s 才切换为未起身。
-    StandState_t stand_state = StandState_Up;
-    // 台架起身判定测试：StandState_t stand_state = StandState_NotUp;
+    /* 上电先等待腿角给出一次已起身判定，避免起身过程提前记录位置零点。 */
+    StandState_t stand_state = StandState_NotUp;
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     Float_PID_Init(&leg_length_pid_l, 1200.0f, 1.5f, 2.0f);
@@ -290,8 +292,8 @@ void CaculateTask(void *pvParameters) {
         // ====== 起身状态机（左右腿共用一个状态）======
         const float theta_l_abs = fabsf(pClassicData->States_Data.theta_L);
         const float theta_r_abs = fabsf(pClassicData->States_Data.theta_R);
-        const bool both_legs_up = (theta_l_abs < 0.5f) && (theta_r_abs < 0.5f);
-        // 台架收紧起身门槛：const bool both_legs_up = (theta_l_abs < 0.4f) && (theta_r_abs < 0.4f);
+        /* 两腿靠近竖直才起身，避免收腿经过中间角度时提前切换支撑力。 */
+        const bool both_legs_up = (theta_l_abs < 0.4f) && (theta_r_abs < 0.4f);
         const bool either_leg_not_up = (theta_l_abs > 1.2f) || (theta_r_abs > 1.2f);
         if (both_legs_up)
         {
@@ -321,9 +323,7 @@ void CaculateTask(void *pvParameters) {
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
         const bool lqr_enabled = (SBUS_Data.Channel[7] > 100);
-        /* 台架位置零点测试：需同时在任务开头增加
-         * bool lqr_pos_ref_recorded = false;
-         * 然后启用以下块。
+        /* LQR 起身后以当前位姿作为位置/yaw 工作点。 */
         const bool pos_ref_ready = lqr_enabled && StandUp_Flag;
         if (pos_ref_ready && !lqr_pos_ref_recorded) {
             Pos_INT = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
@@ -332,7 +332,7 @@ void CaculateTask(void *pvParameters) {
             lqr_pos_ref_recorded = true;
         } else if (!pos_ref_ready) {
             lqr_pos_ref_recorded = false;
-        } */
+        }
 
         /* LQR 仅由 Channel[7] 控制；K 由左右实际腿长均值查 41 点表并线性插值。 */
         if (lqr_enabled) {
@@ -347,17 +347,12 @@ void CaculateTask(void *pvParameters) {
         float gravity_tp_l = 0.0f;
         float gravity_tp_r = 0.0f;
 #if LEG_GRAVITY_COMPENSATION_ENABLE
-        gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
-                                        pClassicData->States_Data.theta_L);
-        gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
-                                        pClassicData->States_Data.theta_R);
-        /* 台架版本：仅起身后叠加重力补偿。
         if (StandUp_Flag) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
                                             pClassicData->States_Data.theta_R);
-        } */
+        }
 #endif
 
         /* phi PID 暂不叠加到 LQR 的 Tp 输出。 */
@@ -420,10 +415,9 @@ void CaculateTask(void *pvParameters) {
         }
         // 台架气弹簧测试：将上述两个收腿下限改为 -15.0f。
 
-        const float stand_offset_l = StandUp_Flag ? 12.5f : 0.0f;
-        const float stand_offset_r = StandUp_Flag ? 12.5f : 0.0f;
-        // 台架预压测试：const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
-        // 台架预压测试：const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
+        /* 未起身先收腿预压；起身后切换为基础支撑力。 */
+        const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
+        const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
         pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
         pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
 
@@ -494,8 +488,8 @@ void CaculateTask(void *pvParameters) {
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
-                Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
-                // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
+                // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
+                 LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
                 // LegLengthPID_Data_Print(pClassicData); // 目标腿长、实际腿长、误差、F0
                 // IMU_Data_Print(pClassicData);
                 // Control_Data_Print(pClassicData);
@@ -1094,11 +1088,11 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                                      K_Fixed_Leg_t gain) {
     /* K 矩阵对应 [x, dx, yaw, dyaw, thetaL, dthetaL,
      * thetaR, dthetaR, pitch, dpitch] 十维状态。 */
-    /* 台架位置保护测试：使用 x_pos_lqr 替换下方第一项。
-     * const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos,
-     *                                    -0.30f), 0.30f); */
+    /* 仅限制送入 K 的位置误差，状态记录保留原值。 */
+    const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos,
+                                        -0.30f), 0.30f);
     float states[10] = {
-        pClassicData->States_Data.X_pos,
+        x_pos_lqr,
         pClassicData->States_Data.d_x_err,
         pClassicData->States_Data.yaw_err,
         pClassicData->States_Data.d_yaw_err,
