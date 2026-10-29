@@ -1090,7 +1090,7 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
      * thetaR, dthetaR, pitch, dpitch] 十维状态。 */
     /* 仅限制送入 K 的位置误差，状态记录保留原值。 */
     const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos,
-                                        -0.30f), 0.30f);
+                                        -0.90f), 0.90f);
     float states[10] = {
         x_pos_lqr,
         pClassicData->States_Data.d_x_err,

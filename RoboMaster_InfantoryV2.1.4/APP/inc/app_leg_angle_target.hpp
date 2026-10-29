@@ -3,7 +3,7 @@
 
 /* 按单腿实际 L0 查询的实车腿摆角目标表。
  * 数值单位为 rad；当前 41 档由新版 MATLAB 静态平衡解生成，
- * 车身质心位于髋中点，前后偏移为 0 mm。 */
+ * 车身质心相对髋中点后偏 8 mm。 */
 #define LEG_ANGLE_TARGET_TABLE_COUNT    41U
 #define LEG_ANGLE_TARGET_MIN_LENGTH_M   0.150f
 #define LEG_ANGLE_TARGET_LENGTH_STEP_M  0.005f
