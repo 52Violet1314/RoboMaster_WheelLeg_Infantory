@@ -2,8 +2,8 @@
 #define __APP_LEG_ANGLE_TARGET_HPP__
 
 /* 按单腿实际 L0 查询的实车腿摆角目标表。
- * 数值单位为 rad；当前 41 档来自新版 MATLAB 静态平衡解，机身质心前 20 mm。
- * MATLAB 导表阶段已把模型 theta_l 转为实车 States_Data.theta_L/theta_R 定义。 */
+ * 数值单位为 rad；当前 41 档由新版 MATLAB 静态平衡解生成，
+ * 车身质心相对髋中点前偏 5 mm。 */
 #define LEG_ANGLE_TARGET_TABLE_COUNT    41U
 #define LEG_ANGLE_TARGET_MIN_LENGTH_M   0.150f
 #define LEG_ANGLE_TARGET_LENGTH_STEP_M  0.005f
