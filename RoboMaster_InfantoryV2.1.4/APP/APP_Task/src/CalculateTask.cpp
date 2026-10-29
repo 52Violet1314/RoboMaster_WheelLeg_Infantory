@@ -10,6 +10,7 @@
 #include "app_Task.hpp"
 #include "app_Data_Task.hpp"
 #include "app_ins_cal.h"
+#include "app_leg_angle_average.hpp"
 #include "app_leg_angle_target.hpp"
 #include "app_leg_gravity_compensation.hpp"
 #include "app_motor.h"
@@ -88,6 +89,9 @@ void State_Data_Print(Classic_Data_t *pClassicData);
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
+/* FireWater CSV：左腿稳定平均角、右腿稳定平均角、两腿平均角（deg）、样本数、完成标志。 */
+void LegAngleAverage_Data_Print(const LegAngleAverage_t *average);
+
 
 void Classic_Data_Update(Classic_Data_t *pClassicData);
 
@@ -102,6 +106,7 @@ void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
     /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
     bool lqr_pos_ref_recorded = false;
+    LegAngleAverage_t leg_angle_average = {};
     static float Max_F0 = 50.0f;
     static float Max_Tp = 1.8f;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
@@ -311,6 +316,13 @@ void CaculateTask(void *pvParameters) {
         }
         StandUp_Flag = (stand_state == StandState_Up);
 
+        /* 仅作标定记录；不参与 LQR、VMC 或任何输出。 */
+        LegAngleAverage_Update(&leg_angle_average, StandUp_Flag,
+                               pClassicData->States_Data.theta_L,
+                               pClassicData->States_Data.theta_R,
+                               pClassicData->States_Data.d_theta_L,
+                               pClassicData->States_Data.d_theta_R);
+
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
         pClassicData->Contronller_Data.Fw_L = 0.0f;
@@ -489,7 +501,8 @@ void CaculateTask(void *pvParameters) {
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
-                 LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
+                // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
+                LegAngleAverage_Data_Print(&leg_angle_average); // 稳定后的左右腿角平均值
                 // LegLengthPID_Data_Print(pClassicData); // 目标腿长、实际腿长、误差、F0
                 // IMU_Data_Print(pClassicData);
                 // Control_Data_Print(pClassicData);
@@ -892,6 +905,25 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
                milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
                milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
                milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
+}
+
+void LegAngleAverage_Data_Print(const LegAngleAverage_t *average) {
+    /* FireWater 纯 CSV：avg_theta_L, avg_theta_R, avg_theta_mean (deg), count, ready。
+     * ready=0 时前三列固定为 0；ready=1 后三列为冻结的 1 s 稳定平均值。 */
+    const float rad_to_deg = 180.0f / PI;
+    const int value_milli[3] = {
+        (int)lroundf(LegAngleAverage_GetLeftRad(average) * rad_to_deg * 1000.0f),
+        (int)lroundf(LegAngleAverage_GetRightRad(average) * rad_to_deg * 1000.0f),
+        (int)lroundf(LegAngleAverage_GetMeanRad(average) * rad_to_deg * 1000.0f),
+    };
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%lu,%u\\r\\n",
+               value_milli[0] < 0 ? '-' : ' ', abs(value_milli[0]) / 1000,
+               abs(value_milli[0]) % 1000,
+               value_milli[1] < 0 ? '-' : ' ', abs(value_milli[1]) / 1000,
+               abs(value_milli[1]) % 1000,
+               value_milli[2] < 0 ? '-' : ' ', abs(value_milli[2]) / 1000,
+               abs(value_milli[2]) % 1000,
+               (unsigned long)average->sample_count, average->ready ? 1U : 0U);
 }
 
 void Classic_Data_Update(Classic_Data_t *pClassicData) {
