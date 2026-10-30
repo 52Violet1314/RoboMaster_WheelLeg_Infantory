@@ -8,15 +8,16 @@ function result = zju_lqr_gain(Qdiag,Rdiag,leg_length)
 % J = integral_0^inf(delta_X'*Q*delta_X + delta_U'*R*delta_U) dt
 % delta_U = -K*delta_X，故实际力矩为 U=U*-K*(X-X*)。
 %
-% 默认 Q、R 的对角线取自上交 get_K_jiao_LQR.m，状态/输入顺序与
-% 当前统一模型的十阶状态空间完全一致。传入两个对角向量即可调参。
+% 状态/输入顺序与当前统一模型的十阶状态空间完全一致。
+% 默认 Q 为当前实车调参值；传入两个对角向量即可调参。
 
 if nargin < 1 || isempty(Qdiag)
-    % 上交 get_K_jiao_LQR.m 的默认 lqr_Q 对角线。
-    Qdiag = [20 1 400 1 35000 10 35000 10 40000 1];
+    % [X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, pitch, dpitch]
+    % 当前调参：X=25，dX=3；其余项保持原值。
+    Qdiag = [25 3 400 1 35000 10 35000 10 40000 1];
 end
 if nargin < 2 || isempty(Rdiag)
-    % 上交 get_K_jiao_LQR.m 的默认 lqr_R 对角线。
+    % 输入顺序：[Fw_L, Fw_R, Tp_L, Tp_R]。
     Rdiag = [10 10 1 1];
 end
 if nargin < 3 || isempty(leg_length)

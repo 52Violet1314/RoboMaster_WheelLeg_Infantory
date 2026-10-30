@@ -1,14 +1,16 @@
 function result = zju_firmware_schedule(Qdiag, Rdiag, print_report)
 %ZJU_FIRMWARE_SCHEDULE Build the 41-point C-firmware gain/angle schedule.
 % The schedule uses the physical parameters in zju_parameters_template.m.
-% It intentionally keeps the deployed Q/R defaults unless values are supplied.
+% It uses the current vehicle Q/R defaults unless values are supplied.
 %
 % result.gain(n,:,:) is the gain in the exact sign convention consumed by
 % CalculateTask.cpp. result.theta_ref_rad(n) is the per-leg target in the
 % real-firmware theta_L/theta_R convention. Both use 0.150:0.005:0.350 m.
 
 if nargin < 1 || isempty(Qdiag)
-    Qdiag = [20 1 400 1 35000 10 35000 10 40000 1];
+    % [X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, pitch, dpitch]
+    % 当前调参：X=25，dX=3；其余项保持原值。
+    Qdiag = [25 3 400 1 35000 10 35000 10 40000 1];
 end
 if nargin < 2 || isempty(Rdiag)
     Rdiag = [10 10 1 1];
