@@ -1,7 +1,7 @@
 #include "app_K_value.hpp"
 #include <math.h>
 
-/*
+jiu/*
  * 当前连续 LQR 代价函数（用于生成本文件全部 41 套 K）：
  * J = integral(delta_X' * Q * delta_X + delta_U' * R * delta_U) dt
  *
