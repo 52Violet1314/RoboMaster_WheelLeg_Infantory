@@ -229,10 +229,8 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Motor_Data.R1_Motor_VEL = DM_8009P4.data.velocity_rad_s;
         pClassicData->Motor_Data.R2_Motor_VEL = DM_8009P3.data.velocity_rad_s;
         pClassicData->Motor_Data.Left_Wheel_Motor_VEL =
-                WHEEL_FEEDBACK_SCALE *
                 -(DM_3519L.data.velocity_rad_s / 15.8f * 19.2f + 0.048f);
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
-                WHEEL_FEEDBACK_SCALE *
                 +(DM_3519R.data.velocity_rad_s / 15.8f * 19.2f + 0.048f);
 
         // ====== 原 Data Task：计算状态变量 ======
