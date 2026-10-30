@@ -501,7 +501,7 @@ void CaculateTask(void *pvParameters) {
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
-                // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
+                 Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
                 // LegLengthPID_Data_Print(pClassicData); // 目标腿长、实际腿长、误差、F0
                 // IMU_Data_Print(pClassicData);
@@ -510,7 +510,7 @@ void CaculateTask(void *pvParameters) {
                 // LegAngleAverage_Data_Print(&leg_angle_average); // 腿角稳定累积平均（需同时恢复上方平均值更新）
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
                 // WheelKalman_Print(&Wheel_Kalman_R, 'R'); // 右侧：原始位置、原始速度、滤波位置、滤波速度
-                WheelKalmanTelemetry_Print(); // 当前启用：左右滤波位置平均后的原始累计位移
+                // WheelKalmanTelemetry_Print(); // 当前启用：左右滤波位置平均后的原始累计位移
                 xLastPrintTick = xNow;
             }
 
