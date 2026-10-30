@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <type_traits>
 #include "wheel_kalman_fliter.h"
+#include "app_wheel_kalman_telemetry.hpp"
 #include "Ground_clearance_detection.h"
 #include "app_K_value.hpp"
 
@@ -106,7 +107,7 @@ void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
     /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
     bool lqr_pos_ref_recorded = false;
-    LegAngleAverage_t leg_angle_average = {};
+    // LegAngleAverage_t leg_angle_average = {};  // 当前仅检查卡尔曼位移，暂不累计腿角平均值。
     static float Max_F0 = 50.0f;
     static float Max_Tp = 1.8f;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
@@ -316,12 +317,12 @@ void CaculateTask(void *pvParameters) {
         }
         StandUp_Flag = (stand_state == StandState_Up);
 
-        /* 仅作标定记录；不参与 LQR、VMC 或任何输出。 */
-        LegAngleAverage_Update(&leg_angle_average, StandUp_Flag,
-                               pClassicData->States_Data.theta_L,
-                               pClassicData->States_Data.theta_R,
-                               pClassicData->States_Data.d_theta_L,
-                               pClassicData->States_Data.d_theta_R);
+        /* 腿角稳定平均标定当前关闭；不参与 LQR、VMC 或任何输出。 */
+        // LegAngleAverage_Update(&leg_angle_average, StandUp_Flag,
+        //                        pClassicData->States_Data.theta_L,
+        //                        pClassicData->States_Data.theta_R,
+        //                        pClassicData->States_Data.d_theta_L,
+        //                        pClassicData->States_Data.d_theta_R);
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
@@ -502,7 +503,7 @@ void CaculateTask(void *pvParameters) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
-                LegAngleAverage_Data_Print(&leg_angle_average); // 稳定后的左右腿角平均值
+                WheelKalmanTelemetry_Print();
                 // LegLengthPID_Data_Print(pClassicData); // 目标腿长、实际腿长、误差、F0
                 // IMU_Data_Print(pClassicData);
                 // Control_Data_Print(pClassicData);
