@@ -18,7 +18,7 @@ validateattributes(leg_length, {'numeric'}, {'real','scalar','finite','positive'
 
 g = 9.81; R_w = 0.0525; R_l = 0.20;
 m_w = 0.30; m_b = 15.75;
-com_forward_m = -0.012; % +body y: 12 mm behind hip midpoint
+com_forward_m = 0.000; % +body y: hip midpoint (0 mm fore-aft offset)
 com_up_m = 0.000;       % +body z: no vertical offset
 l_c = hypot(com_forward_m, com_up_m);
 phi_c = atan2(com_forward_m, com_up_m);
