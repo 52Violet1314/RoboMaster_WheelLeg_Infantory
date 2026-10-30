@@ -13,8 +13,8 @@ function result = zju_lqr_gain(Qdiag,Rdiag,leg_length)
 
 if nargin < 1 || isempty(Qdiag)
     % [X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, pitch, dpitch]
-    % 当前调参：X=65，dX=4，dyaw=2，thetaL/R=35000，dthetaL/R=9，pitch=45000，dpitch=2。
-    Qdiag = [65 4 400 2 35000 9 35000 9 45000 2];
+    % 当前调参：X=40，dX=4，dyaw=2，thetaL/R=35000，dthetaL/R=9，pitch=40000，dpitch=4。
+    Qdiag = [40 4 400 2 35000 9 35000 9 40000 4];
 end
 if nargin < 2 || isempty(Rdiag)
     % 输入顺序：[Fw_L, Fw_R, Tp_L, Tp_R]。
