@@ -8,7 +8,7 @@
 
 /* 台架诊断：仅衰减轮速反馈幅值，不改变正负方向、轮子 Fw 输出或 LQR K。
  * 1.0f 为原始反馈；本轮用于确认轮速支路对位移/倒车现象的影响。 */
-#define WHEEL_FEEDBACK_SCALE -0.10f
+#define WHEEL_FEEDBACK_SCALE -0.1f
 
 
 typedef struct {
