@@ -9,8 +9,8 @@ function result = zju_firmware_schedule(Qdiag, Rdiag, print_report)
 
 if nargin < 1 || isempty(Qdiag)
     % [X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, pitch, dpitch]
-    % 当前调参：X=25，dX=3；其余项保持原值。
-    Qdiag = [25 3 400 1 35000 10 35000 10 40000 1];
+    % 当前调参：X=25，dX=3，dyaw=2，dpitch=4；其余项保持原值。
+    Qdiag = [25 3 400 2 35000 10 35000 10 40000 4];
 end
 if nargin < 2 || isempty(Rdiag)
     Rdiag = [10 10 1 1];
