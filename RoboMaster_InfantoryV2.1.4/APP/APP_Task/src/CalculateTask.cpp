@@ -72,6 +72,19 @@ int task_time = 0;
 int last_task_time = 0;
 int Calculate_time;
 
+/* 仅用于串口诊断：Fw 公共量的逐状态贡献，控制不读取此数据。 */
+typedef struct {
+    float x;
+    float dx;
+    float yaw_and_dyaw;
+    float leg_angle;
+    float leg_angle_rate;
+    float pitch;
+    float pitch_rate;
+    float raw_fw_common;
+} LqrFwTelemetry_t;
+static LqrFwTelemetry_t lqr_fw_telemetry = {};
+
 void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
                    float TpR, float dt);
 
@@ -93,6 +106,12 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 /* FireWater CSV：左腿稳定平均角、右腿稳定平均角、两腿平均角（deg）、样本数、完成标志。 */
 void LegAngleAverage_Data_Print(const LegAngleAverage_t *average);
 
+/* FireWater CSV：CH0 原始、CH1 原始、目标 yaw 速度、目标 X 速度。 */
+void RemoteCommand_Data_Print(const Classic_Data_t *pClassicData);
+
+/* FireWater CSV：遥控原始/目标速度 + LQR Fw 各状态公共贡献与最终 Fw。 */
+void LqrFwContribution_Data_Print(const Classic_Data_t *pClassicData);
+
 
 void Classic_Data_Update(Classic_Data_t *pClassicData);
 
@@ -107,7 +126,7 @@ void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
     /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
     bool lqr_pos_ref_recorded = false;
-    // LegAngleAverage_t leg_angle_average = {};  // 当前仅检查卡尔曼位移，暂不累计腿角平均值。
+    LegAngleAverage_t leg_angle_average = {};
     static float Max_F0 = 50.0f;
     static float Max_Tp = 1.8f;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
@@ -117,7 +136,7 @@ void CaculateTask(void *pvParameters) {
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     Float_PID_Init(&leg_length_pid_l, 1200.0f, 1.5f, 2.0f);
-    Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 4.0f);
+    Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     Float_PID_Init(&leg_phi_pid_l, 15.0f, 0.0f, 3.0f);
     Float_PID_Init(&leg_phi_pid_r, 15.0f, 0.0f, 3.0f);
@@ -317,15 +336,16 @@ void CaculateTask(void *pvParameters) {
         }
         StandUp_Flag = (stand_state == StandState_Up);
 
-        /* 腿角稳定平均标定当前关闭；不参与 LQR、VMC 或任何输出。 */
-        // LegAngleAverage_Update(&leg_angle_average, StandUp_Flag,
-        //                        pClassicData->States_Data.theta_L,
-        //                        pClassicData->States_Data.theta_R,
-        //                        pClassicData->States_Data.d_theta_L,
-        //                        pClassicData->States_Data.d_theta_R);
+        /* 仅用于台架标定输出；不参与 LQR、VMC 或任何控制。 */
+        LegAngleAverage_Update(&leg_angle_average, StandUp_Flag,
+                               pClassicData->States_Data.theta_L,
+                               pClassicData->States_Data.theta_R,
+                               pClassicData->States_Data.d_theta_L,
+                               pClassicData->States_Data.d_theta_R);
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
+        lqr_fw_telemetry = {};
         pClassicData->Contronller_Data.Fw_L = 0.0f;
         pClassicData->Contronller_Data.Fw_R = 0.0f;
         pClassicData->Contronller_Data.Tp_L = 0.0f;
@@ -507,10 +527,12 @@ void CaculateTask(void *pvParameters) {
                 // IMU_Data_Print(pClassicData);
                 // Control_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
-                // LegAngleAverage_Data_Print(&leg_angle_average); // 腿角稳定累积平均（需同时恢复上方平均值更新）
+                // LegAngleAverage_Data_Print(&leg_angle_average); // 稳定 1 s 后冻结：左、右、两侧平均腿角
+                // RemoteCommand_Data_Print(pClassicData); // 已并入下一条统一 CSV
+                LqrFwContribution_Data_Print(pClassicData); // 唯一串口流：遥控指令 + LQR 轮子力逐状态贡献
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
                 // WheelKalman_Print(&Wheel_Kalman_R, 'R'); // 右侧：原始位置、原始速度、滤波位置、滤波速度
-                 WheelKalmanTelemetry_Print(); // 当前启用：左右滤波位置平均后的原始累计位移
+                // WheelKalmanTelemetry_Print(); // 当前启用：左右滤波位置平均后的原始累计位移
                 xLastPrintTick = xNow;
             }
 
@@ -853,7 +875,7 @@ void Control_Data_Print(Classic_Data_t *pClassicData) {
     char t2_r_sign = (t2_r_int == 0 && pClassicData->Contronller_Data.T2_R < 0.0f) ? '-' : ' ';
 
     // 打印输出，按照Fw_L,Fw_R,Tp_L,Tp_R,T1_L,T2_L,T1_R,T2_R顺序
-    uart_print("%c%d.%2d,%c%d.%2d,%c%d.%2d,%c%d.%2d,%c%d.%2d,%c%d.%2d,%c%d.%2d,%c%d.%2d\r\n",
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
                fw_l_sign, fw_l_int, fw_l_dec,
                fw_r_sign, fw_r_int, fw_r_dec,
                tp_l_sign, tp_l_int, tp_l_dec,
@@ -920,7 +942,7 @@ void LegAngleAverage_Data_Print(const LegAngleAverage_t *average) {
         (int)lroundf(LegAngleAverage_GetRightRad(average) * rad_to_deg * 1000.0f),
         (int)lroundf(LegAngleAverage_GetMeanRad(average) * rad_to_deg * 1000.0f),
     };
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%lu,%u\\r\\n",
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%lu,%u\r\n",
                value_milli[0] < 0 ? '-' : ' ', abs(value_milli[0]) / 1000,
                abs(value_milli[0]) % 1000,
                value_milli[1] < 0 ? '-' : ' ', abs(value_milli[1]) / 1000,
@@ -928,6 +950,68 @@ void LegAngleAverage_Data_Print(const LegAngleAverage_t *average) {
                value_milli[2] < 0 ? '-' : ' ', abs(value_milli[2]) / 1000,
                abs(value_milli[2]) % 1000,
                (unsigned long)average->sample_count, average->ready ? 1U : 0U);
+}
+
+void RemoteCommand_Data_Print(const Classic_Data_t *pClassicData) {
+    /* FireWater 纯 CSV：
+     * CH0_raw, CH1_raw, Target_yaw_vel, Target_X_vel。
+     * 前两列为 SBUS 原始拨杆值；后两列单位与控制内部一致。 */
+    const int yaw_target_milli =
+        (int)lroundf(pClassicData->Target_Data.Target_yaw_vel * 1000.0f);
+    const int x_target_milli =
+        (int)lroundf(pClassicData->Target_Data.Target_X_vel * 1000.0f);
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               SBUS_Data.Channel[0] < 0 ? '-' : ' ', abs((int)SBUS_Data.Channel[0]), 0,
+               SBUS_Data.Channel[1] < 0 ? '-' : ' ', abs((int)SBUS_Data.Channel[1]), 0,
+               yaw_target_milli < 0 ? '-' : ' ', abs(yaw_target_milli) / 1000,
+               abs(yaw_target_milli) % 1000,
+               x_target_milli < 0 ? '-' : ' ', abs(x_target_milli) / 1000,
+               abs(x_target_milli) % 1000);
+}
+
+void LqrFwContribution_Data_Print(const Classic_Data_t *pClassicData) {
+    /* FireWater 纯 CSV：
+     * CH0_raw,CH1_raw,Target_yaw_vel,Target_X_vel,
+     * x,dx,yaw+dyaw,thetaL+thetaR,dthetaL+dthetaR,pitch,dpitch,
+     * 原始公共Fw,限幅后Fw_L,限幅后Fw_R。
+     * 后七个分项相加等于原始公共 Fw；公共量=(左轮贡献+右轮贡献)/2。 */
+    const float values[14] = {
+        (float)SBUS_Data.Channel[0],
+        (float)SBUS_Data.Channel[1],
+        pClassicData->Target_Data.Target_yaw_vel,
+        pClassicData->Target_Data.Target_X_vel,
+        lqr_fw_telemetry.x,
+        lqr_fw_telemetry.dx,
+        lqr_fw_telemetry.yaw_and_dyaw,
+        lqr_fw_telemetry.leg_angle,
+        lqr_fw_telemetry.leg_angle_rate,
+        lqr_fw_telemetry.pitch,
+        lqr_fw_telemetry.pitch_rate,
+        lqr_fw_telemetry.raw_fw_common,
+        pClassicData->Contronller_Data.Fw_L,
+        pClassicData->Contronller_Data.Fw_R,
+    };
+    int milli[14];
+    for (uint32_t i = 0; i < 14U; ++i)
+        milli[i] = (int)lroundf(values[i] * 1000.0f);
+
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d\r\n",
+               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
+               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
+               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
+               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
+               milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
+               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
+               milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000,
+               milli[8] < 0 ? '-' : ' ', abs(milli[8]) / 1000, abs(milli[8]) % 1000,
+               milli[9] < 0 ? '-' : ' ', abs(milli[9]) / 1000, abs(milli[9]) % 1000,
+               milli[10] < 0 ? '-' : ' ', abs(milli[10]) / 1000, abs(milli[10]) % 1000,
+               milli[11] < 0 ? '-' : ' ', abs(milli[11]) / 1000, abs(milli[11]) % 1000,
+               milli[12] < 0 ? '-' : ' ', abs(milli[12]) / 1000, abs(milli[12]) % 1000,
+               milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000);
 }
 
 void Classic_Data_Update(Classic_Data_t *pClassicData) {
@@ -1065,11 +1149,11 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
 
     /* 后四列统一放在 State_Data_Print 的 CSV 行中，单位为度：
      * P1/P2raw 是达妙直接反馈；phi1/phi4 是加偏置后送入 VMC 的角。 */
-    const float rad_to_cdeg = 18000.0f / PI;
-    const int p1_raw_cdeg = (int)lroundf(DM_8009P1.data.position_rad * rad_to_cdeg);
-    const int p2_raw_cdeg = (int)lroundf(DM_8009P2.data.position_rad * rad_to_cdeg);
-    const int phi1_cdeg = (int)lroundf(pClassicData->Motor_Data.L1_Motor_POS * rad_to_cdeg);
-    const int phi4_cdeg = (int)lroundf(pClassicData->Motor_Data.L2_Motor_POS * rad_to_cdeg);
+    const float rad_to_mdeg = 180000.0f / PI;
+    const int p1_raw_mdeg = (int)lroundf(DM_8009P1.data.position_rad * rad_to_mdeg);
+    const int p2_raw_mdeg = (int)lroundf(DM_8009P2.data.position_rad * rad_to_mdeg);
+    const int phi1_mdeg = (int)lroundf(pClassicData->Motor_Data.L1_Motor_POS * rad_to_mdeg);
+    const int phi4_mdeg = (int)lroundf(pClassicData->Motor_Data.L2_Motor_POS * rad_to_mdeg);
 
     // 处理符号：当整数部分为0但原始值为负时，手动输出负号
     char x_pos_sign =
@@ -1104,8 +1188,8 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
                 : ' ';
 
     // 打印输出，手动处理负号
-    uart_print("%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%c%d.%d,%"
-               "c%d.%d,%c%d.%d,%c%d.%02d,%c%d.%02d,%c%d.%02d,%c%d.%02d\r\n",
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%"
+               "c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
                x_pos_sign, x_pos_int, x_pos_dec, d_x_sign, d_x_int, d_x_dec,
                yaw_sign, yaw_int, yaw_dec, d_yaw_sign, d_yaw_int, d_yaw_dec,
                theta_l_sign, theta_l_int, theta_l_dec, d_theta_l_sign,
@@ -1113,10 +1197,10 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
                theta_r_dec, d_theta_r_sign, d_theta_r_int, d_theta_r_dec,
                theta_sign, theta_int, theta_dec, d_theta_sign, d_theta_int,
                d_theta_dec,
-               p1_raw_cdeg < 0 ? '-' : ' ', abs(p1_raw_cdeg) / 100, abs(p1_raw_cdeg) % 100,
-               p2_raw_cdeg < 0 ? '-' : ' ', abs(p2_raw_cdeg) / 100, abs(p2_raw_cdeg) % 100,
-               phi1_cdeg < 0 ? '-' : ' ', abs(phi1_cdeg) / 100, abs(phi1_cdeg) % 100,
-               phi4_cdeg < 0 ? '-' : ' ', abs(phi4_cdeg) / 100, abs(phi4_cdeg) % 100);
+               p1_raw_mdeg < 0 ? '-' : ' ', abs(p1_raw_mdeg) / 1000, abs(p1_raw_mdeg) % 1000,
+               p2_raw_mdeg < 0 ? '-' : ' ', abs(p2_raw_mdeg) / 1000, abs(p2_raw_mdeg) % 1000,
+               phi1_mdeg < 0 ? '-' : ' ', abs(phi1_mdeg) / 1000, abs(phi1_mdeg) % 1000,
+               phi4_mdeg < 0 ? '-' : ' ', abs(phi4_mdeg) / 1000, abs(phi4_mdeg) % 1000);
 }
 
 // 固定腿长 K 的状态反馈计算；输出限幅在 VMC 后的 Controler_Limit() 中执行。
@@ -1144,6 +1228,20 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
     arm_matrix_instance_f32 state = {10, 1, states};
     arm_matrix_instance_f32 output = {4, 1, control};
     arm_mat_mult_f32(&K, &state, &output);
+
+    /* 左右轮共同的前后驱动量逐项拆开，定位持续倒车由哪个状态造成。 */
+    float common_term[10];
+    for (uint32_t i = 0; i < 10U; ++i)
+        common_term[i] = 0.5f * (gain[0][i] + gain[1][i]) * states[i];
+    lqr_fw_telemetry.x = common_term[0];
+    lqr_fw_telemetry.dx = common_term[1];
+    lqr_fw_telemetry.yaw_and_dyaw = common_term[2] + common_term[3];
+    lqr_fw_telemetry.leg_angle = common_term[4] + common_term[6];
+    lqr_fw_telemetry.leg_angle_rate = common_term[5] + common_term[7];
+    lqr_fw_telemetry.pitch = common_term[8];
+    lqr_fw_telemetry.pitch_rate = common_term[9];
+    lqr_fw_telemetry.raw_fw_common =
+        (control[0] + control[1]) * 0.5f;
 
     pClassicData->Contronller_Data.Fw_L = control[0];
     pClassicData->Contronller_Data.Fw_R = control[1];

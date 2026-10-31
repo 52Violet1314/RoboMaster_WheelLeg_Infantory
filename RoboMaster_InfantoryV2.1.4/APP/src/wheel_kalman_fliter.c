@@ -22,6 +22,7 @@
 #include "wheel_kalman_fliter.h"
 #include "arm_math.h"
 #include "bsp_UART.h"
+#include <stdlib.h>
 
 
 WheelKalmanFliter_t Wheel_Kalman_L;
@@ -253,9 +254,15 @@ void WheelKalman_Update(WheelKalmanFliter_t *kf,
 
 void WheelKalman_Print(const WheelKalmanFliter_t *kf, char side)
 {
-    uart_print("%d,%d,%d,%d\r\n",
-               (int)(kf->z[0] * WK_PRINT_SCALE),
-               (int)(kf->z[1] * WK_PRINT_SCALE),
-               (int)(kf->x[0] * WK_PRINT_SCALE),
-               (int)(kf->x[1] * WK_PRINT_SCALE));
+    const int value_milli[4] = {
+        (int)lroundf(kf->z[0] * WK_PRINT_SCALE * 1000.0f),
+        (int)lroundf(kf->z[1] * WK_PRINT_SCALE * 1000.0f),
+        (int)lroundf(kf->x[0] * WK_PRINT_SCALE * 1000.0f),
+        (int)lroundf(kf->x[1] * WK_PRINT_SCALE * 1000.0f),
+    };
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               value_milli[0] < 0 ? '-' : ' ', abs(value_milli[0]) / 1000, abs(value_milli[0]) % 1000,
+               value_milli[1] < 0 ? '-' : ' ', abs(value_milli[1]) / 1000, abs(value_milli[1]) % 1000,
+               value_milli[2] < 0 ? '-' : ' ', abs(value_milli[2]) / 1000, abs(value_milli[2]) % 1000,
+               value_milli[3] < 0 ? '-' : ' ', abs(value_milli[3]) / 1000, abs(value_milli[3]) % 1000);
 }
