@@ -313,7 +313,8 @@ void CaculateTask(void *pvParameters) {
          * 保留上方原起身状态机，测试结束时删除下行并恢复原赋值即可。
          * 这样仅放行重力补偿和起身后支路；LQR 仍独立由 CH7 使能。 */
         // StandUp_Flag = (stand_state == StandState_Up);
-        StandUp_Flag = (SBUS_Data.Channel[9] >= 100);
+        const bool motor_enabled = (SBUS_Data.Channel[9] >= 100);
+        StandUp_Flag = motor_enabled;
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
@@ -427,31 +428,32 @@ void CaculateTask(void *pvParameters) {
             leg_length_pid_r.Last_Dout = 0.0f;//清输出
             last_leg_target = leg_target;
         }
-        /* 台架气弹簧预压测试：PID 积分限幅提高到 20 N，便于克服弹簧预压。 */
-        const float leg_l_int_limit = 20.0f;
-        const float leg_r_int_limit = 20.0f;
-        /* 台架气弹簧预压测试：PID 输出限幅为 ±40 N。 */
-        const float leg_l_out_limit = 40.0f;
-        const float leg_r_out_limit = 40.0f;
-        // 台架气弹簧测试：const float leg_l_out_limit = 15.0f;
-        // 台架气弹簧测试：const float leg_r_out_limit = 15.0f;
+        /* 台架气弹簧预压测试：总使能前仅观察、禁止积分，F0 最大 ±10 N；
+         * 总使能后才开放积分，PID 输出和总 F0 均最大 ±150 N。 */
+        const float leg_l_int_limit = motor_enabled ? 150.0f : 0.0f;
+        const float leg_r_int_limit = motor_enabled ? 150.0f : 0.0f;
+        const float leg_l_out_limit = motor_enabled ? 150.0f : 10.0f;
+        const float leg_r_out_limit = motor_enabled ? 150.0f : 10.0f;
+        /* PID_Max_Float 由 Ki 是否为正决定是否累加积分；失能时临时置零，
+         * 调用后恢复参数，避免未使能期间产生任何积分项。 */
+        const float leg_l_ki = leg_length_pid_l.Ki;
+        const float leg_r_ki = leg_length_pid_r.Ki;
+        if (!motor_enabled) {
+            leg_length_pid_l.Err_Int = 0.0f;
+            leg_length_pid_r.Err_Int = 0.0f;
+            leg_length_pid_l.Ki = 0.0f;
+            leg_length_pid_r.Ki = 0.0f;
+        }
         float leg_l_out = PID_Max_Float(&leg_length_pid_l, leg_target,
                                               pClassicData->Leg_Data.L0_L,
                                               leg_l_int_limit, leg_l_out_limit);
         float leg_r_out = PID_Max_Float(&leg_length_pid_r, leg_target,
                                               pClassicData->Leg_Data.L0_R,
                                               leg_r_int_limit, leg_r_out_limit);
+        leg_length_pid_l.Ki = leg_l_ki;
+        leg_length_pid_r.Ki = leg_r_ki;
         // pClassicData->Contronller_Data.F0_L = 15.5f + leg_l_out;
         // pClassicData->Contronller_Data.F0_R = 15.5f + leg_r_out;
-        if(leg_l_out < -40.0f)
-        {
-            leg_l_out = -40.0f;
-        }
-        if(leg_r_out < -40.0f)
-        {
-            leg_r_out = -40.0f;
-        }
-
         /* 台架气弹簧预压测试：关闭起身前 -20.5 N 收腿与起身后 +10 N 支撑预输出。
          * 仅保留腿长 PID 输出；测试结束时恢复以下原逻辑。 */
         // const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
@@ -473,8 +475,8 @@ void CaculateTask(void *pvParameters) {
         // pClassicData->Contronller_Data.F0_L += roll_comp;
         // pClassicData->Contronller_Data.F0_R -= roll_comp;
 
-        if (SBUS_Data.Channel[9] < 100) {
-            /* 电机失能期间不保留积分，重新上电时从当前腿长重新建立力。 */
+        if (!motor_enabled) {
+            /* 失能期间再次清零，确保下次使能从当前腿长重新建立积分。 */
             leg_length_pid_l.Err_Int = 0.0f;
             leg_length_pid_r.Err_Int = 0.0f;
         //     leg_phi_pid_l.Last_Error = phi_ref - pClassicData->Leg_Data.phi_0_L;
@@ -484,7 +486,7 @@ void CaculateTask(void *pvParameters) {
         }
        
         // ====== 输入限幅：VMC 之前，F0/Tp 必须在此限幅（Fw 不经过 VMC） ======
-        /* 台架气弹簧预压测试：总 F0 限幅同步放宽到 ±40 N，不能再被原 ±30 N 截断。
+        /* 台架气弹簧预压测试：总使能前总 F0 为 ±10 N，使能后为 ±150 N。
          * 保留原起身前/后 F0、Tp 限幅逻辑，测试结束时恢复。 */
         // if(StandUp_Flag == true)
         // {
@@ -496,7 +498,7 @@ void CaculateTask(void *pvParameters) {
         // Max_F0 = 60.0f;
         // Max_Tp = 4.0f;
         // };
-        Max_F0 = 40.0f;
+        Max_F0 = motor_enabled ? 150.0f : 10.0f;
         Max_Tp = 2.0f;
 
         // F0 总限幅：起身后 ±30 N，未起身 ±60 N。
