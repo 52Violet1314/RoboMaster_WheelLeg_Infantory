@@ -10,7 +10,6 @@
 #include "app_Task.hpp"
 #include "app_Data_Task.hpp"
 #include "app_ins_cal.h"
-#include "app_leg_angle_average.hpp"
 #include "app_leg_angle_target.hpp"
 #include "app_leg_gravity_compensation.hpp"
 #include "app_motor.h"
@@ -31,7 +30,6 @@
 #include <stdint.h>
 #include <type_traits>
 #include "wheel_kalman_fliter.h"
-#include "app_wheel_kalman_telemetry.hpp"
 #include "Ground_clearance_detection.h"
 #include "app_K_value.hpp"
 
@@ -72,19 +70,6 @@ int task_time = 0;
 int last_task_time = 0;
 int Calculate_time;
 
-/* 仅用于串口诊断：Fw 公共量的逐状态贡献，控制不读取此数据。 */
-typedef struct {
-    float x;
-    float dx;
-    float yaw_and_dyaw;
-    float leg_angle;
-    float leg_angle_rate;
-    float pitch;
-    float pitch_rate;
-    float raw_fw_common;
-} LqrFwTelemetry_t;
-static LqrFwTelemetry_t lqr_fw_telemetry = {};
-
 void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
                    float TpR, float dt);
 
@@ -103,15 +88,6 @@ void State_Data_Print(Classic_Data_t *pClassicData);
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
-/* FireWater CSV：左腿稳定平均角、右腿稳定平均角、两腿平均角（deg）、样本数、完成标志。 */
-void LegAngleAverage_Data_Print(const LegAngleAverage_t *average);
-
-/* FireWater CSV：CH0 原始、CH1 原始、目标 yaw 速度、目标 X 速度。 */
-void RemoteCommand_Data_Print(const Classic_Data_t *pClassicData);
-
-/* FireWater CSV：遥控原始/目标速度 + LQR Fw 各状态公共贡献与最终 Fw。 */
-void LqrFwContribution_Data_Print(const Classic_Data_t *pClassicData);
-
 
 void Classic_Data_Update(Classic_Data_t *pClassicData);
 
@@ -126,7 +102,6 @@ void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
     /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
     bool lqr_pos_ref_recorded = false;
-    LegAngleAverage_t leg_angle_average = {};
     static float Max_F0 = 50.0f;
     static float Max_Tp = 1.8f;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
@@ -334,18 +309,14 @@ void CaculateTask(void *pvParameters) {
             stand_not_up_time = 1.0f;
           }
         }
-        StandUp_Flag = (stand_state == StandState_Up);
-
-        /* 仅用于台架标定输出；不参与 LQR、VMC 或任何控制。 */
-        LegAngleAverage_Update(&leg_angle_average, StandUp_Flag,
-                               pClassicData->States_Data.theta_L,
-                               pClassicData->States_Data.theta_R,
-                               pClassicData->States_Data.d_theta_L,
-                               pClassicData->States_Data.d_theta_R);
+        /* 台架气弹簧预压测试：总使能（CH9 >= 100）后全程按“已起身”处理。
+         * 保留上方原起身状态机，测试结束时删除下行并恢复原赋值即可。
+         * 这样仅放行重力补偿和起身后支路；LQR 仍独立由 CH7 使能。 */
+        // StandUp_Flag = (stand_state == StandState_Up);
+        StandUp_Flag = (SBUS_Data.Channel[9] >= 100);
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
-        lqr_fw_telemetry = {};
         pClassicData->Contronller_Data.Fw_L = 0.0f;
         pClassicData->Contronller_Data.Fw_R = 0.0f;
         pClassicData->Contronller_Data.Tp_L = 0.0f;
@@ -397,16 +368,44 @@ void CaculateTask(void *pvParameters) {
         //         PID_Max_Float(&leg_phi_pid_r, phi_ref,
         //                       pClassicData->Leg_Data.phi_0_R, 0.0f, 0.5f);
 
-        constexpr float roll_kp = 40.0f;
-        constexpr float roll_kd = 2.5f;
-        /* 行驶腿长三档：CH8 下/中/上对应 150/250/350 mm。 */
-        if (SBUS_Data.Channel[8] < -100) {
-            pClassicData->Target_Data.Target_LegLong = 0.150f;
-        } else if (SBUS_Data.Channel[8] > 100) {
-            pClassicData->Target_Data.Target_LegLong = 0.350f;
-        } else {
-            pClassicData->Target_Data.Target_LegLong = 0.250f;
+        /* 台架气弹簧预压测试：roll 差分稳定整段关闭，保留原参数供恢复。 */
+        // constexpr float roll_kp = 40.0f;
+        // constexpr float roll_kd = 2.5f;
+        /* 腿长旋钮控制：VrB=云台 CH6=底盘 Channel[5]。
+         * SBUS 解包后的 Channel[5] 是 raw-1024；此处恢复原始 0~2047 值。
+         * 实测旋钮最低端约 raw=240，0~250 设为低端死区并保持 250 mm；
+         * 251~2047 精确线性映射到 250~350 mm。 */
+        constexpr int32_t leg_knob_raw_min = 0;
+        constexpr int32_t leg_knob_raw_max = 2047;
+        constexpr int32_t leg_knob_deadband_raw = 250;
+        constexpr int32_t leg_knob_active_min_raw = leg_knob_deadband_raw + 1;
+        constexpr float leg_knob_active_span_raw =
+                (float)(leg_knob_raw_max - leg_knob_active_min_raw);
+        constexpr float leg_knob_length_min_m = 0.250f;
+        constexpr float leg_knob_length_max_m = 0.350f;
+        int32_t leg_knob_raw = (int32_t)SBUS_Data.Channel[5] + 1024;
+        if (leg_knob_raw < leg_knob_raw_min) {
+            leg_knob_raw = leg_knob_raw_min;
+        } else if (leg_knob_raw > leg_knob_raw_max) {
+            leg_knob_raw = leg_knob_raw_max;
         }
+        if (leg_knob_raw <= leg_knob_deadband_raw) {
+            pClassicData->Target_Data.Target_LegLong = leg_knob_length_min_m;
+        } else {
+            const float leg_knob_ratio =
+                    (float)(leg_knob_raw - leg_knob_active_min_raw) / leg_knob_active_span_raw;
+            pClassicData->Target_Data.Target_LegLong = leg_knob_length_min_m +
+                    (leg_knob_length_max_m - leg_knob_length_min_m) * leg_knob_ratio;
+        }
+
+        /* 原行驶腿长三档：CH8 下/中/上对应 150/250/350 mm；旋钮 VrB 测试期间关闭。 */
+        // if (SBUS_Data.Channel[8] < -100) {
+        //     pClassicData->Target_Data.Target_LegLong = 0.150f;
+        // } else if (SBUS_Data.Channel[8] > 100) {
+        //     pClassicData->Target_Data.Target_LegLong = 0.350f;
+        // } else {
+        //     pClassicData->Target_Data.Target_LegLong = 0.250f;
+        // }
         // 台架固定腿长测试：pClassicData->Target_Data.Target_LegLong = kBenchLegLengthTargetM;
         /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
         const float leg_target = pClassicData->Target_Data.Target_LegLong;
@@ -423,11 +422,12 @@ void CaculateTask(void *pvParameters) {
             leg_length_pid_r.Last_Dout = 0.0f;//清输出
             last_leg_target = leg_target;
         }
-        const float leg_l_int_limit = leg_err_l < -0.05f ? 1.0f : 5.0f;
-        const float leg_r_int_limit = leg_err_r < -0.05f ? 1.0f : 5.0f;//误差过大可能是腾空，防止力量输出过大
-        /* 原行驶 PID 限幅：放长不超过 +8 N，收腿不超过 -3.5 N。 */
-        const float leg_l_out_limit = 8.0f;
-        const float leg_r_out_limit = 8.0f;
+        /* 台架气弹簧预压测试：PID 积分限幅提高到 20 N，便于克服弹簧预压。 */
+        const float leg_l_int_limit = 20.0f;
+        const float leg_r_int_limit = 20.0f;
+        /* 台架气弹簧预压测试：PID 输出限幅为 ±40 N。 */
+        const float leg_l_out_limit = 40.0f;
+        const float leg_r_out_limit = 40.0f;
         // 台架气弹簧测试：const float leg_l_out_limit = 15.0f;
         // 台架气弹簧测试：const float leg_r_out_limit = 15.0f;
         float leg_l_out = PID_Max_Float(&leg_length_pid_l, leg_target,
@@ -438,33 +438,35 @@ void CaculateTask(void *pvParameters) {
                                               leg_r_int_limit, leg_r_out_limit);
         // pClassicData->Contronller_Data.F0_L = 15.5f + leg_l_out;
         // pClassicData->Contronller_Data.F0_R = 15.5f + leg_r_out;
-        if(leg_l_out < -3.5f)
+        if(leg_l_out < -40.0f)
         {
-            leg_l_out = -3.5f;
+            leg_l_out = -40.0f;
         }
-        if(leg_r_out < -3.5f)
+        if(leg_r_out < -40.0f)
         {
-            leg_r_out = -3.5f;
+            leg_r_out = -40.0f;
         }
-        // 台架气弹簧测试：将上述两个收腿下限改为 -15.0f。
 
-        /* 未起身先收腿预压；起身后切换为基础支撑力。 */
-        const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
-        const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
-        pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
-        pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
+        /* 台架气弹簧预压测试：关闭起身前 -20.5 N 收腿与起身后 +10 N 支撑预输出。
+         * 仅保留腿长 PID 输出；测试结束时恢复以下原逻辑。 */
+        // const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
+        // const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
+        // pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
+        // pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
+        pClassicData->Contronller_Data.F0_L = leg_l_out;
+        pClassicData->Contronller_Data.F0_R = leg_r_out;
 
-        constexpr float roll_f0_limit = 8.0f;
-        float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
-                            + roll_kd * pClassicData->IMU_Data.delta_roll);
-        if (roll_comp > roll_f0_limit) {
-            roll_comp = roll_f0_limit;
-        } else if (roll_comp < -roll_f0_limit) {
-            roll_comp = -roll_f0_limit;
-        }
-        pClassicData->Contronller_Data.F0_L += roll_comp;
-        pClassicData->Contronller_Data.F0_R -= roll_comp;
-        // 台架预压测试：注释本段 roll_comp 计算及以上两行 F0 叠加。
+        /* 台架气弹簧预压测试：暂时关闭 roll 左右腿差分稳定；原逻辑保留。 */
+        // constexpr float roll_f0_limit = 8.0f;
+        // float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
+        //                     + roll_kd * pClassicData->IMU_Data.delta_roll);
+        // if (roll_comp > roll_f0_limit) {
+        //     roll_comp = roll_f0_limit;
+        // } else if (roll_comp < -roll_f0_limit) {
+        //     roll_comp = -roll_f0_limit;
+        // }
+        // pClassicData->Contronller_Data.F0_L += roll_comp;
+        // pClassicData->Contronller_Data.F0_R -= roll_comp;
 
         if (SBUS_Data.Channel[9] < 100) {
             /* 电机失能期间不保留积分，重新上电时从当前腿长重新建立力。 */
@@ -477,16 +479,20 @@ void CaculateTask(void *pvParameters) {
         }
        
         // ====== 输入限幅：VMC 之前，F0/Tp 必须在此限幅（Fw 不经过 VMC） ======
-        if(StandUp_Flag == true)
-        {
-        Max_F0 = 30.0f;
+        /* 台架气弹簧预压测试：总 F0 限幅同步放宽到 ±40 N，不能再被原 ±30 N 截断。
+         * 保留原起身前/后 F0、Tp 限幅逻辑，测试结束时恢复。 */
+        // if(StandUp_Flag == true)
+        // {
+        // Max_F0 = 30.0f;
+        // Max_Tp = 2.0f;
+        // }
+        // else
+        // {
+        // Max_F0 = 60.0f;
+        // Max_Tp = 4.0f;
+        // };
+        Max_F0 = 40.0f;
         Max_Tp = 2.0f;
-        }
-        else  
-        {
-        Max_F0 = 60.0f;
-        Max_Tp = 4.0f;
-        };
 
         // F0 总限幅：起身后 ±30 N，未起身 ±60 N。
         if (pClassicData->Contronller_Data.F0_L > Max_F0)
@@ -523,16 +529,12 @@ void CaculateTask(void *pvParameters) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
-                // LegLengthPID_Data_Print(pClassicData); // 目标腿长、实际腿长、误差、F0
+                LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
                 // IMU_Data_Print(pClassicData);
                 // Control_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
-                // LegAngleAverage_Data_Print(&leg_angle_average); // 稳定 1 s 后冻结：左、右、两侧平均腿角
-                // RemoteCommand_Data_Print(pClassicData); // 已并入下一条统一 CSV
-                LqrFwContribution_Data_Print(pClassicData); // 唯一串口流：遥控指令 + LQR 轮子力逐状态贡献
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
                 // WheelKalman_Print(&Wheel_Kalman_R, 'R'); // 右侧：原始位置、原始速度、滤波位置、滤波速度
-                // WheelKalmanTelemetry_Print(); // 当前启用：左右滤波位置平均后的原始累计位移
                 xLastPrintTick = xNow;
             }
 
@@ -907,7 +909,7 @@ void IMU_Data_Print(Classic_Data_t *pClassicData) {
 
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
     /* FireWater 纯 CSV，单位依次为 m,m,m,m,m,N,N：
-     * target_L0, L0_L, L0_R, err_L, err_R, F0_L, F0_R。 */
+     * VrB 映射目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
     const float target = pClassicData->Target_Data.Target_LegLong;
     const float values[7] = {
         target,
@@ -931,87 +933,6 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
                milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
                milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
                milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
-}
-
-void LegAngleAverage_Data_Print(const LegAngleAverage_t *average) {
-    /* FireWater 纯 CSV：avg_theta_L, avg_theta_R, avg_theta_mean (deg), count, ready。
-     * ready=0 时前三列固定为 0；ready=1 后三列为冻结的 1 s 稳定平均值。 */
-    const float rad_to_deg = 180.0f / PI;
-    const int value_milli[3] = {
-        (int)lroundf(LegAngleAverage_GetLeftRad(average) * rad_to_deg * 1000.0f),
-        (int)lroundf(LegAngleAverage_GetRightRad(average) * rad_to_deg * 1000.0f),
-        (int)lroundf(LegAngleAverage_GetMeanRad(average) * rad_to_deg * 1000.0f),
-    };
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%lu,%u\r\n",
-               value_milli[0] < 0 ? '-' : ' ', abs(value_milli[0]) / 1000,
-               abs(value_milli[0]) % 1000,
-               value_milli[1] < 0 ? '-' : ' ', abs(value_milli[1]) / 1000,
-               abs(value_milli[1]) % 1000,
-               value_milli[2] < 0 ? '-' : ' ', abs(value_milli[2]) / 1000,
-               abs(value_milli[2]) % 1000,
-               (unsigned long)average->sample_count, average->ready ? 1U : 0U);
-}
-
-void RemoteCommand_Data_Print(const Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV：
-     * CH0_raw, CH1_raw, Target_yaw_vel, Target_X_vel。
-     * 前两列为 SBUS 原始拨杆值；后两列单位与控制内部一致。 */
-    const int yaw_target_milli =
-        (int)lroundf(pClassicData->Target_Data.Target_yaw_vel * 1000.0f);
-    const int x_target_milli =
-        (int)lroundf(pClassicData->Target_Data.Target_X_vel * 1000.0f);
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
-               SBUS_Data.Channel[0] < 0 ? '-' : ' ', abs((int)SBUS_Data.Channel[0]), 0,
-               SBUS_Data.Channel[1] < 0 ? '-' : ' ', abs((int)SBUS_Data.Channel[1]), 0,
-               yaw_target_milli < 0 ? '-' : ' ', abs(yaw_target_milli) / 1000,
-               abs(yaw_target_milli) % 1000,
-               x_target_milli < 0 ? '-' : ' ', abs(x_target_milli) / 1000,
-               abs(x_target_milli) % 1000);
-}
-
-void LqrFwContribution_Data_Print(const Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV：
-     * CH0_raw,CH1_raw,Target_yaw_vel,Target_X_vel,
-     * x,dx,yaw+dyaw,thetaL+thetaR,dthetaL+dthetaR,pitch,dpitch,
-     * 原始公共Fw,限幅后Fw_L,限幅后Fw_R。
-     * 后七个分项相加等于原始公共 Fw；公共量=(左轮贡献+右轮贡献)/2。 */
-    const float values[14] = {
-        (float)SBUS_Data.Channel[0],
-        (float)SBUS_Data.Channel[1],
-        pClassicData->Target_Data.Target_yaw_vel,
-        pClassicData->Target_Data.Target_X_vel,
-        lqr_fw_telemetry.x,
-        lqr_fw_telemetry.dx,
-        lqr_fw_telemetry.yaw_and_dyaw,
-        lqr_fw_telemetry.leg_angle,
-        lqr_fw_telemetry.leg_angle_rate,
-        lqr_fw_telemetry.pitch,
-        lqr_fw_telemetry.pitch_rate,
-        lqr_fw_telemetry.raw_fw_common,
-        pClassicData->Contronller_Data.Fw_L,
-        pClassicData->Contronller_Data.Fw_R,
-    };
-    int milli[14];
-    for (uint32_t i = 0; i < 14U; ++i)
-        milli[i] = (int)lroundf(values[i] * 1000.0f);
-
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-               "%c%d.%03d,%c%d.%03d\r\n",
-               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
-               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
-               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
-               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
-               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
-               milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
-               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
-               milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000,
-               milli[8] < 0 ? '-' : ' ', abs(milli[8]) / 1000, abs(milli[8]) % 1000,
-               milli[9] < 0 ? '-' : ' ', abs(milli[9]) / 1000, abs(milli[9]) % 1000,
-               milli[10] < 0 ? '-' : ' ', abs(milli[10]) / 1000, abs(milli[10]) % 1000,
-               milli[11] < 0 ? '-' : ' ', abs(milli[11]) / 1000, abs(milli[11]) % 1000,
-               milli[12] < 0 ? '-' : ' ', abs(milli[12]) / 1000, abs(milli[12]) % 1000,
-               milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000);
 }
 
 void Classic_Data_Update(Classic_Data_t *pClassicData) {
@@ -1228,20 +1149,6 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
     arm_matrix_instance_f32 state = {10, 1, states};
     arm_matrix_instance_f32 output = {4, 1, control};
     arm_mat_mult_f32(&K, &state, &output);
-
-    /* 左右轮共同的前后驱动量逐项拆开，定位持续倒车由哪个状态造成。 */
-    float common_term[10];
-    for (uint32_t i = 0; i < 10U; ++i)
-        common_term[i] = 0.5f * (gain[0][i] + gain[1][i]) * states[i];
-    lqr_fw_telemetry.x = common_term[0];
-    lqr_fw_telemetry.dx = common_term[1];
-    lqr_fw_telemetry.yaw_and_dyaw = common_term[2] + common_term[3];
-    lqr_fw_telemetry.leg_angle = common_term[4] + common_term[6];
-    lqr_fw_telemetry.leg_angle_rate = common_term[5] + common_term[7];
-    lqr_fw_telemetry.pitch = common_term[8];
-    lqr_fw_telemetry.pitch_rate = common_term[9];
-    lqr_fw_telemetry.raw_fw_common =
-        (control[0] + control[1]) * 0.5f;
 
     pClassicData->Contronller_Data.Fw_L = control[0];
     pClassicData->Contronller_Data.Fw_R = control[1];
