@@ -113,8 +113,8 @@ void CaculateTask(void *pvParameters) {
     Float_PID_Init(&leg_length_pid_l, 1200.0f, 1.5f, 2.0f);
     Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
-    Float_PID_Init(&leg_phi_pid_l, 2.0f, 0.0f, 0.1f);
-    Float_PID_Init(&leg_phi_pid_r, 2.0f, 0.0f, 0.1f);
+    Float_PID_Init(&leg_phi_pid_l, 15.0f, 0.0f, 3.0f);
+    Float_PID_Init(&leg_phi_pid_r, 15.0f, 0.0f, 3.0f);
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P2, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -374,8 +374,8 @@ void CaculateTask(void *pvParameters) {
         /* 腿长旋钮控制：VrB=云台 CH6=底盘 Channel[5]。
          * SBUS 解包后的 Channel[5] 是 raw-1024；此处恢复原始 0~2047 值。
          * 实测旋钮最低端约 raw=240、最高端约 raw=1814：0~250 为低端
-         * 死区并保持 130 mm，1800~2047 为高端死区并保持 350 mm；
-         * 251~1799 精确线性映射到 130~350 mm。 */
+         * 死区并保持 150 mm，1800~2047 为高端死区并保持 350 mm；
+         * 251~1799 精确线性映射到工作区间 150~350 mm。 */
         constexpr int32_t leg_knob_raw_min = 0;
         constexpr int32_t leg_knob_raw_max = 2047;
         constexpr int32_t leg_knob_low_deadband_raw = 250;
@@ -384,7 +384,7 @@ void CaculateTask(void *pvParameters) {
         constexpr int32_t leg_knob_active_max_raw = leg_knob_high_deadband_raw - 1;
         constexpr float leg_knob_active_span_raw =
                 (float)(leg_knob_active_max_raw - leg_knob_active_min_raw);
-        constexpr float leg_knob_length_min_m = 0.130f;
+        constexpr float leg_knob_length_min_m = 0.150f;
         constexpr float leg_knob_length_max_m = 0.350f;
         int32_t leg_knob_raw = (int32_t)SBUS_Data.Channel[5] + 1024;
         if (leg_knob_raw < leg_knob_raw_min) {
