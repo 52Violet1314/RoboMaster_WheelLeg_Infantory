@@ -313,8 +313,7 @@ void CaculateTask(void *pvParameters) {
          * 保留上方原起身状态机，测试结束时删除下行并恢复原赋值即可。
          * 这样仅放行重力补偿和起身后支路；LQR 仍独立由 CH7 使能。 */
         // StandUp_Flag = (stand_state == StandState_Up);
-        const bool motor_enabled = (SBUS_Data.Channel[9] >= 100);
-        StandUp_Flag = motor_enabled;
+        StandUp_Flag = (SBUS_Data.Channel[9] >= 100);
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
@@ -428,17 +427,19 @@ void CaculateTask(void *pvParameters) {
             leg_length_pid_r.Last_Dout = 0.0f;//清输出
             last_leg_target = leg_target;
         }
-        /* 台架气弹簧预压测试：总使能前仅观察、禁止积分，F0 最大 ±10 N；
+        /* 台架气弹簧预压测试：仅腿长 PID 按总使能切换限制；旋钮目标始终更新。
+         * 总使能前仅观察、禁止积分，F0 最大 ±10 N；
          * 总使能后才开放积分，PID 输出和总 F0 均最大 ±150 N。 */
-        const float leg_l_int_limit = motor_enabled ? 150.0f : 0.0f;
-        const float leg_r_int_limit = motor_enabled ? 150.0f : 0.0f;
-        const float leg_l_out_limit = motor_enabled ? 150.0f : 10.0f;
-        const float leg_r_out_limit = motor_enabled ? 150.0f : 10.0f;
+        const bool leg_pid_enabled = (SBUS_Data.Channel[9] >= 100);
+        const float leg_l_int_limit = leg_pid_enabled ? 150.0f : 0.0f;
+        const float leg_r_int_limit = leg_pid_enabled ? 150.0f : 0.0f;
+        const float leg_l_out_limit = leg_pid_enabled ? 150.0f : 10.0f;
+        const float leg_r_out_limit = leg_pid_enabled ? 150.0f : 10.0f;
         /* PID_Max_Float 由 Ki 是否为正决定是否累加积分；失能时临时置零，
          * 调用后恢复参数，避免未使能期间产生任何积分项。 */
         const float leg_l_ki = leg_length_pid_l.Ki;
         const float leg_r_ki = leg_length_pid_r.Ki;
-        if (!motor_enabled) {
+        if (!leg_pid_enabled) {
             leg_length_pid_l.Err_Int = 0.0f;
             leg_length_pid_r.Err_Int = 0.0f;
             leg_length_pid_l.Ki = 0.0f;
@@ -475,7 +476,7 @@ void CaculateTask(void *pvParameters) {
         // pClassicData->Contronller_Data.F0_L += roll_comp;
         // pClassicData->Contronller_Data.F0_R -= roll_comp;
 
-        if (!motor_enabled) {
+        if (!leg_pid_enabled) {
             /* 失能期间再次清零，确保下次使能从当前腿长重新建立积分。 */
             leg_length_pid_l.Err_Int = 0.0f;
             leg_length_pid_r.Err_Int = 0.0f;
@@ -498,7 +499,7 @@ void CaculateTask(void *pvParameters) {
         // Max_F0 = 60.0f;
         // Max_Tp = 4.0f;
         // };
-        Max_F0 = motor_enabled ? 150.0f : 10.0f;
+        Max_F0 = leg_pid_enabled ? 150.0f : 10.0f;
         Max_Tp = 2.0f;
 
         // F0 总限幅：起身后 ±30 N，未起身 ±60 N。
