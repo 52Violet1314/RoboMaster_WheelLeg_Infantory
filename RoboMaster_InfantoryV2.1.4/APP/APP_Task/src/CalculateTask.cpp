@@ -110,8 +110,8 @@ void CaculateTask(void *pvParameters) {
     StandState_t stand_state = StandState_NotUp;
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
-    Float_PID_Init(&leg_length_pid_l, 200.0f, 0.2f, 0.2f);
-    Float_PID_Init(&leg_length_pid_r, 200.0f, 0.2f, 0.2f);
+    Float_PID_Init(&leg_length_pid_l, 700.0f, 1.2f, 0.4f);
+    Float_PID_Init(&leg_length_pid_r, 700.0f, 1.2f, 0.4f);
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     Float_PID_Init(&leg_phi_pid_l, 15.0f, 0.0f, 3.0f);
     Float_PID_Init(&leg_phi_pid_r, 15.0f, 0.0f, 3.0f);
