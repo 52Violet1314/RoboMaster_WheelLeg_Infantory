@@ -16,6 +16,11 @@
  * 仅 LEG_CONTROL_TEST_MODE=1 时叠加；正式控制不受影响。 */
 #define LEG_TEST_SPRING_F0_DAMPING_KD 5.0f
 
+/* 仅台架诊断：VMC 后的四个髋电机力矩量化到 0.1 N·m。
+ * 放在总限幅之后、发送给电机之前；不作用于 F0、轮毂或正式版。 */
+#define LEG_TEST_VMC_TORQUE_QUANTIZATION_ENABLE 1
+#define LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM 0.1f
+
 extern uint8_t ControlState;
 
 void CaculateTask(void *pvParameters);

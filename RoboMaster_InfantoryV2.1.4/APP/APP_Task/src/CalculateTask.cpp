@@ -595,6 +595,26 @@ void CaculateTask(void *pvParameters) {
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
 
+#if LEG_CONTROL_TEST_MODE && LEG_TEST_VMC_TORQUE_QUANTIZATION_ENABLE
+        /* 台架诊断：只量化最终发送的髋电机力矩；不改变 VMC、F0 或轮毂控制。 */
+        pClassicData->Contronller_Data.T1_L =
+                roundf(pClassicData->Contronller_Data.T1_L /
+                       LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
+                LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
+        pClassicData->Contronller_Data.T2_L =
+                roundf(pClassicData->Contronller_Data.T2_L /
+                       LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
+                LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
+        pClassicData->Contronller_Data.T1_R =
+                roundf(pClassicData->Contronller_Data.T1_R /
+                       LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
+                LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
+        pClassicData->Contronller_Data.T2_R =
+                roundf(pClassicData->Contronller_Data.T2_R /
+                       LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
+                LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
+#endif
+
         /* 打印节流：两次打印至少间隔 100ms，避免 DMA 串口跟不上导致 CalculateTask 阻塞超时 */
         {
             static TickType_t xLastPrintTick = 0;
