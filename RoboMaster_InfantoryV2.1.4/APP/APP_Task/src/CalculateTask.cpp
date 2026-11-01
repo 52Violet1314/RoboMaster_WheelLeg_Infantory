@@ -90,6 +90,9 @@ void State_Data_Print(Classic_Data_t *pClassicData);
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
+/* 左腿气弹簧/VMC 诊断：仅打印，不参与控制。 */
+void LeftLegVMC_Debug_Print(Classic_Data_t *pClassicData);
+
 
 void Classic_Data_Update(Classic_Data_t *pClassicData);
 
@@ -99,63 +102,6 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                                     K_Fixed_Leg_t gain);
 
 void Controler_Limit(Classic_Data_t *pClassicData);
-
-#if LEG_CONTROL_TEST_MODE && VMC_TEST_COMPENSATION_FEEDBACK_LPF_ENABLE
-typedef struct {
-    float j11;
-    float j12;
-    float j21;
-    float j22;
-} VMC_Jacobian_t;
-
-/* 仅为补偿支路求雅可比，不写入腿长、速度或任何原始状态。 */
-static bool VMC_CompensationJacobian(float phi1, float phi4, VMC_Jacobian_t *j) {
-    constexpr float l1 = 0.210f, l2 = 0.250f, l3 = 0.250f, l4 = 0.210f;
-    const float xd = l4 * arm_cos_f32(phi4), yd = l4 * arm_sin_f32(phi4);
-    const float xb = l1 * arm_cos_f32(phi1), yb = l1 * arm_sin_f32(phi1);
-    const float dx = xd - xb, dy = yd - yb;
-    const float lbd2 = dx * dx + dy * dy;
-    if (!isfinite(lbd2) || lbd2 <= 0.0f) return false;
-    float lbd;
-    if (arm_sqrt_f32(lbd2, &lbd) != ARM_MATH_SUCCESS) return false;
-    const float a0 = 2.0f * l2 * dx, b0 = 2.0f * l2 * dy;
-    const float c0 = l2 * l2 + lbd2 - l3 * l3;
-    float discriminant = a0 * a0 + b0 * b0 - c0 * c0;
-    if (!isfinite(discriminant) || discriminant < -1.0e-7f) return false;
-    if (discriminant < 0.0f) discriminant = 0.0f;
-    float root;
-    if (arm_sqrt_f32(discriminant, &root) != ARM_MATH_SUCCESS) return false;
-    const float phi2 = 2.0f * atan2f(b0 + root, a0 + c0);
-    const float phi3 = atan2f(yb - yd + l2 * arm_sin_f32(phi2),
-                              xb - xd + l2 * arm_cos_f32(phi2));
-    const float xc = xb + l2 * arm_cos_f32(phi2), yc = yb + l2 * arm_sin_f32(phi2);
-    const float l0_2 = xc * xc + yc * yc;
-    if (!isfinite(l0_2) || l0_2 <= 0.0f) return false;
-    float l0;
-    if (arm_sqrt_f32(l0_2, &l0) != ARM_MATH_SUCCESS) return false;
-    const float phi0 = atan2f(yc, xc);
-    const float den = arm_sin_f32(phi3 - phi2);
-    if (!isfinite(den) || fabsf(den) < 1.0e-4f) return false;
-    j->j11 = l1 * arm_sin_f32(phi0 - phi3) * arm_sin_f32(phi1 - phi2) / den;
-    j->j12 = l1 * arm_cos_f32(phi0 - phi3) * arm_sin_f32(phi1 - phi2) / (l0 * den);
-    j->j21 = l4 * arm_sin_f32(phi0 - phi2) * arm_sin_f32(phi3 - phi4) / den;
-    j->j22 = l4 * arm_cos_f32(phi0 - phi2) * arm_sin_f32(phi3 - phi4) / (l0 * den);
-    return isfinite(j->j11) && isfinite(j->j12) && isfinite(j->j21) && isfinite(j->j22);
-}
-
-/* 圆周角一阶低通，跨 ±pi 时按最短角差滤波。 */
-static float VMC_FilterCompensationAngle(float raw, float *filtered, bool *initialized, float dt) {
-    if (!*initialized || !isfinite(raw) || !isfinite(*filtered) || dt <= 0.0f) {
-        *filtered = raw;
-        *initialized = true;
-        return raw;
-    }
-    const float alpha = dt / (VMC_TEST_COMPENSATION_FEEDBACK_LPF_TAU_S + dt);
-    const float delta = atan2f(arm_sin_f32(raw - *filtered), arm_cos_f32(raw - *filtered));
-    *filtered += alpha * delta;
-    return *filtered;
-}
-#endif
 
 void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
@@ -542,12 +488,21 @@ void CaculateTask(void *pvParameters) {
 #else
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
 #endif
+        /* 仅台架：对气弹簧补偿叠加腿长速度阻尼，不修改 PID、LQR 或 VMC 反馈。 */
+        float spring_damping_f0_l = 0.0f;
+        float spring_damping_f0_r = 0.0f;
+#if LEG_CONTROL_TEST_MODE
+        spring_damping_f0_l = -LEG_TEST_SPRING_F0_DAMPING_KD * pClassicData->Leg_Data.d_L0_L;
+        spring_damping_f0_r = -LEG_TEST_SPRING_F0_DAMPING_KD * pClassicData->Leg_Data.d_L0_R;
+#endif
         pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
+                + spring_damping_f0_l
 #if !LEG_CONTROL_TEST_MODE
                 + stand_offset_l
 #endif
                 ;
         pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r
+                + spring_damping_f0_r
 #if !LEG_CONTROL_TEST_MODE
                 + stand_offset_r
 #endif
@@ -629,11 +584,12 @@ void CaculateTask(void *pvParameters) {
         {
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
-            if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
+            if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(20)) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
-                LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
+                // LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
+                LeftLegVMC_Debug_Print(pClassicData);
                 // IMU_Data_Print(pClassicData);
                 // Control_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
@@ -651,6 +607,10 @@ void CaculateTask(void *pvParameters) {
 void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
                    float TpR, float dt, float spring_f0_l, float spring_f0_r,
                    float gravity_tp_l, float gravity_tp_r) {
+    (void)spring_f0_l;
+    (void)spring_f0_r;
+    (void)gravity_tp_l;
+    (void)gravity_tp_r;
     float inv_dt = 1.0f / dt;
 
     // 机械臂连杆长度定义
@@ -843,47 +803,6 @@ void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
     data->Contronller_Data.T2_L = T_L[1]; // 左侧 T2
     data->Contronller_Data.T1_R = T_R[0]; // 右侧 T1
     data->Contronller_Data.T2_R = T_R[1]; // 右侧 T2
-
-#if LEG_CONTROL_TEST_MODE && VMC_TEST_COMPENSATION_FEEDBACK_LPF_ENABLE
-    {
-        /* 总 VMC 仍以原始反馈计算。仅替换补偿分量为“滤波髋角”映射结果。 */
-        const float raw_comp_t1_l = j11_L * spring_f0_l + j12_L * gravity_tp_l;
-        const float raw_comp_t2_l = j21_L * spring_f0_l + j22_L * gravity_tp_l;
-        const float raw_comp_t1_r = j11_R * spring_f0_r + j12_R * gravity_tp_r;
-        const float raw_comp_t2_r = j21_R * spring_f0_r + j22_R * gravity_tp_r;
-        static float phi1_l_filtered = 0.0f, phi4_l_filtered = 0.0f;
-        static float phi1_r_filtered = 0.0f, phi4_r_filtered = 0.0f;
-        static bool phi1_l_initialized = false, phi4_l_initialized = false;
-        static bool phi1_r_initialized = false, phi4_r_initialized = false;
-
-        if (SBUS_Data.Channel[9] < 100) {
-            phi1_l_initialized = phi4_l_initialized = false;
-            phi1_r_initialized = phi4_r_initialized = false;
-        } else {
-            const float phi1_l_comp = VMC_FilterCompensationAngle(
-                    phi1_L, &phi1_l_filtered, &phi1_l_initialized, dt);
-            const float phi4_l_comp = VMC_FilterCompensationAngle(
-                    phi4_L, &phi4_l_filtered, &phi4_l_initialized, dt);
-            const float phi1_r_comp = VMC_FilterCompensationAngle(
-                    phi1_R, &phi1_r_filtered, &phi1_r_initialized, dt);
-            const float phi4_r_comp = VMC_FilterCompensationAngle(
-                    phi4_R, &phi4_r_filtered, &phi4_r_initialized, dt);
-            VMC_Jacobian_t filtered_l, filtered_r;
-            if (VMC_CompensationJacobian(phi1_l_comp, phi4_l_comp, &filtered_l)) {
-                data->Contronller_Data.T1_L +=
-                        (filtered_l.j11 * spring_f0_l + filtered_l.j12 * gravity_tp_l) - raw_comp_t1_l;
-                data->Contronller_Data.T2_L +=
-                        (filtered_l.j21 * spring_f0_l + filtered_l.j22 * gravity_tp_l) - raw_comp_t2_l;
-            }
-            if (VMC_CompensationJacobian(phi1_r_comp, phi4_r_comp, &filtered_r)) {
-                data->Contronller_Data.T1_R +=
-                        (filtered_r.j11 * spring_f0_r + filtered_r.j12 * gravity_tp_r) - raw_comp_t1_r;
-                data->Contronller_Data.T2_R +=
-                        (filtered_r.j21 * spring_f0_r + filtered_r.j22 * gravity_tp_r) - raw_comp_t2_r;
-            }
-        }
-    }
-#endif
 
     // 保存输入的Tp值
     data->Contronller_Data.Tp_L = TpL; // 左侧 Tp
@@ -1079,6 +998,35 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
                milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
                 milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
                 milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
+}
+
+void LeftLegVMC_Debug_Print(Classic_Data_t *pClassicData) {
+    /* FireWater 纯 CSV，依次为：
+     * L0_L,springF0_L,finalF0_L,T1_L,T2_L。
+     * 单位：m,N,N,N*m,N*m。
+     * springF0 使用与控制路径完全相同的测试/正式查表函数。
+     * T1/T2 是经过 VMC 与最终输出限幅后的左后/左前髋电机力矩。 */
+    const float values[5] = {
+        pClassicData->Leg_Data.L0_L,
+#if LEG_CONTROL_TEST_MODE
+        LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L),
+#else
+        LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_L),
+#endif
+        pClassicData->Contronller_Data.F0_L,
+        pClassicData->Contronller_Data.T1_L,
+        pClassicData->Contronller_Data.T2_L,
+    };
+    int milli[5];
+    for (uint32_t index = 0; index < 5U; ++index)
+        milli[index] = (int)lroundf(values[index] * 1000.0f);
+
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
+               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
+               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
+               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000);
 }
 
 void Classic_Data_Update(Classic_Data_t *pClassicData) {
