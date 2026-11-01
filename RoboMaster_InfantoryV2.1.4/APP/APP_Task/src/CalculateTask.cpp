@@ -100,14 +100,62 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
 
 void Controler_Limit(Classic_Data_t *pClassicData);
 
-/* 台架诊断用：只限制补偿分量相邻控制周期的突变，不改任何稳态 VMC 解。
- * 总使能关闭时清空历史，下一次使能从零力矩平滑进入。 */
-static float VMC_TestOnly_SlewCompensationTorque(float target, float *last, float max_step) {
-    if (!isfinite(target)) target = 0.0f;
-    target = fminf(fmaxf(target, *last - max_step), *last + max_step);
-    *last = target;
-    return target;
+#if LEG_CONTROL_TEST_MODE && VMC_TEST_COMPENSATION_FEEDBACK_LPF_ENABLE
+typedef struct {
+    float j11;
+    float j12;
+    float j21;
+    float j22;
+} VMC_Jacobian_t;
+
+/* 仅为补偿支路求雅可比，不写入腿长、速度或任何原始状态。 */
+static bool VMC_CompensationJacobian(float phi1, float phi4, VMC_Jacobian_t *j) {
+    constexpr float l1 = 0.210f, l2 = 0.250f, l3 = 0.250f, l4 = 0.210f;
+    const float xd = l4 * arm_cos_f32(phi4), yd = l4 * arm_sin_f32(phi4);
+    const float xb = l1 * arm_cos_f32(phi1), yb = l1 * arm_sin_f32(phi1);
+    const float dx = xd - xb, dy = yd - yb;
+    const float lbd2 = dx * dx + dy * dy;
+    if (!isfinite(lbd2) || lbd2 <= 0.0f) return false;
+    float lbd;
+    if (arm_sqrt_f32(lbd2, &lbd) != ARM_MATH_SUCCESS) return false;
+    const float a0 = 2.0f * l2 * dx, b0 = 2.0f * l2 * dy;
+    const float c0 = l2 * l2 + lbd2 - l3 * l3;
+    float discriminant = a0 * a0 + b0 * b0 - c0 * c0;
+    if (!isfinite(discriminant) || discriminant < -1.0e-7f) return false;
+    if (discriminant < 0.0f) discriminant = 0.0f;
+    float root;
+    if (arm_sqrt_f32(discriminant, &root) != ARM_MATH_SUCCESS) return false;
+    const float phi2 = 2.0f * atan2f(b0 + root, a0 + c0);
+    const float phi3 = atan2f(yb - yd + l2 * arm_sin_f32(phi2),
+                              xb - xd + l2 * arm_cos_f32(phi2));
+    const float xc = xb + l2 * arm_cos_f32(phi2), yc = yb + l2 * arm_sin_f32(phi2);
+    const float l0_2 = xc * xc + yc * yc;
+    if (!isfinite(l0_2) || l0_2 <= 0.0f) return false;
+    float l0;
+    if (arm_sqrt_f32(l0_2, &l0) != ARM_MATH_SUCCESS) return false;
+    const float phi0 = atan2f(yc, xc);
+    const float den = arm_sin_f32(phi3 - phi2);
+    if (!isfinite(den) || fabsf(den) < 1.0e-4f) return false;
+    j->j11 = l1 * arm_sin_f32(phi0 - phi3) * arm_sin_f32(phi1 - phi2) / den;
+    j->j12 = l1 * arm_cos_f32(phi0 - phi3) * arm_sin_f32(phi1 - phi2) / (l0 * den);
+    j->j21 = l4 * arm_sin_f32(phi0 - phi2) * arm_sin_f32(phi3 - phi4) / den;
+    j->j22 = l4 * arm_cos_f32(phi0 - phi2) * arm_sin_f32(phi3 - phi4) / (l0 * den);
+    return isfinite(j->j11) && isfinite(j->j12) && isfinite(j->j21) && isfinite(j->j22);
 }
+
+/* 圆周角一阶低通，跨 ±pi 时按最短角差滤波。 */
+static float VMC_FilterCompensationAngle(float raw, float *filtered, bool *initialized, float dt) {
+    if (!*initialized || !isfinite(raw) || !isfinite(*filtered) || dt <= 0.0f) {
+        *filtered = raw;
+        *initialized = true;
+        return raw;
+    }
+    const float alpha = dt / (VMC_TEST_COMPENSATION_FEEDBACK_LPF_TAU_S + dt);
+    const float delta = atan2f(arm_sin_f32(raw - *filtered), arm_cos_f32(raw - *filtered));
+    *filtered += alpha * delta;
+    return *filtered;
+}
+#endif
 
 void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
@@ -796,35 +844,43 @@ void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
     data->Contronller_Data.T1_R = T_R[0]; // 右侧 T1
     data->Contronller_Data.T2_R = T_R[1]; // 右侧 T2
 
-#if LEG_CONTROL_TEST_MODE && VMC_TEST_COMPENSATION_TORQUE_SLEW_LIMIT_ENABLE
+#if LEG_CONTROL_TEST_MODE && VMC_TEST_COMPENSATION_FEEDBACK_LPF_ENABLE
     {
-        /* VMC 线性：总输出 = 非补偿输出 + 气弹簧/重力补偿输出。
-         * 因而只替换补偿分量即可，LQR、腿长 PID 的输出保持原始实时值。 */
-        const float comp_t1_l = j11_L * spring_f0_l + j12_L * gravity_tp_l;
-        const float comp_t2_l = j21_L * spring_f0_l + j22_L * gravity_tp_l;
-        const float comp_t1_r = j11_R * spring_f0_r + j12_R * gravity_tp_r;
-        const float comp_t2_r = j21_R * spring_f0_r + j22_R * gravity_tp_r;
-        static float last_t1_l = 0.0f;
-        static float last_t2_l = 0.0f;
-        static float last_t1_r = 0.0f;
-        static float last_t2_r = 0.0f;
+        /* 总 VMC 仍以原始反馈计算。仅替换补偿分量为“滤波髋角”映射结果。 */
+        const float raw_comp_t1_l = j11_L * spring_f0_l + j12_L * gravity_tp_l;
+        const float raw_comp_t2_l = j21_L * spring_f0_l + j22_L * gravity_tp_l;
+        const float raw_comp_t1_r = j11_R * spring_f0_r + j12_R * gravity_tp_r;
+        const float raw_comp_t2_r = j21_R * spring_f0_r + j22_R * gravity_tp_r;
+        static float phi1_l_filtered = 0.0f, phi4_l_filtered = 0.0f;
+        static float phi1_r_filtered = 0.0f, phi4_r_filtered = 0.0f;
+        static bool phi1_l_initialized = false, phi4_l_initialized = false;
+        static bool phi1_r_initialized = false, phi4_r_initialized = false;
 
-        if (SBUS_Data.Channel[9] < 100 || !isfinite(dt) || dt <= 0.0f) {
-            last_t1_l = last_t2_l = last_t1_r = last_t2_r = 0.0f;
+        if (SBUS_Data.Channel[9] < 100) {
+            phi1_l_initialized = phi4_l_initialized = false;
+            phi1_r_initialized = phi4_r_initialized = false;
         } else {
-            const float max_step = VMC_TEST_COMPENSATION_TORQUE_SLEW_RATE_NM_S * dt;
-            const float limited_t1_l = VMC_TestOnly_SlewCompensationTorque(
-                    comp_t1_l, &last_t1_l, max_step);
-            const float limited_t2_l = VMC_TestOnly_SlewCompensationTorque(
-                    comp_t2_l, &last_t2_l, max_step);
-            const float limited_t1_r = VMC_TestOnly_SlewCompensationTorque(
-                    comp_t1_r, &last_t1_r, max_step);
-            const float limited_t2_r = VMC_TestOnly_SlewCompensationTorque(
-                    comp_t2_r, &last_t2_r, max_step);
-            data->Contronller_Data.T1_L += limited_t1_l - comp_t1_l;
-            data->Contronller_Data.T2_L += limited_t2_l - comp_t2_l;
-            data->Contronller_Data.T1_R += limited_t1_r - comp_t1_r;
-            data->Contronller_Data.T2_R += limited_t2_r - comp_t2_r;
+            const float phi1_l_comp = VMC_FilterCompensationAngle(
+                    phi1_L, &phi1_l_filtered, &phi1_l_initialized, dt);
+            const float phi4_l_comp = VMC_FilterCompensationAngle(
+                    phi4_L, &phi4_l_filtered, &phi4_l_initialized, dt);
+            const float phi1_r_comp = VMC_FilterCompensationAngle(
+                    phi1_R, &phi1_r_filtered, &phi1_r_initialized, dt);
+            const float phi4_r_comp = VMC_FilterCompensationAngle(
+                    phi4_R, &phi4_r_filtered, &phi4_r_initialized, dt);
+            VMC_Jacobian_t filtered_l, filtered_r;
+            if (VMC_CompensationJacobian(phi1_l_comp, phi4_l_comp, &filtered_l)) {
+                data->Contronller_Data.T1_L +=
+                        (filtered_l.j11 * spring_f0_l + filtered_l.j12 * gravity_tp_l) - raw_comp_t1_l;
+                data->Contronller_Data.T2_L +=
+                        (filtered_l.j21 * spring_f0_l + filtered_l.j22 * gravity_tp_l) - raw_comp_t2_l;
+            }
+            if (VMC_CompensationJacobian(phi1_r_comp, phi4_r_comp, &filtered_r)) {
+                data->Contronller_Data.T1_R +=
+                        (filtered_r.j11 * spring_f0_r + filtered_r.j12 * gravity_tp_r) - raw_comp_t1_r;
+                data->Contronller_Data.T2_R +=
+                        (filtered_r.j21 * spring_f0_r + filtered_r.j22 * gravity_tp_r) - raw_comp_t2_r;
+            }
         }
     }
 #endif

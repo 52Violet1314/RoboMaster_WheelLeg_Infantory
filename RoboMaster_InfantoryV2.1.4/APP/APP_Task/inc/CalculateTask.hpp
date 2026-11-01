@@ -11,10 +11,10 @@
  * 起身前/后 F0 预输出；正式版恢复状态机、roll、预输出，并在总使能且已起身后开腿重力补偿。 */
 #define LEG_CONTROL_TEST_MODE 1
 
-/* 仅台架诊断：只限制气弹簧与腿重力补偿映射出的 T1/T2 变化率。
- * LQR 与腿长 PID 的 VMC 输出不经过此限制，稳态补偿力矩也不改变。 */
-#define VMC_TEST_COMPENSATION_TORQUE_SLEW_LIMIT_ENABLE 1
-#define VMC_TEST_COMPENSATION_TORQUE_SLEW_RATE_NM_S    50.0f
+/* 仅台架诊断：仅给气弹簧/腿重力补偿的 VMC 髋角副本做一阶低通。
+ * 原始髋角仍用于腿长、状态、LQR、腿长 PID 与其余 VMC 输出。 */
+#define VMC_TEST_COMPENSATION_FEEDBACK_LPF_ENABLE 0
+#define VMC_TEST_COMPENSATION_FEEDBACK_LPF_TAU_S  0.008f
 
 extern uint8_t ControlState;
 
