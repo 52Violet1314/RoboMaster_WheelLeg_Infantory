@@ -308,13 +308,14 @@ void CaculateTask(void *pvParameters) {
           {
             stand_state = StandState_NotUp;
             stand_not_up_time = 1.0f;
-          }
+            }
         }
-        /* 台架气弹簧预压测试：总使能（CH9 >= 100）后全程按“已起身”处理。
-         * 保留上方原起身状态机，测试结束时删除下行并恢复原赋值即可。
-         * 这样仅放行重力补偿和起身后支路；LQR 仍独立由 CH7 使能。 */
-        // StandUp_Flag = (stand_state == StandState_Up);
+        /* 测试版：总使能后全程按已起身处理；正式版使用原起身状态机。 */
+#if LEG_CONTROL_TEST_MODE
         StandUp_Flag = (SBUS_Data.Channel[9] >= 100);
+#else
+        StandUp_Flag = (stand_state == StandState_Up);
+#endif
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
@@ -328,8 +329,9 @@ void CaculateTask(void *pvParameters) {
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
         const bool lqr_enabled = (SBUS_Data.Channel[7] > 100);
+        const bool leg_pid_enabled = (SBUS_Data.Channel[9] >= 100);
         /* LQR 起身后以当前位姿作为位置/yaw 工作点。 */
-        const bool pos_ref_ready = lqr_enabled && StandUp_Flag;
+        const bool pos_ref_ready = leg_pid_enabled && lqr_enabled && StandUp_Flag;
         if (pos_ref_ready && !lqr_pos_ref_recorded) {
             Pos_INT = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
             pClassicData->States_Data.X_pos = 0.0f;
@@ -348,11 +350,16 @@ void CaculateTask(void *pvParameters) {
             LQR_K_CalculateWithGain(pClassicData, scheduled_gain);
         }
 
-        /* 重力补偿独立保存：LQR 的 Tp 先按原逻辑限幅，补偿在进入 VMC 时最后叠加。 */
+        /* 测试版：总使能后全程补偿；正式版：总使能且已起身后补偿。
+         * 任一模式下，总使能关闭时 ControlTask 均向全部电机发送零力矩。 */
         float gravity_tp_l = 0.0f;
         float gravity_tp_r = 0.0f;
 #if LEG_GRAVITY_COMPENSATION_ENABLE
+#if LEG_CONTROL_TEST_MODE
         if (StandUp_Flag) {
+#else
+        if (leg_pid_enabled && StandUp_Flag) {
+#endif
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
@@ -368,10 +375,6 @@ void CaculateTask(void *pvParameters) {
         // pClassicData->Contronller_Data.Tp_R +=
         //         PID_Max_Float(&leg_phi_pid_r, phi_ref,
         //                       pClassicData->Leg_Data.phi_0_R, 0.0f, 0.5f);
-
-        /* 台架气弹簧预压测试：roll 差分稳定整段关闭，保留原参数供恢复。 */
-        // constexpr float roll_kp = 40.0f;
-        // constexpr float roll_kd = 2.5f;
         /* 腿长旋钮控制：VrB=云台 CH6=底盘 Channel[5]。
          * SBUS 解包后的 Channel[5] 是 raw-1024；此处恢复原始 0~2047 值。
          * 实测旋钮最低端约 raw=240、最高端约 raw=1814：0~250 为低端
@@ -404,12 +407,14 @@ void CaculateTask(void *pvParameters) {
             leg_knob_target_m = leg_knob_length_min_m +
                     (leg_knob_length_max_m - leg_knob_length_min_m) * leg_knob_ratio;
         }
-        /* 正式逻辑：旋钮始终映射 150~384 mm；LQR 打开时，350~384 mm 作为
-         * 高端死区，进入腿长 PID 的实际指令固定在 350 mm，确保不超出 K 表。 */
-        pClassicData->Target_Data.Target_LegLong = lqr_enabled
+        /* 测试版保留完整旋钮行程；正式版起身后，350~384 mm 为高端死区。 */
+#if LEG_CONTROL_TEST_MODE
+        pClassicData->Target_Data.Target_LegLong = leg_knob_target_m;
+#else
+        pClassicData->Target_Data.Target_LegLong = StandUp_Flag
                 ? fminf(leg_knob_target_m, 0.350f)
                 : leg_knob_target_m;
-
+#endif
         /* 原行驶腿长三档：CH8 下/中/上对应 150/250/350 mm；旋钮 VrB 测试期间关闭。 */
         // if (SBUS_Data.Channel[8] < -100) {
         //     pClassicData->Target_Data.Target_LegLong = 0.150f;
@@ -434,14 +439,16 @@ void CaculateTask(void *pvParameters) {
             leg_length_pid_r.Last_Dout = 0.0f;//清输出
             last_leg_target = leg_target;
         }
-        /* 台架气弹簧预压测试：仅腿长 PID 按总使能切换限制；旋钮目标始终更新。
+        /* 共用安全逻辑：仅腿长 PID 按总使能切换限制；旋钮目标始终更新。
          * 总使能前仅观察、禁止积分，F0 最大 ±10 N；
-         * 总使能后才开放积分，PID 输出和总 F0 均最大 ±150 N。 */
-        const bool leg_pid_enabled = (SBUS_Data.Channel[9] >= 100);
-        const float leg_l_int_limit = leg_pid_enabled ? 150.0f : 0.0f;
-        const float leg_r_int_limit = leg_pid_enabled ? 150.0f : 0.0f;
-        const float leg_l_out_limit = leg_pid_enabled ? 150.0f : 10.0f;
-        const float leg_r_out_limit = leg_pid_enabled ? 150.0f : 10.0f;
+         * 总使能后才开放积分。原收腿保护保留：误差小于 -50 mm 时积分限为 1，
+         * 其余为 50；PID 输出和总 F0 均使用对称 ±50 N 限幅。 */
+        const float leg_l_int_limit = leg_pid_enabled ?
+                (leg_err_l < -0.05f ? 1.0f : 50.0f) : 0.0f;
+        const float leg_r_int_limit = leg_pid_enabled ?
+                (leg_err_r < -0.05f ? 1.0f : 50.0f) : 0.0f;
+        const float leg_l_out_limit = leg_pid_enabled ? 50.0f : 10.0f;
+        const float leg_r_out_limit = leg_pid_enabled ? 50.0f : 10.0f;
         /* PID_Max_Float 由 Ki 是否为正决定是否累加积分；失能时临时置零，
          * 调用后恢复参数，避免未使能期间产生任何积分项。 */
         const float leg_l_ki = leg_length_pid_l.Ki;
@@ -462,32 +469,45 @@ void CaculateTask(void *pvParameters) {
         leg_length_pid_r.Ki = leg_r_ki;
         // pClassicData->Contronller_Data.F0_L = 15.5f + leg_l_out;
         // pClassicData->Contronller_Data.F0_R = 15.5f + leg_r_out;
-        /* 台架气弹簧预压测试：关闭起身前 -20.5 N 收腿与起身后 +10 N 支撑预输出。
-         * 仅保留腿长 PID 输出；测试结束时恢复以下原逻辑。 */
-        // const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
-        // const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
-        // pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
-        // pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
+        /* 正式版的原起身前/后 F0 预输出；台架模式不叠加。 */
+#if !LEG_CONTROL_TEST_MODE
+        const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
+        const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
+#endif
         /* 气弹簧预压补偿始终生效：左右腿按各自实际 L0 查表，独立叠加到 PID。
          * 150~350 mm 为 10 mm 表插值，350~384 mm 恒用 350 mm 的补偿力。 */
         const float spring_preload_f0_l =
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_L);
         const float spring_preload_f0_r =
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
-        pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l;
-        pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r;
+        pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
+#if !LEG_CONTROL_TEST_MODE
+                + stand_offset_l
+#endif
+                ;
+        pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r
+#if !LEG_CONTROL_TEST_MODE
+                + stand_offset_r
+#endif
+                ;
 
-        /* 台架气弹簧预压测试：暂时关闭 roll 左右腿差分稳定；原逻辑保留。 */
-        // constexpr float roll_f0_limit = 8.0f;
-        // float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
-        //                     + roll_kd * pClassicData->IMU_Data.delta_roll);
-        // if (roll_comp > roll_f0_limit) {
-        //     roll_comp = roll_f0_limit;
-        // } else if (roll_comp < -roll_f0_limit) {
-        //     roll_comp = -roll_f0_limit;
-        // }
-        // pClassicData->Contronller_Data.F0_L += roll_comp;
-        // pClassicData->Contronller_Data.F0_R -= roll_comp;
+        /* 测试版关闭 roll 差分；正式版仅已起身时恢复原左右反向 F0 补偿。 */
+#if !LEG_CONTROL_TEST_MODE
+        if (StandUp_Flag) {
+        constexpr float roll_kp = 40.0f;
+        constexpr float roll_kd = 2.5f;
+        constexpr float roll_f0_limit = 8.0f;
+        float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
+                            + roll_kd * pClassicData->IMU_Data.delta_roll);
+        if (roll_comp > roll_f0_limit) {
+            roll_comp = roll_f0_limit;
+        } else if (roll_comp < -roll_f0_limit) {
+            roll_comp = -roll_f0_limit;
+        }
+        pClassicData->Contronller_Data.F0_L += roll_comp;
+        pClassicData->Contronller_Data.F0_R -= roll_comp;
+        }
+#endif
 
         if (!leg_pid_enabled) {
             /* 失能期间再次清零，确保下次使能从当前腿长重新建立积分。 */
@@ -500,7 +520,7 @@ void CaculateTask(void *pvParameters) {
         }
        
         // ====== 输入限幅：VMC 之前，F0/Tp 必须在此限幅（Fw 不经过 VMC） ======
-        /* 台架气弹簧预压测试：总使能前总 F0 为 ±10 N，使能后为 ±150 N。
+        /* 台架气弹簧预压测试：总使能前总 F0 为 ±10 N，使能后为 ±50 N。
          * 保留原起身前/后 F0、Tp 限幅逻辑，测试结束时恢复。 */
         // if(StandUp_Flag == true)
         // {
@@ -512,10 +532,10 @@ void CaculateTask(void *pvParameters) {
         // Max_F0 = 60.0f;
         // Max_Tp = 4.0f;
         // };
-        Max_F0 = leg_pid_enabled ? 150.0f : 10.0f;
+        Max_F0 = leg_pid_enabled ? 50.0f : 10.0f;
         Max_Tp = 2.0f;
 
-        // F0 总限幅：起身后 ±30 N，未起身 ±60 N。
+        // F0 总限幅：总使能前 ±10 N；总使能后 ±50 N。
         if (pClassicData->Contronller_Data.F0_L > Max_F0)
             pClassicData->Contronller_Data.F0_L = Max_F0;
         if (pClassicData->Contronller_Data.F0_L < -Max_F0)
