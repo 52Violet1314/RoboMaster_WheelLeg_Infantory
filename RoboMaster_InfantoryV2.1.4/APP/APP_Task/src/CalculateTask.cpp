@@ -72,7 +72,8 @@ int last_task_time = 0;
 int Calculate_time;
 
 void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
-                   float TpR, float dt);
+                   float TpR, float dt, float spring_f0_l, float spring_f0_r,
+                   float gravity_tp_l, float gravity_tp_r);
 
 float angle_to_rad(float degrees);
 
@@ -98,6 +99,15 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                                     K_Fixed_Leg_t gain);
 
 void Controler_Limit(Classic_Data_t *pClassicData);
+
+/* 台架诊断用：只限制补偿分量相邻控制周期的突变，不改任何稳态 VMC 解。
+ * 总使能关闭时清空历史，下一次使能从零力矩平滑进入。 */
+static float VMC_TestOnly_SlewCompensationTorque(float target, float *last, float max_step) {
+    if (!isfinite(target)) target = 0.0f;
+    target = fminf(fmaxf(target, *last - max_step), *last + max_step);
+    *last = target;
+    return target;
+}
 
 void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
@@ -561,7 +571,8 @@ void CaculateTask(void *pvParameters) {
         VMC_Calculate(pClassicData, pClassicData->Contronller_Data.F0_L,
                       pClassicData->Contronller_Data.F0_R,
                       pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
-                      pClassicData->Contronller_Data.Tp_R + gravity_tp_r, cal_dt);
+                      pClassicData->Contronller_Data.Tp_R + gravity_tp_r, cal_dt,
+                      spring_preload_f0_l, spring_preload_f0_r, gravity_tp_l, gravity_tp_r);
 
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
@@ -590,7 +601,8 @@ void CaculateTask(void *pvParameters) {
 }
 
 void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
-                   float TpR, float dt) {
+                   float TpR, float dt, float spring_f0_l, float spring_f0_r,
+                   float gravity_tp_l, float gravity_tp_r) {
     float inv_dt = 1.0f / dt;
 
     // 机械臂连杆长度定义
@@ -783,6 +795,39 @@ void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
     data->Contronller_Data.T2_L = T_L[1]; // 左侧 T2
     data->Contronller_Data.T1_R = T_R[0]; // 右侧 T1
     data->Contronller_Data.T2_R = T_R[1]; // 右侧 T2
+
+#if LEG_CONTROL_TEST_MODE && VMC_TEST_COMPENSATION_TORQUE_SLEW_LIMIT_ENABLE
+    {
+        /* VMC 线性：总输出 = 非补偿输出 + 气弹簧/重力补偿输出。
+         * 因而只替换补偿分量即可，LQR、腿长 PID 的输出保持原始实时值。 */
+        const float comp_t1_l = j11_L * spring_f0_l + j12_L * gravity_tp_l;
+        const float comp_t2_l = j21_L * spring_f0_l + j22_L * gravity_tp_l;
+        const float comp_t1_r = j11_R * spring_f0_r + j12_R * gravity_tp_r;
+        const float comp_t2_r = j21_R * spring_f0_r + j22_R * gravity_tp_r;
+        static float last_t1_l = 0.0f;
+        static float last_t2_l = 0.0f;
+        static float last_t1_r = 0.0f;
+        static float last_t2_r = 0.0f;
+
+        if (SBUS_Data.Channel[9] < 100 || !isfinite(dt) || dt <= 0.0f) {
+            last_t1_l = last_t2_l = last_t1_r = last_t2_r = 0.0f;
+        } else {
+            const float max_step = VMC_TEST_COMPENSATION_TORQUE_SLEW_RATE_NM_S * dt;
+            const float limited_t1_l = VMC_TestOnly_SlewCompensationTorque(
+                    comp_t1_l, &last_t1_l, max_step);
+            const float limited_t2_l = VMC_TestOnly_SlewCompensationTorque(
+                    comp_t2_l, &last_t2_l, max_step);
+            const float limited_t1_r = VMC_TestOnly_SlewCompensationTorque(
+                    comp_t1_r, &last_t1_r, max_step);
+            const float limited_t2_r = VMC_TestOnly_SlewCompensationTorque(
+                    comp_t2_r, &last_t2_r, max_step);
+            data->Contronller_Data.T1_L += limited_t1_l - comp_t1_l;
+            data->Contronller_Data.T2_L += limited_t2_l - comp_t2_l;
+            data->Contronller_Data.T1_R += limited_t1_r - comp_t1_r;
+            data->Contronller_Data.T2_R += limited_t2_r - comp_t2_r;
+        }
+    }
+#endif
 
     // 保存输入的Tp值
     data->Contronller_Data.Tp_L = TpL; // 左侧 Tp
