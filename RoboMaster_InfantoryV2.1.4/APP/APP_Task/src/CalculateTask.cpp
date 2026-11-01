@@ -72,8 +72,7 @@ int last_task_time = 0;
 int Calculate_time;
 
 void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
-                   float TpR, float dt, float spring_f0_l, float spring_f0_r,
-                   float gravity_tp_l, float gravity_tp_r);
+                   float TpR, float dt);
 
 float angle_to_rad(float degrees);
 
@@ -488,12 +487,29 @@ void CaculateTask(void *pvParameters) {
 #else
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
 #endif
-        /* 仅台架：对气弹簧补偿叠加腿长速度阻尼，不修改 PID、LQR 或 VMC 反馈。 */
+        /* 仅台架：对气弹簧补偿叠加原始腿长差分阻尼。
+         * 这里刻意不用 Leg_Data.d_L0：该变量是全局滤波速度，还供 Kalman 等模块使用。
+         * 本地差分仅服务本测试补偿，正式版和其余控制路径均不受影响。 */
         float spring_damping_f0_l = 0.0f;
         float spring_damping_f0_r = 0.0f;
 #if LEG_CONTROL_TEST_MODE
-        spring_damping_f0_l = -LEG_TEST_SPRING_F0_DAMPING_KD * pClassicData->Leg_Data.d_L0_L;
-        spring_damping_f0_r = -LEG_TEST_SPRING_F0_DAMPING_KD * pClassicData->Leg_Data.d_L0_R;
+        static float last_damping_l0_l = 0.0f;
+        static float last_damping_l0_r = 0.0f;
+        static bool damping_l0_initialized = false;
+        if (!damping_l0_initialized || cal_dt <= 0.0f) {
+            last_damping_l0_l = pClassicData->Leg_Data.L0_L;
+            last_damping_l0_r = pClassicData->Leg_Data.L0_R;
+            damping_l0_initialized = true;
+        } else {
+            const float raw_damping_dl_l =
+                    (pClassicData->Leg_Data.L0_L - last_damping_l0_l) / cal_dt;
+            const float raw_damping_dl_r =
+                    (pClassicData->Leg_Data.L0_R - last_damping_l0_r) / cal_dt;
+            spring_damping_f0_l = -LEG_TEST_SPRING_F0_DAMPING_KD * raw_damping_dl_l;
+            spring_damping_f0_r = -LEG_TEST_SPRING_F0_DAMPING_KD * raw_damping_dl_r;
+            last_damping_l0_l = pClassicData->Leg_Data.L0_L;
+            last_damping_l0_r = pClassicData->Leg_Data.L0_R;
+        }
 #endif
         pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
                 + spring_damping_f0_l
@@ -574,8 +590,7 @@ void CaculateTask(void *pvParameters) {
         VMC_Calculate(pClassicData, pClassicData->Contronller_Data.F0_L,
                       pClassicData->Contronller_Data.F0_R,
                       pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
-                      pClassicData->Contronller_Data.Tp_R + gravity_tp_r, cal_dt,
-                      spring_preload_f0_l, spring_preload_f0_r, gravity_tp_l, gravity_tp_r);
+                      pClassicData->Contronller_Data.Tp_R + gravity_tp_r, cal_dt);
 
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
@@ -605,12 +620,7 @@ void CaculateTask(void *pvParameters) {
 }
 
 void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
-                   float TpR, float dt, float spring_f0_l, float spring_f0_r,
-                   float gravity_tp_l, float gravity_tp_r) {
-    (void)spring_f0_l;
-    (void)spring_f0_r;
-    (void)gravity_tp_l;
-    (void)gravity_tp_r;
+                   float TpR, float dt) {
     float inv_dt = 1.0f / dt;
 
     // 机械臂连杆长度定义
