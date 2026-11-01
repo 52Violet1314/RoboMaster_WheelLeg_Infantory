@@ -11,6 +11,7 @@
 #include "app_Data_Task.hpp"
 #include "app_ins_cal.h"
 #include "app_leg_angle_target.hpp"
+#include "app_leg_force_compensation.hpp"
 #include "app_leg_gravity_compensation.hpp"
 #include "app_motor.h"
 #include "arm_math.h"
@@ -392,16 +393,22 @@ void CaculateTask(void *pvParameters) {
         } else if (leg_knob_raw > leg_knob_raw_max) {
             leg_knob_raw = leg_knob_raw_max;
         }
+        float leg_knob_target_m = leg_knob_length_min_m;
         if (leg_knob_raw <= leg_knob_low_deadband_raw) {
-            pClassicData->Target_Data.Target_LegLong = leg_knob_length_min_m;
+            leg_knob_target_m = leg_knob_length_min_m;
         } else if (leg_knob_raw >= leg_knob_high_deadband_raw) {
-            pClassicData->Target_Data.Target_LegLong = leg_knob_length_max_m;
+            leg_knob_target_m = leg_knob_length_max_m;
         } else {
             const float leg_knob_ratio =
                     (float)(leg_knob_raw - leg_knob_active_min_raw) / leg_knob_active_span_raw;
-            pClassicData->Target_Data.Target_LegLong = leg_knob_length_min_m +
+            leg_knob_target_m = leg_knob_length_min_m +
                     (leg_knob_length_max_m - leg_knob_length_min_m) * leg_knob_ratio;
         }
+        /* 正式逻辑：旋钮始终映射 150~384 mm；LQR 打开时，350~384 mm 作为
+         * 高端死区，进入腿长 PID 的实际指令固定在 350 mm，确保不超出 K 表。 */
+        pClassicData->Target_Data.Target_LegLong = lqr_enabled
+                ? fminf(leg_knob_target_m, 0.350f)
+                : leg_knob_target_m;
 
         /* 原行驶腿长三档：CH8 下/中/上对应 150/250/350 mm；旋钮 VrB 测试期间关闭。 */
         // if (SBUS_Data.Channel[8] < -100) {
@@ -461,8 +468,14 @@ void CaculateTask(void *pvParameters) {
         // const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
         // pClassicData->Contronller_Data.F0_L = leg_l_out + stand_offset_l;
         // pClassicData->Contronller_Data.F0_R = leg_r_out + stand_offset_r;
-        pClassicData->Contronller_Data.F0_L = leg_l_out;
-        pClassicData->Contronller_Data.F0_R = leg_r_out;
+        /* 气弹簧预压补偿始终生效：左右腿按各自实际 L0 查表，独立叠加到 PID。
+         * 150~350 mm 为 10 mm 表插值，350~384 mm 恒用 350 mm 的补偿力。 */
+        const float spring_preload_f0_l =
+                LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_L);
+        const float spring_preload_f0_r =
+                LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
+        pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l;
+        pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r;
 
         /* 台架气弹簧预压测试：暂时关闭 roll 左右腿差分稳定；原逻辑保留。 */
         // constexpr float roll_f0_limit = 8.0f;
