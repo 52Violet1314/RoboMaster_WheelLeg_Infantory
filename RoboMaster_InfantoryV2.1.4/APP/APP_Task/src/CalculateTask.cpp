@@ -111,8 +111,8 @@ void CaculateTask(void *pvParameters) {
     StandState_t stand_state = StandState_NotUp;
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
-    Float_PID_Init(&leg_length_pid_l, 700.0f, 1.2f, 0.4f);
-    Float_PID_Init(&leg_length_pid_r, 700.0f, 1.2f, 0.4f);
+    Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
+    Float_PID_Init(&leg_length_pid_r, 0.0f, 0.0f, 0.0f);//200 1.2 0.4
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     Float_PID_Init(&leg_phi_pid_l, 15.0f, 0.0f, 3.0f);
     Float_PID_Init(&leg_phi_pid_r, 15.0f, 0.0f, 3.0f);
@@ -350,16 +350,12 @@ void CaculateTask(void *pvParameters) {
             LQR_K_CalculateWithGain(pClassicData, scheduled_gain);
         }
 
-        /* 测试版：总使能后全程补偿；正式版：总使能且已起身后补偿。
+        /* 测试版不叠加腿重力补偿；正式版总使能且已起身后叠加。
          * 任一模式下，总使能关闭时 ControlTask 均向全部电机发送零力矩。 */
         float gravity_tp_l = 0.0f;
         float gravity_tp_r = 0.0f;
-#if LEG_GRAVITY_COMPENSATION_ENABLE
-#if LEG_CONTROL_TEST_MODE
-        if (StandUp_Flag) {
-#else
+#if LEG_GRAVITY_COMPENSATION_ENABLE && !LEG_CONTROL_TEST_MODE
         if (leg_pid_enabled && StandUp_Flag) {
-#endif
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
@@ -477,9 +473,17 @@ void CaculateTask(void *pvParameters) {
         /* 气弹簧预压补偿始终生效：左右腿按各自实际 L0 查表，独立叠加到 PID。
          * 150~350 mm 为 10 mm 表插值，350~384 mm 恒用 350 mm 的补偿力。 */
         const float spring_preload_f0_l =
+#if LEG_CONTROL_TEST_MODE
+                LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
+#else
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_L);
+#endif
         const float spring_preload_f0_r =
+#if LEG_CONTROL_TEST_MODE
+                LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
+#else
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
+#endif
         pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
 #if !LEG_CONTROL_TEST_MODE
                 + stand_offset_l
