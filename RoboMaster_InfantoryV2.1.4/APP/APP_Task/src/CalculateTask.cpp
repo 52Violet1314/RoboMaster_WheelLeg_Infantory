@@ -475,50 +475,44 @@ void CaculateTask(void *pvParameters) {
 #endif
         /* 气弹簧预压补偿始终生效：左右腿按各自实际 L0 查表，独立叠加到 PID。
          * 150~350 mm 为 10 mm 表插值，350~384 mm 恒用 350 mm 的补偿力。 */
-        const float spring_preload_f0_l =
+        float spring_preload_f0_l =
 #if LEG_CONTROL_TEST_MODE
                 LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
 #else
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_L);
 #endif
-        const float spring_preload_f0_r =
+        float spring_preload_f0_r =
 #if LEG_CONTROL_TEST_MODE
                 LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
 #else
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
 #endif
-        /* 仅台架：对气弹簧补偿叠加原始腿长差分阻尼。
-         * 这里刻意不用 Leg_Data.d_L0：该变量是全局滤波速度，还供 Kalman 等模块使用。
-         * 本地差分仅服务本测试补偿，正式版和其余控制路径均不受影响。 */
-        float spring_damping_f0_l = 0.0f;
-        float spring_damping_f0_r = 0.0f;
+        /* 台架：仅限制气弹簧补偿力每个控制周期的变化，避免查表跳变。
+         * 总使能关闭时复位；下一次使能从零按 0.3 N/周期爬升。 */
 #if LEG_CONTROL_TEST_MODE
-        static float last_damping_l0_l = 0.0f;
-        static float last_damping_l0_r = 0.0f;
-        static bool damping_l0_initialized = false;
-        if (!damping_l0_initialized || cal_dt <= 0.0f) {
-            last_damping_l0_l = pClassicData->Leg_Data.L0_L;
-            last_damping_l0_r = pClassicData->Leg_Data.L0_R;
-            damping_l0_initialized = true;
+        static float last_spring_preload_f0_l = 0.0f;
+        static float last_spring_preload_f0_r = 0.0f;
+        if (!leg_pid_enabled) {
+            last_spring_preload_f0_l = 0.0f;
+            last_spring_preload_f0_r = 0.0f;
         } else {
-            const float raw_damping_dl_l =
-                    (pClassicData->Leg_Data.L0_L - last_damping_l0_l) / cal_dt;
-            const float raw_damping_dl_r =
-                    (pClassicData->Leg_Data.L0_R - last_damping_l0_r) / cal_dt;
-            spring_damping_f0_l = -LEG_TEST_SPRING_F0_DAMPING_KD * raw_damping_dl_l;
-            spring_damping_f0_r = -LEG_TEST_SPRING_F0_DAMPING_KD * raw_damping_dl_r;
-            last_damping_l0_l = pClassicData->Leg_Data.L0_L;
-            last_damping_l0_r = pClassicData->Leg_Data.L0_R;
+            const float force_step = LEG_TEST_SPRING_COMPENSATION_SLEW_STEP_N;
+            spring_preload_f0_l = fminf(fmaxf(spring_preload_f0_l,
+                                              last_spring_preload_f0_l - force_step),
+                                         last_spring_preload_f0_l + force_step);
+            spring_preload_f0_r = fminf(fmaxf(spring_preload_f0_r,
+                                              last_spring_preload_f0_r - force_step),
+                                         last_spring_preload_f0_r + force_step);
+            last_spring_preload_f0_l = spring_preload_f0_l;
+            last_spring_preload_f0_r = spring_preload_f0_r;
         }
 #endif
         pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
-                + spring_damping_f0_l
 #if !LEG_CONTROL_TEST_MODE
                 + stand_offset_l
 #endif
                 ;
         pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r
-                + spring_damping_f0_r
 #if !LEG_CONTROL_TEST_MODE
                 + stand_offset_r
 #endif
@@ -598,19 +592,19 @@ void CaculateTask(void *pvParameters) {
 #if LEG_CONTROL_TEST_MODE && LEG_TEST_VMC_TORQUE_QUANTIZATION_ENABLE
         /* 台架诊断：只量化最终发送的髋电机力矩；不改变 VMC、F0 或轮毂控制。 */
         pClassicData->Contronller_Data.T1_L =
-                roundf(pClassicData->Contronller_Data.T1_L /
+                truncf(pClassicData->Contronller_Data.T1_L /
                        LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
                 LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
         pClassicData->Contronller_Data.T2_L =
-                roundf(pClassicData->Contronller_Data.T2_L /
+                truncf(pClassicData->Contronller_Data.T2_L /
                        LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
                 LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
         pClassicData->Contronller_Data.T1_R =
-                roundf(pClassicData->Contronller_Data.T1_R /
+                truncf(pClassicData->Contronller_Data.T1_R /
                        LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
                 LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
         pClassicData->Contronller_Data.T2_R =
-                roundf(pClassicData->Contronller_Data.T2_R /
+                truncf(pClassicData->Contronller_Data.T2_R /
                        LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
                 LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
 #endif
