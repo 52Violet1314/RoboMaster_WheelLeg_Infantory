@@ -11,9 +11,8 @@
  * 起身前/后 F0 预输出；正式版恢复状态机、roll、预输出，并在总使能且已起身后开腿重力补偿。 */
 #define LEG_CONTROL_TEST_MODE 1
 
-/* 仅台架：气弹簧补偿力截断到 0.1 N，并限制每周期最大变化量 [N]。 */
+/* 仅台架：气弹簧补偿力截断到 0.1 N。 */
 #define LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N 0.1f
-#define LEG_TEST_SPRING_COMPENSATION_SLEW_STEP_N  0.3f
 
 extern uint8_t ControlState;
 

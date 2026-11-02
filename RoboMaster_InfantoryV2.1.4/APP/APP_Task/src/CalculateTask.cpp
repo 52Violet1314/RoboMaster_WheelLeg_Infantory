@@ -487,8 +487,7 @@ void CaculateTask(void *pvParameters) {
 #else
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
 #endif
-        /* 台架：仅截断气弹簧补偿力并限制其每个控制周期的变化，避免查表跳变。
-         * 总使能关闭时复位；下一次使能从零按 0.3 N/周期爬升。 */
+        /* 台架：仅截断气弹簧补偿力到 0.1 N。 */
 #if LEG_CONTROL_TEST_MODE
         spring_preload_f0_l = truncf(spring_preload_f0_l /
                                      LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N) *
@@ -496,22 +495,6 @@ void CaculateTask(void *pvParameters) {
         spring_preload_f0_r = truncf(spring_preload_f0_r /
                                      LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N) *
                              LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N;
-        static float last_spring_preload_f0_l = 0.0f;
-        static float last_spring_preload_f0_r = 0.0f;
-        if (!leg_pid_enabled) {
-            last_spring_preload_f0_l = 0.0f;
-            last_spring_preload_f0_r = 0.0f;
-        } else {
-            const float force_step = LEG_TEST_SPRING_COMPENSATION_SLEW_STEP_N;
-            spring_preload_f0_l = fminf(fmaxf(spring_preload_f0_l,
-                                              last_spring_preload_f0_l - force_step),
-                                         last_spring_preload_f0_l + force_step);
-            spring_preload_f0_r = fminf(fmaxf(spring_preload_f0_r,
-                                              last_spring_preload_f0_r - force_step),
-                                         last_spring_preload_f0_r + force_step);
-            last_spring_preload_f0_l = spring_preload_f0_l;
-            last_spring_preload_f0_r = spring_preload_f0_r;
-        }
 #endif
         pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
 #if !LEG_CONTROL_TEST_MODE
@@ -604,7 +587,7 @@ void CaculateTask(void *pvParameters) {
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
                 // LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
-                LeftLegVMC_Debug_Print(pClassicData);
+                 LeftLegVMC_Debug_Print(pClassicData);   // 暂停左腿补偿/VMC CSV 调试
                 // IMU_Data_Print(pClassicData);
                 // Control_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
