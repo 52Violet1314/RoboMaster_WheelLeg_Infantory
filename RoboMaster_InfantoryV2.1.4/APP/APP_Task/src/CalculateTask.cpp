@@ -115,10 +115,10 @@ void CaculateTask(void *pvParameters) {
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
-    Float_PID_Init(&leg_length_pid_r, 0.0f, 0.0f, 0.0f);//200 1.2 0.4
+    Float_PID_Init(&leg_length_pid_r, 300.0f, 1.0f, 1.0f);//200 1.2 0.4
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
-    Float_PID_Init(&leg_phi_pid_l, 15.0f, 0.0f, 3.0f);
-    Float_PID_Init(&leg_phi_pid_r, 15.0f, 0.0f, 3.0f);
+    Float_PID_Init(&leg_phi_pid_l, 1200.0f, 1.5f, 2.0f);
+    Float_PID_Init(&leg_phi_pid_r, 1200.0f, 1.5f, 2.0f);
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P2, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -487,9 +487,15 @@ void CaculateTask(void *pvParameters) {
 #else
                 LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
 #endif
-        /* 台架：仅限制气弹簧补偿力每个控制周期的变化，避免查表跳变。
+        /* 台架：仅截断气弹簧补偿力并限制其每个控制周期的变化，避免查表跳变。
          * 总使能关闭时复位；下一次使能从零按 0.3 N/周期爬升。 */
 #if LEG_CONTROL_TEST_MODE
+        spring_preload_f0_l = truncf(spring_preload_f0_l /
+                                     LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N) *
+                             LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N;
+        spring_preload_f0_r = truncf(spring_preload_f0_r /
+                                     LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N) *
+                             LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N;
         static float last_spring_preload_f0_l = 0.0f;
         static float last_spring_preload_f0_r = 0.0f;
         if (!leg_pid_enabled) {
@@ -588,26 +594,6 @@ void CaculateTask(void *pvParameters) {
 
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
-
-#if LEG_CONTROL_TEST_MODE && LEG_TEST_VMC_TORQUE_QUANTIZATION_ENABLE
-        /* 台架诊断：只量化最终发送的髋电机力矩；不改变 VMC、F0 或轮毂控制。 */
-        pClassicData->Contronller_Data.T1_L =
-                truncf(pClassicData->Contronller_Data.T1_L /
-                       LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
-                LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
-        pClassicData->Contronller_Data.T2_L =
-                truncf(pClassicData->Contronller_Data.T2_L /
-                       LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
-                LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
-        pClassicData->Contronller_Data.T1_R =
-                truncf(pClassicData->Contronller_Data.T1_R /
-                       LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
-                LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
-        pClassicData->Contronller_Data.T2_R =
-                truncf(pClassicData->Contronller_Data.T2_R /
-                       LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM) *
-                LEG_TEST_VMC_TORQUE_QUANTIZATION_STEP_NM;
-#endif
 
         /* 打印节流：两次打印至少间隔 100ms，避免 DMA 串口跟不上导致 CalculateTask 阻塞超时 */
         {
