@@ -80,6 +80,23 @@ float PID_Max_Float(Float_PID_Typedef *PID, float Target, float Current,
   return PID->Res;
 }
 
+/* 带真实时间步长的浮点 PID：Ki 单位为输出/(误差·s)，Kd 单位为输出·s/误差。 */
+float PID_Max_Float_Dt(Float_PID_Typedef *PID, float Target, float Current,
+                       float Err_Int_Max, float Res_Max, float dt) {
+  PID->Error = Target - Current;
+  if (PID->Ki > 0.0f) {
+    PID->Err_Int += PID->Error * dt;
+    PID->Err_Int = fast_clip(PID->Err_Int, -Err_Int_Max, Err_Int_Max);
+  }
+  const float error_rate = (PID->Error - PID->Last_Error) / dt;
+  PID->Dout = PID->Kd * 0.6f * error_rate + 0.4f * PID->Last_Dout;
+  PID->Last_Error = PID->Error;
+  PID->Last_Dout = PID->Dout;
+  PID->Res = PID->Kp * PID->Error + PID->Ki * PID->Err_Int + PID->Dout;
+  PID->Res = fast_clip(PID->Res, -Res_Max, Res_Max);
+  return PID->Res;
+}
+
 int PID_Loc_Close_Max(PID_Typedef *PID, int Target, int Current,
                       int Err_Int_Max, int Res_Max, int Loc_Max) {
   PID->Error = Target - Current;

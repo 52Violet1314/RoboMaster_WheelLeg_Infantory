@@ -114,8 +114,8 @@ void CaculateTask(void *pvParameters) {
     StandState_t stand_state = StandState_NotUp;
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
-    Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
-    Float_PID_Init(&leg_length_pid_r, 300.0f, 1.0f, 1.0f);//200 1.2 0.4
+    Float_PID_Init(&leg_length_pid_l, 250.0f, 1.0f, 0.2f);
+    Float_PID_Init(&leg_length_pid_r, 250.0f, 1.0f, 0.2f);//200 1.2 0.4
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     Float_PID_Init(&leg_phi_pid_l, 1200.0f, 1.5f, 2.0f);
     Float_PID_Init(&leg_phi_pid_r, 1200.0f, 1.5f, 2.0f);
@@ -458,12 +458,12 @@ void CaculateTask(void *pvParameters) {
             leg_length_pid_l.Ki = 0.0f;
             leg_length_pid_r.Ki = 0.0f;
         }
-        float leg_l_out = PID_Max_Float(&leg_length_pid_l, leg_target,
-                                              pClassicData->Leg_Data.L0_L,
-                                              leg_l_int_limit, leg_l_out_limit);
-        float leg_r_out = PID_Max_Float(&leg_length_pid_r, leg_target,
-                                              pClassicData->Leg_Data.L0_R,
-                                              leg_r_int_limit, leg_r_out_limit);
+        float leg_l_out = PID_Max_Float_Dt(&leg_length_pid_l, leg_target,
+                                           pClassicData->Leg_Data.L0_L,
+                                           leg_l_int_limit, leg_l_out_limit, cal_dt);
+        float leg_r_out = PID_Max_Float_Dt(&leg_length_pid_r, leg_target,
+                                           pClassicData->Leg_Data.L0_R,
+                                           leg_r_int_limit, leg_r_out_limit, cal_dt);
         leg_length_pid_l.Ki = leg_l_ki;
         leg_length_pid_r.Ki = leg_r_ki;
         // pClassicData->Contronller_Data.F0_L = 15.5f + leg_l_out;
