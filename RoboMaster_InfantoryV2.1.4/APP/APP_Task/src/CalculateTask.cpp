@@ -80,8 +80,6 @@ void LEG_Data_Print(Classic_Data_t *pClassicData);
 
 void Motor_Data_Print(Classic_Data_t *pClassicData);
 
-void Control_Data_Print(Classic_Data_t *pClassicData);
-
 void IMU_Data_Print(Classic_Data_t *pClassicData);
 
 void State_Data_Print(Classic_Data_t *pClassicData);
@@ -89,8 +87,8 @@ void State_Data_Print(Classic_Data_t *pClassicData);
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
-/* 左腿气弹簧/VMC 诊断：仅打印，不参与控制。 */
-void LeftLegVMC_Debug_Print(Classic_Data_t *pClassicData);
+/* 右腿弹簧补偿全链路诊断：仅打印，不参与控制。 */
+void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData);
 
 
 void Classic_Data_Update(Classic_Data_t *pClassicData);
@@ -587,9 +585,8 @@ void CaculateTask(void *pvParameters) {
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
                 // LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
-                 LeftLegVMC_Debug_Print(pClassicData);   // 暂停左腿补偿/VMC CSV 调试
+                // RightLegCompensation_Debug_Print(pClassicData); // 暂停右腿补偿 CSV 调试
                 // IMU_Data_Print(pClassicData);
-                // Control_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
                 // WheelKalman_Print(&Wheel_Kalman_R, 'R'); // 右侧：原始位置、原始速度、滤波位置、滤波速度
@@ -890,62 +887,6 @@ void Motor_Data_Print(Classic_Data_t *pClassicData) {
                milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000);
 }
 
-void Control_Data_Print(Classic_Data_t *pClassicData) {
-    // 计算每个控制量的绝对值
-    float fw_l_abs = 0.0f, fw_r_abs = 0.0f, tp_l_abs = 0.0f, tp_r_abs = 0.0f;
-    float t1_l_abs = 0.0f, t2_l_abs = 0.0f, t1_r_abs = 0.0f, t2_r_abs = 0.0f;
-
-    arm_abs_f32(&pClassicData->Contronller_Data.Fw_L, &fw_l_abs, 1);
-    arm_abs_f32(&pClassicData->Contronller_Data.Fw_R, &fw_r_abs, 1);
-    arm_abs_f32(&pClassicData->Contronller_Data.Tp_L, &tp_l_abs, 1);
-    arm_abs_f32(&pClassicData->Contronller_Data.Tp_R, &tp_r_abs, 1);
-    arm_abs_f32(&pClassicData->Contronller_Data.T1_L, &t1_l_abs, 1);
-    arm_abs_f32(&pClassicData->Contronller_Data.T2_L, &t2_l_abs, 1);
-    arm_abs_f32(&pClassicData->Contronller_Data.T1_R, &t1_r_abs, 1);
-    arm_abs_f32(&pClassicData->Contronller_Data.T2_R, &t2_r_abs, 1);
-
-    // 计算每个控制量的整数部分
-    int fw_l_int = (int) (pClassicData->Contronller_Data.Fw_L * 1000) / 1000;
-    int fw_r_int = (int) (pClassicData->Contronller_Data.Fw_R * 1000) / 1000;
-    int tp_l_int = (int) (pClassicData->Contronller_Data.Tp_L * 1000) / 1000;
-    int tp_r_int = (int) (pClassicData->Contronller_Data.Tp_R * 1000) / 1000;
-    int t1_l_int = (int) (pClassicData->Contronller_Data.T1_L * 1000) / 1000;
-    int t2_l_int = (int) (pClassicData->Contronller_Data.T2_L * 1000) / 1000;
-    int t1_r_int = (int) (pClassicData->Contronller_Data.T1_R * 1000) / 1000;
-    int t2_r_int = (int) (pClassicData->Contronller_Data.T2_R * 1000) / 1000;
-
-    // 计算每个控制量的小数部分
-    int fw_l_dec = (int) (fw_l_abs * 1000) % 1000;
-    int fw_r_dec = (int) (fw_r_abs * 1000) % 1000;
-    int tp_l_dec = (int) (tp_l_abs * 1000) % 1000;
-    int tp_r_dec = (int) (tp_r_abs * 1000) % 1000;
-    int t1_l_dec = (int) (t1_l_abs * 1000) % 1000;
-    int t2_l_dec = (int) (t2_l_abs * 1000) % 1000;
-    int t1_r_dec = (int) (t1_r_abs * 1000) % 1000;
-    int t2_r_dec = (int) (t2_r_abs * 1000) % 1000;
-
-    // 处理符号：当整数部分为0但原始值为负时，手动输出负号
-    char fw_l_sign = (fw_l_int == 0 && pClassicData->Contronller_Data.Fw_L < 0.0f) ? '-' : ' ';
-    char fw_r_sign = (fw_r_int == 0 && pClassicData->Contronller_Data.Fw_R < 0.0f) ? '-' : ' ';
-    char tp_l_sign = (tp_l_int == 0 && pClassicData->Contronller_Data.Tp_L < 0.0f) ? '-' : ' ';
-    char tp_r_sign = (tp_r_int == 0 && pClassicData->Contronller_Data.Tp_R < 0.0f) ? '-' : ' ';
-    char t1_l_sign = (t1_l_int == 0 && pClassicData->Contronller_Data.T1_L < 0.0f) ? '-' : ' ';
-    char t2_l_sign = (t2_l_int == 0 && pClassicData->Contronller_Data.T2_L < 0.0f) ? '-' : ' ';
-    char t1_r_sign = (t1_r_int == 0 && pClassicData->Contronller_Data.T1_R < 0.0f) ? '-' : ' ';
-    char t2_r_sign = (t2_r_int == 0 && pClassicData->Contronller_Data.T2_R < 0.0f) ? '-' : ' ';
-
-    // 打印输出，按照Fw_L,Fw_R,Tp_L,Tp_R,T1_L,T2_L,T1_R,T2_R顺序
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
-               fw_l_sign, fw_l_int, fw_l_dec,
-               fw_r_sign, fw_r_int, fw_r_dec,
-               tp_l_sign, tp_l_int, tp_l_dec,
-               tp_r_sign, tp_r_int, tp_r_dec,
-               t1_l_sign, t1_l_int, t1_l_dec,
-               t2_l_sign, t2_l_int, t2_l_dec,
-               t1_r_sign, t1_r_int, t1_r_dec,
-               t2_r_sign, t2_r_int, t2_r_dec);
-}
-
 void IMU_Data_Print(Classic_Data_t *pClassicData) {
     /* FireWater: 纯 CSV，依次为 roll,pitch,yaw,droll,dpitch,dyaw。 */
     const int value_milli[6] = {
@@ -993,33 +934,68 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
                 milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
 }
 
-void LeftLegVMC_Debug_Print(Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV，依次为：
-     * L0_L,springF0_L,finalF0_L,T1_L,T2_L。
-     * 单位：m,N,N,N*m,N*m。
-     * springF0 使用与控制路径完全相同的测试/正式查表函数。
-     * T1/T2 是经过 VMC 与最终输出限幅后的左后/左前髋电机力矩。 */
-    const float values[5] = {
-        pClassicData->Leg_Data.L0_L,
+void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData) {
+    /* FireWater 纯 CSV，按顺序为：
+     * rawP4,rawP3,rawV4,rawV3,phi1R,phi4R,L0R,dL0R,phi0R,targetL0,errorR,
+     * springRaw,springApplied,pidP,pidI,pidD,pidOut,finalF0R,T1R,T2R,sentT1R,sentT2R。
+     * 单位依次为 rad,rad,rad/s,rad/s,rad,rad,m,m/s,rad,m,m,N,N,N,N,N,N,N,N*m,N*m,N*m,N*m。
+     * springRaw 为拟合/查表原值；springApplied 为控制实际叠加的 0.1 N 截断值。
+     * sentT1R/sentT2R 是 ControlTask 发送给右髋 MIT 的实际符号。 */
+    const float spring_raw =
 #if LEG_CONTROL_TEST_MODE
-        LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L),
+            LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
 #else
-        LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_L),
+            LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
 #endif
-        pClassicData->Contronller_Data.F0_L,
-        pClassicData->Contronller_Data.T1_L,
-        pClassicData->Contronller_Data.T2_L,
+    float spring_applied = spring_raw;
+#if LEG_CONTROL_TEST_MODE
+    spring_applied = truncf(spring_applied /
+                            LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N) *
+                     LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N;
+#endif
+    const float values[] = {
+        DM_8009P4.data.position_rad,
+        DM_8009P3.data.position_rad,
+        DM_8009P4.data.velocity_rad_s,
+        DM_8009P3.data.velocity_rad_s,
+        pClassicData->Motor_Data.R1_Motor_POS,
+        pClassicData->Motor_Data.R2_Motor_POS,
+        pClassicData->Leg_Data.L0_R,
+        pClassicData->Leg_Data.d_L0_R,
+        pClassicData->Leg_Data.phi_0_R,
+        pClassicData->Target_Data.Target_LegLong,
+        leg_length_pid_r.Error,
+        spring_raw,
+        spring_applied,
+        leg_length_pid_r.Kp * leg_length_pid_r.Error,
+        leg_length_pid_r.Ki * leg_length_pid_r.Err_Int,
+        leg_length_pid_r.Dout,
+        leg_length_pid_r.Res,
+        pClassicData->Contronller_Data.F0_R,
+        pClassicData->Contronller_Data.T1_R,
+        pClassicData->Contronller_Data.T2_R,
+        -pClassicData->Contronller_Data.T1_R,
+        -pClassicData->Contronller_Data.T2_R,
     };
-    int milli[5];
-    for (uint32_t index = 0; index < 5U; ++index)
-        milli[index] = (int)lroundf(values[index] * 1000.0f);
-
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
-               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
-               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
-               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
-               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
-               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000);
+    char csv[UART_BUFFER_SIZE];
+    size_t used = 0U;
+    for (uint32_t index = 0; index < sizeof(values) / sizeof(values[0]); ++index) {
+        const long milli = lroundf(values[index] * 1000.0f);
+        const long magnitude = milli < 0L ? -milli : milli;
+        const int written = snprintf(csv + used, sizeof(csv) - used,
+                                     index == 0U ? "%c%ld.%03ld" : ",%c%ld.%03ld",
+                                     milli < 0L ? '-' : ' ', magnitude / 1000L,
+                                     magnitude % 1000L);
+        if (written <= 0 || (size_t)written >= sizeof(csv) - used)
+            return;
+        used += (size_t)written;
+    }
+    if (used + 2U >= sizeof(csv))
+        return;
+    csv[used++] = '\r';
+    csv[used++] = '\n';
+    csv[used] = '\0';
+    uart_print("%s", csv);
 }
 
 void Classic_Data_Update(Classic_Data_t *pClassicData) {
