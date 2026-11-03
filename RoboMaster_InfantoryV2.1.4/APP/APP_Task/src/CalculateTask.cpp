@@ -575,7 +575,7 @@ void CaculateTask(void *pvParameters) {
         {
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
-            if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(20)) {
+            if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
