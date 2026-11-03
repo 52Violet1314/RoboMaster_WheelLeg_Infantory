@@ -16,6 +16,7 @@
 #include "app_motor.h"
 #include "arm_math.h"
 #include "bsp_UART.h"
+#include "bsp_fdcan.h"
 #include "event_groups.h"
 #include "fdcan.h"
 #include "main.h"
@@ -931,9 +932,9 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
 void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData,
                                       float cal_dt) {
     /* FireWater 纯 CSV，按顺序为：
-     * dt_us,rawP4,rawP3,rawV4,rawV3,phi1R,phi4R,L0R,dL0R,phi0R,targetL0,
+     * dt_us,motor_complete_dt_us,rawP4,rawP3,rawV4,rawV3,phi1R,phi4R,L0R,dL0R,phi0R,targetL0,
      * springFittedR,finalF0R,T1R,T2R,sentT1R,sentT2R。
-     * 单位依次为 us,rad,rad,rad/s,rad/s,rad,rad,m,m/s,rad,m,N,N,N*m,N*m,N*m,N*m。
+     * 前两列单位为 us；其余依次为 rad,rad,rad/s,rad/s,rad,rad,m,m/s,rad,m,N,N,N*m,N*m,N*m,N*m。
      * 这是裸露测试链路：springFittedR 直接叠加到 F0，没有截断、低通、阻尼或变化限幅。
      * sentT1R/sentT2R 是 ControlTask 发送给右髋 MIT 的实际符号。 */
     const float spring_raw =
@@ -958,7 +959,10 @@ void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData,
     };
     char csv[UART_BUFFER_SIZE];
     const uint32_t dt_us = (uint32_t)lroundf(cal_dt * 1.0e6f);
-    int first_written = snprintf(csv, sizeof(csv), "%lu", (unsigned long)dt_us);
+    const uint32_t motor_complete_dt_us = motor_feedback_complete_dt_us;
+    int first_written = snprintf(csv, sizeof(csv), "%lu,%lu",
+                                 (unsigned long)dt_us,
+                                 (unsigned long)motor_complete_dt_us);
     if (first_written <= 0 || (size_t)first_written >= sizeof(csv))
         return;
     size_t used = (size_t)first_written;

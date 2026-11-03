@@ -22,6 +22,8 @@
 static uint8_t   Motor_Data_ReadyBit       = 0;
 static TickType_t Motor_Data_LastComplete  = 0;
 static uint8_t   Motor_Data_HasCompleted   = 0;
+volatile uint32_t motor_feedback_complete_dt_us = 0;
+static uint32_t Motor_Feedback_LastCompleteUs = 0;
 
 void bsp_can_init(void) {
 
@@ -359,6 +361,12 @@ void fdcan1_rx_callback(void) {
   }
   BaseType_t pxHighPriorityTaskWoken = pdFALSE;
   if (Motor_Data_ReadyBit == 0x3F) {
+    const uint32_t complete_now_us = __HAL_TIM_GET_COUNTER(&htim5);
+    if (Motor_Feedback_LastCompleteUs != 0U) {
+      motor_feedback_complete_dt_us =
+          complete_now_us - Motor_Feedback_LastCompleteUs;
+    }
+    Motor_Feedback_LastCompleteUs = complete_now_us;
     xEventGroupSetBitsFromISR(DataGroup, MOTOR_Data_READY_BIT,
                               &pxHighPriorityTaskWoken);
     if (pxHighPriorityTaskWoken == pdTRUE) {
