@@ -88,7 +88,8 @@ void State_Data_Print(Classic_Data_t *pClassicData);
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
 /* 右腿弹簧补偿全链路诊断：仅打印，不参与控制。 */
-void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData);
+void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData,
+                                      float cal_dt);
 
 
 void Classic_Data_Update(Classic_Data_t *pClassicData);
@@ -471,29 +472,11 @@ void CaculateTask(void *pvParameters) {
         const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
         const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
 #endif
-        /* 气弹簧预压补偿始终生效：左右腿按各自实际 L0 查表，独立叠加到 PID。
-         * 150~350 mm 为 10 mm 表插值，350~384 mm 恒用 350 mm 的补偿力。 */
+        /* 气弹簧预压补偿：左右腿均按各自实际 L0 使用拟合函数，独立叠加到 PID。 */
         float spring_preload_f0_l =
-#if LEG_CONTROL_TEST_MODE
                 LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
-#else
-                LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_L);
-#endif
         float spring_preload_f0_r =
-#if LEG_CONTROL_TEST_MODE
                 LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
-#else
-                LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
-#endif
-        /* 台架：仅截断气弹簧补偿力到 0.1 N。 */
-#if LEG_CONTROL_TEST_MODE
-        spring_preload_f0_l = truncf(spring_preload_f0_l /
-                                     LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N) *
-                             LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N;
-        spring_preload_f0_r = truncf(spring_preload_f0_r /
-                                     LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N) *
-                             LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N;
-#endif
         pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
 #if !LEG_CONTROL_TEST_MODE
                 + stand_offset_l
@@ -576,7 +559,19 @@ void CaculateTask(void *pvParameters) {
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
 
-        /* 打印节流：两次打印至少间隔 100ms，避免 DMA 串口跟不上导致 CalculateTask 阻塞超时 */
+        /* 台架高频诊断：每两个成功控制周期输出一次右腿补偿全链路 CSV。
+         * 单行约 160 B，在 USART1 2 Mbps 下 500 Hz 约占 40% 线速；
+         * 不使用 1 kHz，避免串口自身反压影响控制周期。 */
+#if LEG_CONTROL_TEST_MODE
+        {
+            static uint8_t right_comp_debug_divider = 0U;
+            if (++right_comp_debug_divider >= 2U) {
+                right_comp_debug_divider = 0U;
+                RightLegCompensation_Debug_Print(pClassicData, cal_dt);
+            }
+        }
+#else
+        /* 正式版维持原调试节流，且默认不输出。 */
         {
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
@@ -594,6 +589,7 @@ void CaculateTask(void *pvParameters) {
             }
 
         }
+#endif
         xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
@@ -934,25 +930,16 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
                 milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
 }
 
-void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData) {
+void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData,
+                                      float cal_dt) {
     /* FireWater 纯 CSV，按顺序为：
-     * rawP4,rawP3,rawV4,rawV3,phi1R,phi4R,L0R,dL0R,phi0R,targetL0,errorR,
-     * springRaw,springApplied,pidP,pidI,pidD,pidOut,finalF0R,T1R,T2R,sentT1R,sentT2R。
-     * 单位依次为 rad,rad,rad/s,rad/s,rad,rad,m,m/s,rad,m,m,N,N,N,N,N,N,N,N*m,N*m,N*m,N*m。
-     * springRaw 为拟合/查表原值；springApplied 为控制实际叠加的 0.1 N 截断值。
+     * dt_us,rawP4,rawP3,rawV4,rawV3,phi1R,phi4R,L0R,dL0R,phi0R,targetL0,
+     * springFittedR,finalF0R,T1R,T2R,sentT1R,sentT2R。
+     * 单位依次为 us,rad,rad,rad/s,rad/s,rad,rad,m,m/s,rad,m,N,N,N*m,N*m,N*m,N*m。
+     * 这是裸露测试链路：springFittedR 直接叠加到 F0，没有截断、低通、阻尼或变化限幅。
      * sentT1R/sentT2R 是 ControlTask 发送给右髋 MIT 的实际符号。 */
     const float spring_raw =
-#if LEG_CONTROL_TEST_MODE
             LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
-#else
-            LegForceCompensation_GetF0(pClassicData->Leg_Data.L0_R);
-#endif
-    float spring_applied = spring_raw;
-#if LEG_CONTROL_TEST_MODE
-    spring_applied = truncf(spring_applied /
-                            LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N) *
-                     LEG_TEST_SPRING_COMPENSATION_QUANTIZATION_STEP_N;
-#endif
     const float values[] = {
         DM_8009P4.data.position_rad,
         DM_8009P3.data.position_rad,
@@ -964,13 +951,7 @@ void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData) {
         pClassicData->Leg_Data.d_L0_R,
         pClassicData->Leg_Data.phi_0_R,
         pClassicData->Target_Data.Target_LegLong,
-        leg_length_pid_r.Error,
         spring_raw,
-        spring_applied,
-        leg_length_pid_r.Kp * leg_length_pid_r.Error,
-        leg_length_pid_r.Ki * leg_length_pid_r.Err_Int,
-        leg_length_pid_r.Dout,
-        leg_length_pid_r.Res,
         pClassicData->Contronller_Data.F0_R,
         pClassicData->Contronller_Data.T1_R,
         pClassicData->Contronller_Data.T2_R,
@@ -978,12 +959,16 @@ void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData) {
         -pClassicData->Contronller_Data.T2_R,
     };
     char csv[UART_BUFFER_SIZE];
-    size_t used = 0U;
+    const uint32_t dt_us = (uint32_t)lroundf(cal_dt * 1.0e6f);
+    int first_written = snprintf(csv, sizeof(csv), "%lu", (unsigned long)dt_us);
+    if (first_written <= 0 || (size_t)first_written >= sizeof(csv))
+        return;
+    size_t used = (size_t)first_written;
     for (uint32_t index = 0; index < sizeof(values) / sizeof(values[0]); ++index) {
         const long milli = lroundf(values[index] * 1000.0f);
         const long magnitude = milli < 0L ? -milli : milli;
         const int written = snprintf(csv + used, sizeof(csv) - used,
-                                     index == 0U ? "%c%ld.%03ld" : ",%c%ld.%03ld",
+                                     ",%c%ld.%03ld",
                                      milli < 0L ? '-' : ' ', magnitude / 1000L,
                                      magnitude % 1000L);
         if (written <= 0 || (size_t)written >= sizeof(csv) - used)
