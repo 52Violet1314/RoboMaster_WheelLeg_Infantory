@@ -67,8 +67,27 @@ int task_time = 0;
 int last_task_time = 0;
 int Calculate_time;
 
-void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
-                   float TpR, float dt);
+typedef struct {
+    float phi1;
+    float phi4;
+    float phi2;
+    float phi3;
+    float L0;
+    float phi0;
+} VMC_LegKinematics_t;
+
+typedef struct {
+    VMC_LegKinematics_t left;
+    VMC_LegKinematics_t right;
+} VMC_Kinematics_t;
+
+static VMC_LegKinematics_t VMC_ForwardLeg(float phi1, float phi4);
+static void VMC_UpdateLegFeedback(Classic_Data_t *data,
+                                  VMC_Kinematics_t *kinematics, float dt);
+static void VMC_MapForceToJointTorques(Classic_Data_t *data,
+                                       const VMC_Kinematics_t *kinematics,
+                                       float F0L, float F0R, float TpL,
+                                       float TpR);
 
 float angle_to_rad(float degrees);
 
@@ -101,6 +120,7 @@ void CaculateTask(void *pvParameters) {
     bool lqr_pos_ref_recorded = false;
     static float Max_F0 = 50.0f;
     static float Max_Tp = 1.8f;
+    VMC_Kinematics_t vmc_kinematics;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
     // 任一侧超出阈值连续 1 s 才切换为未起身。
     /* 上电先等待腿角给出一次已起身判定，避免起身过程提前记录位置零点。 */
@@ -222,6 +242,10 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
                 +(DM_3519R.data.velocity_rad_s / 15.8f * 19.2f + 0.048f);
 
+        /* 本轮四个髋电机反馈已经就绪。先完成正运动学并写入 Leg_Data，
+         * 后面的 Kalman、起身判断、LQR、PID 与补偿都只使用本轮同一套腿状态。 */
+        VMC_UpdateLegFeedback(pClassicData, &vmc_kinematics, cal_dt);
+
         pClassicData->States_Data.d_yaw_err =
                 pClassicData->Target_Data.Target_yaw_vel + pClassicData->IMU_Data.delta_yaw;//计算yaw速度误差
         pClassicData->States_Data.yaw_err +=
@@ -273,14 +297,6 @@ void CaculateTask(void *pvParameters) {
         pClassicData->States_Data.d_x_err =
                 pClassicData->States_Data.d_X - pClassicData->Target_Data.Target_X_vel;//计算速度误差
         
-        // WheelKalman_Print(&Wheel_Kalman_L, 'L');
-        // WheelKalman_Print(&Wheel_Kalman_R, 'R');
-        //离地检测：识别腿支持力
-        float Fn_Left = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_L,pClassicData->Contronller_Data.Tp_L, pClassicData->Leg_Data.L0_L,pClassicData->Leg_Data.d_L0_L,pClassicData->Leg_Data.dd_L0_L,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_L,pClassicData->States_Data.d_theta_L,pClassicData->States_Data.dd_theta_L);
-        float Fn_Right = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_R,pClassicData->Contronller_Data.Tp_R, pClassicData->Leg_Data.L0_R,pClassicData->Leg_Data.d_L0_R,pClassicData->Leg_Data.dd_L0_R,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_R,pClassicData->States_Data.d_theta_R,pClassicData->States_Data.dd_theta_R);
-        (void)Fn_Left;
-        (void)Fn_Right;
-
         // ====== 起身状态机（左右腿共用一个状态）======
         const float theta_l_abs = fabsf(pClassicData->States_Data.theta_L);
         const float theta_r_abs = fabsf(pClassicData->States_Data.theta_R);
@@ -307,6 +323,14 @@ void CaculateTask(void *pvParameters) {
 #else
         StandUp_Flag = (stand_state == StandState_Up);
 #endif
+
+        // WheelKalman_Print(&Wheel_Kalman_L, 'L');
+        // WheelKalman_Print(&Wheel_Kalman_R, 'R');
+        //离地检测：识别腿支持力
+        float Fn_Left = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_L,pClassicData->Contronller_Data.Tp_L, pClassicData->Leg_Data.L0_L,pClassicData->Leg_Data.d_L0_L,pClassicData->Leg_Data.dd_L0_L,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_L,pClassicData->States_Data.d_theta_L,pClassicData->States_Data.dd_theta_L);
+        float Fn_Right = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_R,pClassicData->Contronller_Data.Tp_R, pClassicData->Leg_Data.L0_R,pClassicData->Leg_Data.d_L0_R,pClassicData->Leg_Data.dd_L0_R,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_R,pClassicData->States_Data.d_theta_R,pClassicData->States_Data.dd_theta_R);
+        (void)Fn_Left;
+        (void)Fn_Right;
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
@@ -354,6 +378,12 @@ void CaculateTask(void *pvParameters) {
         }
 #endif
 
+        /* 气弹簧预压补偿：在重力补偿之后，按本轮左右实际 L0 分别计算。 */
+        const float spring_preload_f0_l =
+                LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
+        const float spring_preload_f0_r =
+                LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
+
         /* 腿长旋钮控制：VrB=云台 CH6=底盘 Channel[5]。
          * SBUS 解包后的 Channel[5] 是 raw-1024；此处恢复原始 0~2047 值。
          * 实测旋钮最低端约 raw=240、最高端约 raw=1814：0~250 为低端
@@ -394,6 +424,26 @@ void CaculateTask(void *pvParameters) {
                 ? fminf(leg_knob_target_m, 0.350f)
                 : leg_knob_target_m;
 #endif
+        /* 当前旋钮目标就是左右腿共用的平均腿长目标；后续若加入左右独立目标，
+         * 在此处拆为 Target_LegLong_L / Target_LegLong_R 即可。 */
+
+        /* 测试版关闭 roll 差分；正式版仅已起身时计算原左右反向 F0 补偿。 */
+        float roll_comp = 0.0f;
+#if !LEG_CONTROL_TEST_MODE
+        if (StandUp_Flag) {
+            constexpr float roll_kp = 40.0f;
+            constexpr float roll_kd = 2.5f;
+            constexpr float roll_f0_limit = 8.0f;
+            roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
+                          + roll_kd * pClassicData->IMU_Data.delta_roll);
+            if (roll_comp > roll_f0_limit) {
+                roll_comp = roll_f0_limit;
+            } else if (roll_comp < -roll_f0_limit) {
+                roll_comp = -roll_f0_limit;
+            }
+        }
+#endif
+
         /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
         const float leg_target = pClassicData->Target_Data.Target_LegLong;
         const float leg_err_l = leg_target - pClassicData->Leg_Data.L0_L;
@@ -444,39 +494,18 @@ void CaculateTask(void *pvParameters) {
         const float stand_offset_l = StandUp_Flag ? 10.0f : -20.5f;
         const float stand_offset_r = StandUp_Flag ? 10.0f : -20.5f;
 #endif
-        /* 气弹簧预压补偿：左右腿均按各自实际 L0 使用拟合函数，独立叠加到 PID。 */
-        float spring_preload_f0_l =
-                LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
-        float spring_preload_f0_r =
-                LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
         pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
 #if !LEG_CONTROL_TEST_MODE
                 + stand_offset_l
 #endif
+                + roll_comp
                 ;
         pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r
 #if !LEG_CONTROL_TEST_MODE
                 + stand_offset_r
 #endif
+                - roll_comp
                 ;
-
-        /* 测试版关闭 roll 差分；正式版仅已起身时恢复原左右反向 F0 补偿。 */
-#if !LEG_CONTROL_TEST_MODE
-        if (StandUp_Flag) {
-        constexpr float roll_kp = 40.0f;
-        constexpr float roll_kd = 2.5f;
-        constexpr float roll_f0_limit = 8.0f;
-        float roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
-                            + roll_kd * pClassicData->IMU_Data.delta_roll);
-        if (roll_comp > roll_f0_limit) {
-            roll_comp = roll_f0_limit;
-        } else if (roll_comp < -roll_f0_limit) {
-            roll_comp = -roll_f0_limit;
-        }
-        pClassicData->Contronller_Data.F0_L += roll_comp;
-        pClassicData->Contronller_Data.F0_R -= roll_comp;
-        }
-#endif
 
         if (!leg_pid_enabled) {
             /* 失能期间再次清零，确保下次使能从当前腿长重新建立积分。 */
@@ -519,10 +548,12 @@ void CaculateTask(void *pvParameters) {
         if (pClassicData->Contronller_Data.Tp_R < -Max_Tp)
             pClassicData->Contronller_Data.Tp_R = -Max_Tp;
         // ====== VMC 力矩分配 ======
-        VMC_Calculate(pClassicData, pClassicData->Contronller_Data.F0_L,
-                      pClassicData->Contronller_Data.F0_R,
-                      pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
-                      pClassicData->Contronller_Data.Tp_R + gravity_tp_r, cal_dt);
+        VMC_MapForceToJointTorques(
+                pClassicData, &vmc_kinematics,
+                pClassicData->Contronller_Data.F0_L,
+                pClassicData->Contronller_Data.F0_R,
+                pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
+                pClassicData->Contronller_Data.Tp_R + gravity_tp_r);
 
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
@@ -561,204 +592,98 @@ void CaculateTask(void *pvParameters) {
     }
 }
 
-void VMC_Calculate(Classic_Data_t *data, float F0L, float F0R, float TpL,
-                   float TpR, float dt) {
-    float inv_dt = 1.0f / dt;
+static VMC_LegKinematics_t VMC_ForwardLeg(float phi1, float phi4) {
+    constexpr float l1 = 0.210f;
+    constexpr float l2 = 0.250f;
+    constexpr float l3 = 0.250f;
+    constexpr float l4 = 0.210f;
+    VMC_LegKinematics_t leg = {};
+    leg.phi1 = phi1;
+    leg.phi4 = phi4;
+    const float yd = l4 * arm_sin_f32(phi4);
+    const float yb = l1 * arm_sin_f32(phi1);
+    const float xd = l4 * arm_cos_f32(phi4);
+    const float xb = l1 * arm_cos_f32(phi1);
+    const float dx = xd - xb;
+    const float dy = yd - yb;
+    float lbd;
+    arm_sqrt_f32(dx * dx + dy * dy, &lbd);
+    const float a0 = 2.0f * l2 * dx;
+    const float b0 = 2.0f * l2 * dy;
+    const float c0 = l2 * l2 + lbd * lbd - l3 * l3;
+    float root;
+    arm_sqrt_f32(a0 * a0 + b0 * b0 - c0 * c0, &root);
+    leg.phi2 = 2.0f * atan2f(b0 + root, a0 + c0);
+    leg.phi3 = atan2f(yb - yd + l2 * arm_sin_f32(leg.phi2),
+                      xb - xd + l2 * arm_cos_f32(leg.phi2));
+    const float xc = l1 * arm_cos_f32(phi1) + l2 * arm_cos_f32(leg.phi2);
+    const float yc = l1 * arm_sin_f32(phi1) + l2 * arm_sin_f32(leg.phi2);
+    arm_sqrt_f32(xc * xc + yc * yc, &leg.L0);
+    leg.phi0 = atan2f(yc, xc);
+    return leg;
+}
 
-    // 机械臂连杆长度定义
-    float l1 = 0.210f;
-    float l2 = 0.250f;
-    float l3 = 0.250f;
-    float l4 = 0.210f;
-
-    // 从结构体中获取输入参数
-    float phi1_L = data->Motor_Data.L1_Motor_POS; // L1_Motor_POS 对应左侧 phi1
-    float phi4_L = data->Motor_Data.L2_Motor_POS; // L2_Motor_POS 对应左侧 phi4
-
-    float phi1_R = data->Motor_Data.R1_Motor_POS; // R1_Motor_POS 对应右侧 phi1
-    float phi4_R = data->Motor_Data.R2_Motor_POS; // R2_Motor_POS 对应右侧 phi4
-
-    // **************************
-    // 左侧力矩计算
-    // **************************
-    // 计算各点坐标
-    float YD_L = l4 * arm_sin_f32(phi4_L);
-    float YB_L = l1 * arm_sin_f32(phi1_L);
-    float XD_L = l4 * arm_cos_f32(phi4_L);
-    float XB_L = l1 * arm_cos_f32(phi1_L);
-
-    // 计算 BD 长度
-    float XD_XB_L = XD_L - XB_L;
-    float YD_YB_L = YD_L - YB_L;
-    float temp_L = XD_XB_L * XD_XB_L + YD_YB_L * YD_YB_L;
-    float lBD_L;
-    arm_sqrt_f32(temp_L, &lBD_L);
-
-    // 计算 phi2
-    float A0_L = 2 * l2 * XD_XB_L;
-    float B0_L = 2 * l2 * YD_YB_L;
-    float C0_L = l2 * l2 + lBD_L * lBD_L - l3 * l3;
-    float temp2_L = A0_L * A0_L + B0_L * B0_L - C0_L * C0_L;
-    float sqrt_val_L;
-    arm_sqrt_f32(temp2_L, &sqrt_val_L);
-    float phi2_L = 2 * atan2f((B0_L + sqrt_val_L), (A0_L + C0_L));
-
-    // 计算 phi3
-    float YB_YD_L = YB_L - YD_L;
-    float XB_XD_L = XB_L - XD_L;
-    float phi3_L = atan2f(YB_YD_L + l2 * arm_sin_f32(phi2_L),
-                          XB_XD_L + l2 * arm_cos_f32(phi2_L));
-
-    // 计算 XC, YC
-    float XC_L = l1 * arm_cos_f32(phi1_L) + l2 * arm_cos_f32(phi2_L);
-    float YC_L = l1 * arm_sin_f32(phi1_L) + l2 * arm_sin_f32(phi2_L);
-
-    // 计算 L0, phi0
-    float XC_l5_2_L = XC_L;
-    float temp3_L = XC_l5_2_L * XC_l5_2_L + YC_L * YC_L;
-    float L0_L;
-    arm_sqrt_f32(temp3_L, &L0_L);
-    float phi0_L = atan2f(YC_L, XC_l5_2_L);
-    data->Leg_Data.phi_0_L = phi0_L;
-    data->Leg_Data.L0_L = L0_L;
-
-    /* L0_L 一阶导 / 二阶导：后向差分 + 一阶低通滤波，使用真实 dt */
-    {
-        static float last_L0_L = 0.0f;
-        float raw_d_L0_L = (L0_L - last_L0_L) * inv_dt;          // m/s
-        data->Leg_Data.d_L0_L =
-                a * raw_d_L0_L + (1 - a) * data->Leg_Data.d_L0_L;
-
-        float raw_dd_L0_L = (data->Leg_Data.d_L0_L - data->Leg_Data.d_last_L0_L) * inv_dt;
-        data->Leg_Data.dd_L0_L =
-                a * raw_dd_L0_L + (1 - a) * data->Leg_Data.dd_L0_L;
-        data->Leg_Data.d_last_L0_L = data->Leg_Data.d_L0_L;
-        last_L0_L = L0_L;
+static void VMC_UpdateLegFeedback(Classic_Data_t *data,
+                                  VMC_Kinematics_t *kinematics, float dt) {
+    const float inv_dt = 1.0f / dt;
+    kinematics->left = VMC_ForwardLeg(data->Motor_Data.L1_Motor_POS,
+                                      data->Motor_Data.L2_Motor_POS);
+    kinematics->right = VMC_ForwardLeg(data->Motor_Data.R1_Motor_POS,
+                                       data->Motor_Data.R2_Motor_POS);
+    VMC_LegKinematics_t *legs[2] = {&kinematics->left, &kinematics->right};
+    float *l0[2] = {&data->Leg_Data.L0_L, &data->Leg_Data.L0_R};
+    float *phi0[2] = {&data->Leg_Data.phi_0_L, &data->Leg_Data.phi_0_R};
+    float *dl0[2] = {&data->Leg_Data.d_L0_L, &data->Leg_Data.d_L0_R};
+    float *ddl0[2] = {&data->Leg_Data.dd_L0_L, &data->Leg_Data.dd_L0_R};
+    float *last_dl0[2] = {&data->Leg_Data.d_last_L0_L, &data->Leg_Data.d_last_L0_R};
+    float *dphi0[2] = {&data->Leg_Data.delta_phi_0_L, &data->Leg_Data.delta_phi_0_R};
+    static float last_l0[2] = {0.0f, 0.0f};
+    static float last_phi0[2] = {0.0f, 0.0f};
+    for (uint32_t side = 0; side < 2U; ++side) {
+        *l0[side] = legs[side]->L0;
+        *phi0[side] = legs[side]->phi0;
+        const float raw_dl0 = (legs[side]->L0 - last_l0[side]) * inv_dt;
+        *dl0[side] = a * raw_dl0 + (1.0f - a) * *dl0[side];
+        const float raw_ddl0 = (*dl0[side] - *last_dl0[side]) * inv_dt;
+        *ddl0[side] = a * raw_ddl0 + (1.0f - a) * *ddl0[side];
+        *last_dl0[side] = *dl0[side];
+        /* 保持原来的腿角速度定义；本次仅调整正运动学与控制的先后顺序。 */
+        const float raw_dphi0 = (legs[side]->phi0 - last_phi0[side]) * 1000.0f;
+        *dphi0[side] = a * raw_dphi0 + (1.0f - a) * *dphi0[side];
+        last_l0[side] = legs[side]->L0;
+        last_phi0[side] = legs[side]->phi0;
     }
+}
 
-    static float last_phi_0_L = 0.0f;
-    float raw_delta_phi_0_L = (phi0_L - last_phi_0_L) * 1000.0f;
-    data->Leg_Data.delta_phi_0_L =
-            a * raw_delta_phi_0_L + (1 - a) * data->Leg_Data.delta_phi_0_L;
-    last_phi_0_L = phi0_L;
-
-    // 计算雅可比矩阵元素
-    float sin_phi0_phi3_L = arm_sin_f32(phi0_L - phi3_L);
-    float sin_phi1_phi2_L = arm_sin_f32(phi1_L - phi2_L);
-    float sin_phi3_phi2_L = arm_sin_f32(phi3_L - phi2_L);
-    float cos_phi0_phi3_L = arm_cos_f32(phi0_L - phi3_L);
-    float sin_phi0_phi2_L = arm_sin_f32(phi0_L - phi2_L);
-    float sin_phi3_phi4_L = arm_sin_f32(phi3_L - phi4_L);
-    float cos_phi0_phi2_L = arm_cos_f32(phi0_L - phi2_L);
-
-    float j11_L = (l1 * sin_phi0_phi3_L * sin_phi1_phi2_L) / sin_phi3_phi2_L;
-    float j12_L =
-            (l1 * cos_phi0_phi3_L * sin_phi1_phi2_L) / (L0_L * sin_phi3_phi2_L);
-    float j21_L = (l4 * sin_phi0_phi2_L * sin_phi3_phi4_L) / sin_phi3_phi2_L;
-    float j22_L =
-            (l4 * cos_phi0_phi2_L * sin_phi3_phi4_L) / (L0_L * sin_phi3_phi2_L);
-
-    // 计算力矩
-    float F_L[2] = {F0L, TpL};
-    float T_L[2];
-    T_L[0] = j11_L * F_L[0] + j12_L * F_L[1];
-    T_L[1] = j21_L * F_L[0] + j22_L * F_L[1];
-
-    // **************************
-    // 右侧力矩计算
-    // **************************
-    // 计算各点坐标
-    float YD_R = l4 * arm_sin_f32(phi4_R);
-    float YB_R = l1 * arm_sin_f32(phi1_R);
-    float XD_R = l4 * arm_cos_f32(phi4_R);
-    float XB_R = l1 * arm_cos_f32(phi1_R);
-
-    // 计算 BD 长度
-    float XD_XB_R = XD_R - XB_R;
-    float YD_YB_R = YD_R - YB_R;
-    float temp_R = XD_XB_R * XD_XB_R + YD_YB_R * YD_YB_R;
-    float lBD_R;
-    arm_sqrt_f32(temp_R, &lBD_R);
-
-    // 计算 phi2
-    float A0_R = 2 * l2 * XD_XB_R;
-    float B0_R = 2 * l2 * YD_YB_R;
-    float C0_R = l2 * l2 + lBD_R * lBD_R - l3 * l3;
-    float temp2_R = A0_R * A0_R + B0_R * B0_R - C0_R * C0_R;
-    float sqrt_val_R;
-    arm_sqrt_f32(temp2_R, &sqrt_val_R);
-    float phi2_R = 2 * atan2f((B0_R + sqrt_val_R), (A0_R + C0_R));
-
-    // 计算 phi3
-    float YB_YD_R = YB_R - YD_R;
-    float XB_XD_R = XB_R - XD_R;
-    float phi3_R = atan2f(YB_YD_R + l2 * arm_sin_f32(phi2_R),
-                          XB_XD_R + l2 * arm_cos_f32(phi2_R));
-
-    // 计算 XC, YC
-    float XC_R = l1 * arm_cos_f32(phi1_R) + l2 * arm_cos_f32(phi2_R);
-    float YC_R = l1 * arm_sin_f32(phi1_R) + l2 * arm_sin_f32(phi2_R);
-
-    // 计算 L0, phi0
-    float XC_l5_2_R = XC_R;
-    float temp3_R = XC_l5_2_R * XC_l5_2_R + YC_R * YC_R;
-    float L0_R;
-    arm_sqrt_f32(temp3_R, &L0_R);
-    float phi0_R = atan2f(YC_R, XC_l5_2_R);
-    data->Leg_Data.phi_0_R = phi0_R;
-    data->Leg_Data.L0_R = L0_R;
-
-    /* L0_R 一阶导 / 二阶导：后向差分 + 一阶低通滤波，使用真实 dt */
-    {
-        static float last_L0_R = 0.0f;
-        float raw_d_L0_R = (L0_R - last_L0_R) * inv_dt;          // m/s
-        data->Leg_Data.d_L0_R =
-                a * raw_d_L0_R + (1 - a) * data->Leg_Data.d_L0_R;
-
-        float raw_dd_L0_R = (data->Leg_Data.d_L0_R - data->Leg_Data.d_last_L0_R) * inv_dt;
-        data->Leg_Data.dd_L0_R =
-                a * raw_dd_L0_R + (1 - a) * data->Leg_Data.dd_L0_R;
-        data->Leg_Data.d_last_L0_R = data->Leg_Data.d_L0_R;
-        last_L0_R = L0_R;
+static void VMC_MapForceToJointTorques(Classic_Data_t *data,
+                                       const VMC_Kinematics_t *kinematics,
+                                       float F0L, float F0R, float TpL,
+                                       float TpR) {
+    constexpr float l1 = 0.210f;
+    constexpr float l4 = 0.210f;
+    const VMC_LegKinematics_t *legs[2] = {&kinematics->left, &kinematics->right};
+    const float f0[2] = {F0L, F0R};
+    const float tp[2] = {TpL, TpR};
+    float *t1[2] = {&data->Contronller_Data.T1_L, &data->Contronller_Data.T1_R};
+    float *t2[2] = {&data->Contronller_Data.T2_L, &data->Contronller_Data.T2_R};
+    for (uint32_t side = 0; side < 2U; ++side) {
+        const VMC_LegKinematics_t *leg = legs[side];
+        const float sin32 = arm_sin_f32(leg->phi3 - leg->phi2);
+        const float sin12 = arm_sin_f32(leg->phi1 - leg->phi2);
+        const float sin03 = arm_sin_f32(leg->phi0 - leg->phi3);
+        const float cos03 = arm_cos_f32(leg->phi0 - leg->phi3);
+        const float sin02 = arm_sin_f32(leg->phi0 - leg->phi2);
+        const float cos02 = arm_cos_f32(leg->phi0 - leg->phi2);
+        const float sin34 = arm_sin_f32(leg->phi3 - leg->phi4);
+        const float j11 = l1 * sin03 * sin12 / sin32;
+        const float j12 = l1 * cos03 * sin12 / (leg->L0 * sin32);
+        const float j21 = l4 * sin02 * sin34 / sin32;
+        const float j22 = l4 * cos02 * sin34 / (leg->L0 * sin32);
+        *t1[side] = j11 * f0[side] + j12 * tp[side];
+        *t2[side] = j21 * f0[side] + j22 * tp[side];
     }
-
-    static float last_phi_0_R = 0.0f;
-    float raw_delta_phi_0_R = (phi0_R - last_phi_0_R) * 1000.0f;
-    data->Leg_Data.delta_phi_0_R =
-            a * raw_delta_phi_0_R + (1 - a) * data->Leg_Data.delta_phi_0_R;
-    last_phi_0_R = phi0_R;
-
-    // 计算雅可比矩阵元素
-    float sin_phi0_phi3_R = arm_sin_f32(phi0_R - phi3_R);
-    float sin_phi1_phi2_R = arm_sin_f32(phi1_R - phi2_R);
-    float sin_phi3_phi2_R = arm_sin_f32(phi3_R - phi2_R);
-    float cos_phi0_phi3_R = arm_cos_f32(phi0_R - phi3_R);
-    float sin_phi0_phi2_R = arm_sin_f32(phi0_R - phi2_R);
-    float sin_phi3_phi4_R = arm_sin_f32(phi3_R - phi4_R);
-    float cos_phi0_phi2_R = arm_cos_f32(phi0_R - phi2_R);
-
-    float j11_R = (l1 * sin_phi0_phi3_R * sin_phi1_phi2_R) / sin_phi3_phi2_R;
-    float j12_R =
-            (l1 * cos_phi0_phi3_R * sin_phi1_phi2_R) / (L0_R * sin_phi3_phi2_R);
-    float j21_R = (l4 * sin_phi0_phi2_R * sin_phi3_phi4_R) / sin_phi3_phi2_R;
-    float j22_R =
-            (l4 * cos_phi0_phi2_R * sin_phi3_phi4_R) / (L0_R * sin_phi3_phi2_R);
-
-    // 计算力矩
-    float F_R[2] = {F0R, TpR};
-    float T_R[2];
-    T_R[0] = j11_R * F_R[0] + j12_R * F_R[1];
-    T_R[1] = j21_R * F_R[0] + j22_R * F_R[1];
-
-    // 将结果保存到结构体中
-    data->Contronller_Data.T1_L = T_L[0]; // 左侧 T1
-    data->Contronller_Data.T2_L = T_L[1]; // 左侧 T2
-    data->Contronller_Data.T1_R = T_R[0]; // 右侧 T1
-    data->Contronller_Data.T2_R = T_R[1]; // 右侧 T2
-
-    // 保存输入的Tp值
-    data->Contronller_Data.Tp_L = TpL; // 左侧 Tp
-    data->Contronller_Data.Tp_R = TpR; // 右侧 Tp
+    data->Contronller_Data.Tp_L = TpL;
+    data->Contronller_Data.Tp_R = TpR;
 }
 
 /**
