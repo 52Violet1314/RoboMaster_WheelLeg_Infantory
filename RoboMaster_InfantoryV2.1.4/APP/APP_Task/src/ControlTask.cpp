@@ -16,26 +16,12 @@
 #include "usart.h"
 #include <cstddef>
 
-int controltimer = 0;
-int tasktime = 0;
-int last_tasktime = 0;
-
 void MotorControlTask(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     Classic_Data_t *Classic_Data = (Classic_Data_t *) pvParameters;
     while (1) {
-        // tasktime = __HAL_TIM_GET_COUNTER(&htim5) - last_tasktime;
-        // last_tasktime = __HAL_TIM_GET_COUNTER(&htim5);a
         xEventGroupWaitBits(ControlEventGroup, Calculate_OK_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-        // uart_print("enter ControlTask\r\n");
-        // uart_print("ControlState: %d\r\n", ControlState);
         if (SBUS_Data.Channel[9] < 100) {
-            // DM_Motor_Enable(&DM_8009P1);
-            // DM_Motor_Enable(&DM_8009P2);
-            // DM_Motor_Enable(&DM_8009P3);
-            // DM_Motor_Enable(&DM_8009P4);
-            // DM_Motor_Enable(&DM_3519L);
-            // DM_Motor_Enable(&DM_3519R);
             DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0);
             DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
             DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0);
@@ -43,19 +29,6 @@ void MotorControlTask(void *pvParameters) {
             DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0);
             DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0);
         } else {
-            // DM_Motor_Enable(&DM_8009P1);
-            // DM_Motor_Enable(&DM_8009P2);
-            // DM_Motor_Enable(&DM_8009P3);
-            // DM_Motor_Enable(&DM_8009P4);
-            // DM_Motor_Enable(&DM_3519L);
-            // DM_Motor_Enable(&DM_3519R);
-            // DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-            // DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-
             DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f,
                                  Classic_Data->Contronller_Data.T1_L);
             DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f,
@@ -71,7 +44,6 @@ void MotorControlTask(void *pvParameters) {
                 &DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f,
                 -((Classic_Data->Contronller_Data.Fw_R / 15.8f) * 19.2f));
         }
-        // uart_print("[%d]Cont\r\n", __HAL_TIM_GET_COUNTER(&htim5));
         xEventGroupSetBits(ControlEventGroup, Control_OK_BIT);
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }

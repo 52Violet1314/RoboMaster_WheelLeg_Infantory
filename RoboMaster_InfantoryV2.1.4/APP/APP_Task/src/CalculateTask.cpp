@@ -47,14 +47,9 @@ float d_theta_R_ref = 0.0f; // 期望右腿角速度
 float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
-/* 台架固定腿长测试：取消下面注释，并注释掉 CH8 三档选择。 */
-// static constexpr float kBenchLegLengthTargetM = 0.350f;
-
 /* 腿长力闭环：L0 由四连杆正运动学计算得到，PID 输出为腿向力修正量。 */
 static Float_PID_Typedef leg_length_pid_l;
 static Float_PID_Typedef leg_length_pid_r;
-static Float_PID_Typedef leg_phi_pid_l;
-static Float_PID_Typedef leg_phi_pid_r;
 
 bool StandUp_Flag = true;
 
@@ -93,8 +88,6 @@ void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData,
                                       float cal_dt);
 
 
-void Classic_Data_Update(Classic_Data_t *pClassicData);
-
 void IMU_Temp_Control(float Target_Temp);
 
 static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
@@ -117,8 +110,6 @@ void CaculateTask(void *pvParameters) {
     Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
     Float_PID_Init(&leg_length_pid_r, 0.0f, 0.0f, 0.0f);//200 1.2 0.4
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
-    Float_PID_Init(&leg_phi_pid_l, 1200.0f, 1.5f, 2.0f);
-    Float_PID_Init(&leg_phi_pid_r, 1200.0f, 1.5f, 2.0f);
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P2, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -231,9 +222,6 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
                 +(DM_3519R.data.velocity_rad_s / 15.8f * 19.2f + 0.048f);
 
-        // ====== 原 Data Task：计算状态变量 ======
-        // pClassicData->States_Data.d_X =
-        //         (pClassicData->Motor_Data.Left_Wheel_Motor_VEL * -0.05f);
         pClassicData->States_Data.d_yaw_err =
                 pClassicData->Target_Data.Target_yaw_vel + pClassicData->IMU_Data.delta_yaw;//计算yaw速度误差
         pClassicData->States_Data.yaw_err +=
@@ -366,14 +354,6 @@ void CaculateTask(void *pvParameters) {
         }
 #endif
 
-        /* phi PID 暂不叠加到 LQR 的 Tp 输出。 */
-        // const float phi_ref = 1.5708f - pClassicData->IMU_Data.pitch - theta_ref;
-        // pClassicData->Contronller_Data.Tp_L +=
-        //         PID_Max_Float(&leg_phi_pid_l, phi_ref,
-        //                       pClassicData->Leg_Data.phi_0_L, 0.0f, 0.5f);
-        // pClassicData->Contronller_Data.Tp_R +=
-        //         PID_Max_Float(&leg_phi_pid_r, phi_ref,
-        //                       pClassicData->Leg_Data.phi_0_R, 0.0f, 0.5f);
         /* 腿长旋钮控制：VrB=云台 CH6=底盘 Channel[5]。
          * SBUS 解包后的 Channel[5] 是 raw-1024；此处恢复原始 0~2047 值。
          * 实测旋钮最低端约 raw=240、最高端约 raw=1814：0~250 为低端
@@ -414,15 +394,6 @@ void CaculateTask(void *pvParameters) {
                 ? fminf(leg_knob_target_m, 0.350f)
                 : leg_knob_target_m;
 #endif
-        /* 原行驶腿长三档：CH8 下/中/上对应 150/250/350 mm；旋钮 VrB 测试期间关闭。 */
-        // if (SBUS_Data.Channel[8] < -100) {
-        //     pClassicData->Target_Data.Target_LegLong = 0.150f;
-        // } else if (SBUS_Data.Channel[8] > 100) {
-        //     pClassicData->Target_Data.Target_LegLong = 0.350f;
-        // } else {
-        //     pClassicData->Target_Data.Target_LegLong = 0.250f;
-        // }
-        // 台架固定腿长测试：pClassicData->Target_Data.Target_LegLong = kBenchLegLengthTargetM;
         /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
         const float leg_target = pClassicData->Target_Data.Target_LegLong;
         const float leg_err_l = leg_target - pClassicData->Leg_Data.L0_L;
@@ -511,10 +482,6 @@ void CaculateTask(void *pvParameters) {
             /* 失能期间再次清零，确保下次使能从当前腿长重新建立积分。 */
             leg_length_pid_l.Err_Int = 0.0f;
             leg_length_pid_r.Err_Int = 0.0f;
-        //     leg_phi_pid_l.Last_Error = phi_ref - pClassicData->Leg_Data.phi_0_L;
-        //     leg_phi_pid_r.Last_Error = phi_ref - pClassicData->Leg_Data.phi_0_R;
-        //     leg_phi_pid_l.Last_Dout = 0.0f;
-        //     leg_phi_pid_r.Last_Dout = 0.0f;
         }
        
         // ====== 输入限幅：VMC 之前，F0/Tp 必须在此限幅（Fw 不经过 VMC） ======
@@ -983,90 +950,6 @@ void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData,
     csv[used++] = '\n';
     csv[used] = '\0';
     uart_print("%s", csv);
-}
-
-void Classic_Data_Update(Classic_Data_t *pClassicData) {
-    pClassicData->IMU_Data.roll = angle_to_rad(INS.Roll);
-    pClassicData->IMU_Data.pitch = angle_to_rad(INS.Pitch);
-    pClassicData->IMU_Data.yaw = angle_to_rad(INS.Yaw);
-    pClassicData->Motor_Data.L1_Motor_POS =
-            (DM_8009P1.data.position_rad / 3.50f * 3.14f) + 3.14f;
-    pClassicData->Motor_Data.L2_Motor_POS =
-            (DM_8009P2.data.position_rad / 3.50f * 3.14f) + 6.28f;
-    pClassicData->Motor_Data.R1_Motor_POS =
-            -(DM_8009P4.data.position_rad / 3.50f * 3.14f) - 3.14f;
-    pClassicData->Motor_Data.R2_Motor_POS =
-            -(DM_8009P3.data.position_rad / 3.50f * 3.14f);
-    pClassicData->Motor_Data.L1_Motor_VEL = DM_8009P1.data.velocity_rad_s;
-    pClassicData->Motor_Data.L2_Motor_VEL = DM_8009P2.data.velocity_rad_s;
-    pClassicData->Motor_Data.R1_Motor_VEL = DM_8009P4.data.velocity_rad_s;
-    pClassicData->Motor_Data.R2_Motor_VEL = DM_8009P3.data.velocity_rad_s;
-    pClassicData->Motor_Data.Left_Wheel_Motor_VEL =
-            -(DM_3519L.data.velocity_rad_s / 16.8f * 19.2f + 0.048f);
-    pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
-            (DM_3519R.data.velocity_rad_s / 16.8f * 19.2f + 0.048f);
-
-    // 计算时间差（微秒转秒），添加除零保护
-    float time_diff = (pClassicData->Data_Time.imu_time -
-                       pClassicData->Data_Time.last_imu_time) *
-                      1e-6f;
-    if (time_diff > 1e-6f) {
-        // ====== 角速度计算（弧度制，带 ±π 跳变处理） ======
-        float roll_change = pClassicData->IMU_Data.roll -
-                            pClassicData->IMU_Data.last_roll;
-        if (roll_change > 3.14159f)
-            roll_change -= 6.28318f;
-        else if (roll_change < -3.14159f)
-            roll_change += 6.28318f;
-        pClassicData->IMU_Data.delta_roll =
-                a * roll_change / time_diff +
-                (1 - a) * pClassicData->IMU_Data.delta_roll;
-        pClassicData->IMU_Data.last_roll = pClassicData->IMU_Data.roll;
-        float pitch_change =
-                pClassicData->IMU_Data.pitch - pClassicData->IMU_Data.last_pitch;
-        if (pitch_change > 3.14159f)
-            pitch_change -= 6.28318f;
-        else if (pitch_change < -3.14159f)
-            pitch_change += 6.28318f;
-        pClassicData->IMU_Data.delta_pitch =
-                a * pitch_change / time_diff +
-                (1 - a) * pClassicData->IMU_Data.delta_pitch;
-
-        float yaw_change =
-                pClassicData->IMU_Data.yaw - pClassicData->IMU_Data.last_yaw;
-        if (yaw_change > 3.14159f)
-            yaw_change -= 6.28318f;
-        else if (yaw_change < -3.14159f)
-            yaw_change += 6.28318f;
-        pClassicData->IMU_Data.delta_yaw =
-                a * yaw_change / time_diff + (1 - a) * pClassicData->IMU_Data.delta_yaw;
-    } else {
-        pClassicData->IMU_Data.delta_roll = 0.0f;
-        pClassicData->IMU_Data.delta_pitch = 0.0f;
-        pClassicData->IMU_Data.delta_yaw = 0.0f;
-    }
-    pClassicData->States_Data.d_X =
-            (pClassicData->Motor_Data.Left_Wheel_Motor_VEL * -0.08f);
-    pClassicData->States_Data.X_pos =
-            pClassicData->States_Data.X_pos + ((pClassicData->States_Data.d_X - d_X_ref) / 1000.f);
-    if (pClassicData->States_Data.X_pos > -5.0f)
-      pClassicData->States_Data.X_pos = -5.0f;
-    if (pClassicData->States_Data.X_pos < -15.0f)
-      pClassicData->States_Data.X_pos = -15.0f;
-
-    pClassicData->States_Data.d_yaw = pClassicData->IMU_Data.delta_yaw + 0.0023f;
-    pClassicData->States_Data.yaw +=
-            (pClassicData->States_Data.d_yaw - d_yaw_ref) / 1000.f;
-    pClassicData->States_Data.theta_L =
-            +1.5708f - pClassicData->Leg_Data.phi_0_L - pClassicData->IMU_Data.pitch;
-    pClassicData->States_Data.d_theta_L = -pClassicData->Leg_Data.delta_phi_0_L -
-                                          pClassicData->IMU_Data.delta_pitch;
-    pClassicData->States_Data.theta_R =
-            +1.5708f - pClassicData->Leg_Data.phi_0_R - pClassicData->IMU_Data.pitch;
-    pClassicData->States_Data.d_theta_R = -pClassicData->Leg_Data.delta_phi_0_R -
-                                          pClassicData->IMU_Data.delta_pitch;
-    pClassicData->States_Data.theta = pClassicData->IMU_Data.pitch;
-    pClassicData->States_Data.d_theta = pClassicData->IMU_Data.delta_pitch;
 }
 
 void State_Data_Print(Classic_Data_t *pClassicData) {

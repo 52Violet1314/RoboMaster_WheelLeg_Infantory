@@ -119,7 +119,6 @@ extern Classic_Data_t Classic_Data;
 extern "C" {
 #endif
 
-void app_Data_Task(void *pvParameters);
 #ifdef __cplusplus
 }
 #endif

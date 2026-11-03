@@ -1,5 +1,4 @@
 #include "app_leg_support_force_compensation.hpp"
-#include <stdint.h>
 
 /* 每条腿独立以各自 L0 查询此表。
  * 第二列单位 N；当前全部为 0，等待起身后各腿长的实测支撑力补偿。 */
@@ -17,40 +16,3 @@ const LegSupportForceCompensationParam_t
     {0.330f, 0.0f}, {0.335f, 0.0f}, {0.340f, 0.0f}, {0.345f, 0.0f},
     {0.350f, 0.0f},
 };
-
-LegSupportForceCompensationParam_t
-LegSupportForceCompensation_GetParam(float leg_length_m) {
-    if (leg_length_m <= LegSupportForceCompensationTable[0].leg_length_m)
-        return LegSupportForceCompensationTable[0];
-    if (leg_length_m >= LegSupportForceCompensationTable[
-                              LEG_SUPPORT_FORCE_COMP_TABLE_COUNT - 1U]
-                              .leg_length_m)
-        return LegSupportForceCompensationTable[
-                LEG_SUPPORT_FORCE_COMP_TABLE_COUNT - 1U];
-
-    const float table_index =
-            (leg_length_m - LEG_SUPPORT_FORCE_COMP_MIN_LENGTH_M) /
-            LEG_SUPPORT_FORCE_COMP_LENGTH_STEP_M;
-    uint32_t lower_index = (uint32_t)table_index;
-    if (lower_index >= LEG_SUPPORT_FORCE_COMP_TABLE_COUNT - 1U)
-        lower_index = LEG_SUPPORT_FORCE_COMP_TABLE_COUNT - 2U;
-
-    const LegSupportForceCompensationParam_t &lower =
-            LegSupportForceCompensationTable[lower_index];
-    const LegSupportForceCompensationParam_t &upper =
-            LegSupportForceCompensationTable[lower_index + 1U];
-    const float ratio = (leg_length_m - lower.leg_length_m) /
-                        (upper.leg_length_m - lower.leg_length_m);
-
-    return {
-        lower.leg_length_m + (upper.leg_length_m - lower.leg_length_m) * ratio,
-        lower.support_f0_compensation_n +
-                (upper.support_f0_compensation_n -
-                 lower.support_f0_compensation_n) * ratio,
-    };
-}
-
-float LegSupportForceCompensation_GetF0(float leg_length_m) {
-    return LegSupportForceCompensation_GetParam(leg_length_m)
-            .support_f0_compensation_n;
-}
