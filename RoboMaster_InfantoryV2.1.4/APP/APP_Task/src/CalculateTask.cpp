@@ -559,13 +559,11 @@ void CaculateTask(void *pvParameters) {
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
 
-        /* 台架高频诊断：每两个成功控制周期输出一次右腿补偿全链路 CSV。
-         * 单行约 160 B，在 USART1 2 Mbps 下 500 Hz 约占 40% 线速；
-         * 不使用 1 kHz，避免串口自身反压影响控制周期。 */
+        /* 台架高频诊断：每个成功控制周期输出一次右腿补偿全链路 CSV。 */
 #if LEG_CONTROL_TEST_MODE
         {
             static uint8_t right_comp_debug_divider = 0U;
-            if (++right_comp_debug_divider >= 2U) {
+            if (++right_comp_debug_divider >= 1U) {
                 right_comp_debug_divider = 0U;
                 RightLegCompensation_Debug_Print(pClassicData, cal_dt);
             }
