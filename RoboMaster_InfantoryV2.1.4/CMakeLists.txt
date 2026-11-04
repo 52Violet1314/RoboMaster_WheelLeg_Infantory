@@ -33,7 +33,6 @@ enable_language(C CXX ASM)
 file(GLOB_RECURSE CORE_SRCS "Core/Src/*.c")
 file(GLOB_RECURSE CORE_CPP_SRCS "Core/Src/*.cpp")  # 修复：改为.cpp文件
 file(GLOB_RECURSE HARDWARE_SRCS "HardWare/*.c")
-file(GLOB_RECURSE MOTOR_SRCS "Motor/*.c")
 file(GLOB_RECURSE APP_TASK_SRCS "APP/APP_Task/src/*.cpp")
 file(GLOB_RECURSE APP_SRCS CONFIGURE_DEPENDS "APP/src/*.cpp")
 file(GLOB_RECURSE APP_C_SRCS "APP/src/*.c")  # 新增：收集APP目录下的C文件
@@ -58,7 +57,6 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CORE_SRCS}
     ${CORE_CPP_SRCS}  # 添加这一行：包含C++源文件
     ${HARDWARE_SRCS}
-    ${MOTOR_SRCS}
     ${APP_TASK_SRCS}
     ${APP_SRCS}
     ${APP_C_SRCS}     # 新增：包含APP目录的C文件
