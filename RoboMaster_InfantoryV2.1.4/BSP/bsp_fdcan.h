@@ -24,8 +24,6 @@ extern "C" {
 #endif
 
 extern uint32_t fdcan_tx_fail_count;
-/* 相邻两次 FDCAN1 六电机反馈凑齐的 TIM5 间隔，单位 us。仅用于诊断。 */
-extern volatile uint32_t motor_feedback_complete_dt_us;
 
 void bsp_can_init(void);
 void can_filter_init(void);

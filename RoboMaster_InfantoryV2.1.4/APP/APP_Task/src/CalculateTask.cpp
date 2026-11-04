@@ -16,7 +16,6 @@
 #include "app_motor.h"
 #include "arm_math.h"
 #include "bsp_UART.h"
-#include "bsp_fdcan.h"
 #include "event_groups.h"
 #include "fdcan.h"
 #include "main.h"
@@ -101,11 +100,6 @@ void State_Data_Print(Classic_Data_t *pClassicData);
 
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
-
-/* 右腿弹簧补偿全链路诊断：仅打印，不参与控制。 */
-void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData,
-                                      float cal_dt);
-
 
 void IMU_Temp_Control(float Target_Temp);
 
@@ -558,18 +552,8 @@ void CaculateTask(void *pvParameters) {
         // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
         Controler_Limit(pClassicData);
 
-        /* 台架高频诊断：每个成功控制周期输出一次右腿补偿全链路 CSV。 */
-#if LEG_CONTROL_TEST_MODE
         {
-            static uint8_t right_comp_debug_divider = 0U;
-            if (++right_comp_debug_divider >= 1U) {
-                right_comp_debug_divider = 0U;
-                RightLegCompensation_Debug_Print(pClassicData, cal_dt);
-            }
-        }
-#else
-        /* 正式版维持原调试节流，且默认不输出。 */
-        {
+            /* 原控制周期末尾调试选择：默认不输出。 */
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
@@ -577,7 +561,6 @@ void CaculateTask(void *pvParameters) {
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
                 // LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
-                // RightLegCompensation_Debug_Print(pClassicData); // 暂停右腿补偿 CSV 调试
                 // IMU_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
@@ -586,7 +569,6 @@ void CaculateTask(void *pvParameters) {
             }
 
         }
-#endif
         xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
@@ -819,62 +801,6 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
                milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
                 milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
                 milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
-}
-
-void RightLegCompensation_Debug_Print(Classic_Data_t *pClassicData,
-                                      float cal_dt) {
-    /* FireWater 纯 CSV，按顺序为：
-     * dt_us,motor_complete_dt_us,rawP4,rawP3,rawV4,rawV3,phi1R,phi4R,L0R,dL0R,phi0R,targetL0,
-     * springFittedR,finalF0R,T1R,T2R,sentT1R,sentT2R。
-     * 前两列单位为 us；其余依次为 rad,rad,rad/s,rad/s,rad,rad,m,m/s,rad,m,N,N,N*m,N*m,N*m,N*m。
-     * 这是裸露测试链路：springFittedR 直接叠加到 F0，没有截断、低通、阻尼或变化限幅。
-     * sentT1R/sentT2R 是 ControlTask 发送给右髋 MIT 的实际符号。 */
-    const float spring_raw =
-            LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
-    const float values[] = {
-        DM_8009P4.data.position_rad,
-        DM_8009P3.data.position_rad,
-        DM_8009P4.data.velocity_rad_s,
-        DM_8009P3.data.velocity_rad_s,
-        pClassicData->Motor_Data.R1_Motor_POS,
-        pClassicData->Motor_Data.R2_Motor_POS,
-        pClassicData->Leg_Data.L0_R,
-        pClassicData->Leg_Data.d_L0_R,
-        pClassicData->Leg_Data.phi_0_R,
-        pClassicData->Target_Data.Target_LegLong,
-        spring_raw,
-        pClassicData->Contronller_Data.F0_R,
-        pClassicData->Contronller_Data.T1_R,
-        pClassicData->Contronller_Data.T2_R,
-        -pClassicData->Contronller_Data.T1_R,
-        -pClassicData->Contronller_Data.T2_R,
-    };
-    char csv[UART_BUFFER_SIZE];
-    const uint32_t dt_us = (uint32_t)lroundf(cal_dt * 1.0e6f);
-    const uint32_t motor_complete_dt_us = motor_feedback_complete_dt_us;
-    int first_written = snprintf(csv, sizeof(csv), "%lu,%lu",
-                                 (unsigned long)dt_us,
-                                 (unsigned long)motor_complete_dt_us);
-    if (first_written <= 0 || (size_t)first_written >= sizeof(csv))
-        return;
-    size_t used = (size_t)first_written;
-    for (uint32_t index = 0; index < sizeof(values) / sizeof(values[0]); ++index) {
-        const long milli = lroundf(values[index] * 1000.0f);
-        const long magnitude = milli < 0L ? -milli : milli;
-        const int written = snprintf(csv + used, sizeof(csv) - used,
-                                     ",%c%ld.%03ld",
-                                     milli < 0L ? '-' : ' ', magnitude / 1000L,
-                                     magnitude % 1000L);
-        if (written <= 0 || (size_t)written >= sizeof(csv) - used)
-            return;
-        used += (size_t)written;
-    }
-    if (used + 2U >= sizeof(csv))
-        return;
-    csv[used++] = '\r';
-    csv[used++] = '\n';
-    csv[used] = '\0';
-    uart_print("%s", csv);
 }
 
 void State_Data_Print(Classic_Data_t *pClassicData) {
