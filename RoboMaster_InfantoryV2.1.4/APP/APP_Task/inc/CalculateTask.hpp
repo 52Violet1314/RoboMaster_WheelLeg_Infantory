@@ -11,7 +11,10 @@
  * 起身前/后 F0 预输出；正式版恢复状态机、roll、预输出，并在总使能且已起身后开腿重力补偿。 */
 #define LEG_CONTROL_TEST_MODE 1
 
-extern uint8_t ControlState;
+/* 台架测试：单次传感器缺帧不立刻清零髋关节力矩，最多保持上一拍 30 ms。
+ * 超过该时间仍按故障安全策略清零。正式版始终使用即时清零。 */
+#define LEG_CONTROL_TEST_HOLD_LAST_TORQUE_ON_SENSOR_GAP 1
+#define LEG_CONTROL_TEST_SENSOR_HOLD_MS 30U
 
 void CaculateTask(void *pvParameters);
 float angle_to_rad(float degrees);

@@ -35,11 +35,7 @@
 #include "app_K_value.hpp"
 
 // 定义参考值（根据实际需求调整）
-float X_pos_ref = 0.0f; // 期望位置
-float d_X_ref = 0.0f; // 期望速度
 float theta_ref = 0.0f; // 期望整体角度
-float d_yaw_ref = 0.0f; // 期望整体角速度
-float yaw_ref = 0.0f; // 期望整体角速度
 float d_theta_ref = 0.0f; // 期望整体角速度
 float d_theta_L_ref = 0.0f; // 期望左腿角速度
 float d_theta_R_ref = 0.0f; // 期望右腿角速度
@@ -58,13 +54,7 @@ typedef enum
     StandState_NotUp,
 } StandState_t;
 
-uint8_t ControlState = 0;
-
 #define a 0.2f // 一阶低通滤波
-
-int task_time = 0;
-int last_task_time = 0;
-int Calculate_time;
 
 typedef struct {
     float phi1;
@@ -122,7 +112,7 @@ void CaculateTask(void *pvParameters) {
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
-    Float_PID_Init(&leg_length_pid_r, 250.0f, 10.0f, 0.0f);//200 1.2 0.4
+    Float_PID_Init(&leg_length_pid_r, 250.0f, 25.0f, 0.0f);//200 1.2 0.4
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -146,8 +136,15 @@ void CaculateTask(void *pvParameters) {
 
     // uart_print("CaculateTask start\r\n");
     TickType_t xLastWakeTime = xTaskGetTickCount();
+    TickType_t last_sensor_valid_tick = xLastWakeTime;
     uint32_t last_cal_tick = 0;  // 使用 htim5 微秒计数器跟踪真实 dt
     while (1) {
+        /* 总使能关闭时，无论本轮随后等到完整反馈、超时，还是走测试保持分支，
+         * F0 状态都不能保留上一拍的值。 */
+        if (SBUS_Data.Channel[9] < 100) {
+            pClassicData->Contronller_Data.F0_L = 0.0f;
+            pClassicData->Contronller_Data.F0_R = 0.0f;
+        }
         /* 台架腿长 PID 测试：关闭任务心跳调试串口输出。 */
         // static TickType_t xLastAlivePrint = 0;
         // TickType_t xAliveNow = xTaskGetTickCount();
@@ -163,6 +160,17 @@ void CaculateTask(void *pvParameters) {
 
         if ((uxBits & (MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT))
             != (MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT)) {
+#if LEG_CONTROL_TEST_MODE && LEG_CONTROL_TEST_HOLD_LAST_TORQUE_ON_SENSOR_GAP
+            /* 台架标定中，偶发缺一帧时短暂保持上一拍关节力矩，避免一次 10 ms
+             * 等待超时就令腿卸力。保持窗口有严格上限，通信持续异常仍会清零。 */
+            const TickType_t xSensorGapNow = xTaskGetTickCount();
+            if ((xSensorGapNow - last_sensor_valid_tick)
+                    <= pdMS_TO_TICKS(LEG_CONTROL_TEST_SENSOR_HOLD_MS)) {
+                xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
+                vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
+                continue;
+            }
+#endif
             /* 传感器帧未成套到达时，禁止沿用上一周期的轮速控制量。
              * 否则 ControlTask 仍会按旧的 Fw_R/Fw_L 发包，表现为单侧电机持续转动。 */
             pClassicData->Contronller_Data.Fw_L = 0.0f;
@@ -186,6 +194,8 @@ void CaculateTask(void *pvParameters) {
             vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
             continue;
         }
+
+        last_sensor_valid_tick = xTaskGetTickCount();
 
         // ====== 计算本周期真实时间步长 (s) ======
         uint32_t now_tick = __HAL_TIM_GET_COUNTER(&htim5);
@@ -557,9 +567,12 @@ void CaculateTask(void *pvParameters) {
                 ;
 
         if (!leg_pid_enabled) {
-            /* 失能期间再次清零，确保下次使能从当前腿长重新建立积分。 */
+            /* 两种模式都一样：总使能关闭时不保留任何腿向力输出。
+             * PID 积分同时清零，下一次使能从当前腿长重新建立。 */
             leg_length_pid_l.Err_Int = 0.0f;
             leg_length_pid_r.Err_Int = 0.0f;
+            pClassicData->Contronller_Data.F0_L = 0.0f;
+            pClassicData->Contronller_Data.F0_R = 0.0f;
         }
        
         // ====== 输入限幅：VMC 之前，F0/Tp 必须在此限幅（Fw 不经过 VMC） ======
@@ -575,7 +588,7 @@ void CaculateTask(void *pvParameters) {
         // Max_F0 = 60.0f;
         // Max_Tp = 4.0f;
         // };
-        Max_F0 = leg_pid_enabled ? 50.0f : 10.0f;
+        Max_F0 = leg_pid_enabled ? 50.0f : 0.0f;
         Max_Tp = 2.0f;
 
         // F0 总限幅：总使能前 ±10 N；总使能后 ±50 N。

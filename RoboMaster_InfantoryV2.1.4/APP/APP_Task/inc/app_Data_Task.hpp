@@ -49,9 +49,7 @@ typedef struct {
 
     struct {
         int imu_time;
-        int leg_data_time;
         int last_imu_time;
-        int last_leg_data_time;
     } Data_Time;
 
     struct {
