@@ -1,5 +1,4 @@
 #include "bsp_fdcan.h"
-#include "DMIMU.h"
 #include "app_motor.h"
 #include "bsp_uart.h"
 #include <string.h>
@@ -393,13 +392,6 @@ void fdcan3_rx_callback(void) {
          HAL_OK) {
     rec_id = pRxHeader.Identifier;    
     switch (rec_id) {
-    case 0x033: //  IMU ID
-      IMU_UpdateEuler(buf, &imu);
-      Classic_Data.Data_Time.last_imu_time = Classic_Data.Data_Time.imu_time;
-      Classic_Data.Data_Time.imu_time = __HAL_TIM_GET_COUNTER(&htim5);
-      // IMU_DATA_READY_BIT 统一由 INS Task 设置，避免双源冲突
-      // xEventGroupSetBitsFromISR(DataGroup, IMU_DATA_READY_BIT, NULL);
-      break;
     default:
       // 忽略其他ID
       break;

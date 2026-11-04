@@ -32,7 +32,6 @@
 #include "event_groups.h"
 #include "task.h"
 #include "../BSP/bsp_UART.h"
-#include "DMIMU.h"
 #include "FreeRTOS.h"
 #include "WS2812.h"
 #include "app_Task.hpp"
@@ -148,7 +147,6 @@ int main(void)
   // 初始化SBUS环形缓冲区
   SBUS_RingBuffer_Init();
   SCB_InvalidateDCache_by_Addr((void *)rx_buff, BUFF_SIZE * 2);
-  // IMU_Init(0x22, 0x33, &hfdcan3, &imu);
   // HAL_TIM_Base_Start_IT(&htim3);
   // TIM5以1MHx计数
   HAL_TIM_Base_Start(&htim5);
@@ -391,7 +389,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
   if (htim->Instance == TIM3) {
-    // IMU_RequestEuler(&imu);
   DM_8009P1.CheckTimes++;
   DM_8009P2.CheckTimes++;
   DM_8009P3.CheckTimes++;
