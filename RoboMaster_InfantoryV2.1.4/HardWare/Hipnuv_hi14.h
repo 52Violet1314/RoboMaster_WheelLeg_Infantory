@@ -62,7 +62,6 @@ int hipnuc_input(hi14_t *raw, uint8_t data);
  * @param buf_size Size of the output buffer
  * @return Number of characters written to the buffer
  */
-int hipnuc_dump_packet(hi14_t *raw, char *buf, size_t buf_size);
 
 #ifdef __cplusplus
 }

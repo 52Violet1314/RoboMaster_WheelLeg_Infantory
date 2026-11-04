@@ -174,58 +174,6 @@ int hipnuc_input(hi14_t *raw, uint8_t data)
 
 
 /**
- * @brief    Convert packet to string, only dump parts of data
- *
- * @param    raw is struct of decoder
- * @param    buf is the log string buffer, make sure buf is larger than 256
- * @param    buf_size is the size of the log buffer
- * @return   Number of characters written to the buffer
- */
-int hipnuc_dump_packet(hi14_t *raw, char *buf, size_t buf_size)
-{
-    int written = 0;
-    int ret;
-
-    /* dump 0x91 packet */
-    if(raw->hi14data.tag == HIPNUC_ID_HI91)
-    {
-        /* Format:
-         * system_time: ms
-         * acc: m/s²
-         * gyr: deg/s
-         * mag: uT
-         * pitch/roll/yaw: deg
-         * quat: w,x,y,z
-         * air_pressure: Pa
-         */
-        ret = snprintf(buf + written, buf_size - written,
-            "{\n"
-            "  \"type\": \"hi14data\",\n"
-            "  \"main_status\": [0x%X],\n"
-            "  \"system_time\": %lu,\n"
-            "  \"acc\": [%.3f, %.3f, %.3f],\n"
-            "  \"gyr\": [%.3f, %.3f, %.3f],\n"
-            "  \"mag\": [%.3f, %.3f, %.3f],\n"
-            "  \"pitch\": %.2f,\n"
-            "  \"roll\": %.2f,\n"
-            "  \"yaw\": %.2f,\n"
-            "  \"quat\": [%.3f, %.3f, %.3f, %.3f],\n"
-            "  \"air_pressure\": %.1f\n"
-            "}\n",
-            (unsigned)raw->hi14data.main_status,
-            (unsigned long)raw->hi14data.system_time,
-            raw->hi14data.acc[0]*GRAVITY, raw->hi14data.acc[1]*GRAVITY, raw->hi14data.acc[2]*GRAVITY,
-            raw->hi14data.gyr[0], raw->hi14data.gyr[1], raw->hi14data.gyr[2],
-            raw->hi14data.mag[0], raw->hi14data.mag[1], raw->hi14data.mag[2],
-            raw->hi14data.pitch, raw->hi14data.roll, raw->hi14data.yaw,
-            raw->hi14data.quat[0], raw->hi14data.quat[1], raw->hi14data.quat[2], raw->hi14data.quat[3],
-            raw->hi14data.air_pressure);
-    }
-    if (ret > 0) written += ret;
-    return written;
-}
-
-/**
  * @brief    Calculate HiPNUC CRC16
  *
  * @param    inital is initial value

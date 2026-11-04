@@ -18,12 +18,9 @@ DM_Motor_t DM_3507;
 
 DM_Motor_t DM_4310;
 
-static int16_t float_to_int16(float x, float x_min, float x_max, uint8_t bits);
 static float uint16_to_float(uint16_t x, float x_min, float x_max, uint8_t bits);
 static int16_t float_to_int12(float x, float x_min, float x_max);
 static float int12_to_float(int16_t x, float x_min, float x_max);
-static float AngleUnify(float angle);
-static float RadUnify(float rad);
 
 static int float_to_uint(float x, float x_min, float x_max, int bits) {
   // Converts a float to an unsigned int, given range and number of bits
@@ -149,105 +146,6 @@ void DM_Motor_3519_Data_Get(DM_Motor_t *motor, uint8_t *data) {
   motor->data.temp_COIL_C = (float)data[7];
 }
 
-// DJI电机初始化函数
-void DJi_Motor_Init(DJi_Motor_t *motor, FDCAN_HandleTypeDef *hcan) {
-  motor->hcan = hcan;
-}
-
-// DJI电机电流控制函数
-void DJi_Motor_Current_Control(DJi_Motor_t *motor, uint8_t Motor_Type,
-                               uint8_t id_range, int16_t Current1,
-                               int16_t Current2, int16_t Current3,
-                               int16_t Current4) {
-  uint8_t TxBuf[8];
-
-  switch (Motor_Type) {
-  case DJI_MOTOR_TYPE_M3508:
-    if (id_range == 0) {
-      TxBuf[0] = (Current1 >> 8) & 0xff;
-      TxBuf[1] = (Current1) & 0xff;
-      TxBuf[2] = (Current2 >> 8) & 0xff;
-      TxBuf[3] = (Current2) & 0xff;
-      TxBuf[4] = (Current3 >> 8) & 0xff;
-      TxBuf[5] = (Current3) & 0xff;
-      TxBuf[6] = (Current4 >> 8) & 0xff;
-      TxBuf[7] = (Current4) & 0xff;
-      fdcanx_send_data(motor->hcan, 0x200, TxBuf, 8);
-    } else {
-      TxBuf[0] = (Current1 >> 8) & 0xff;
-      TxBuf[1] = (Current1) & 0xff;
-      TxBuf[2] = (Current2 >> 8) & 0xff;
-      TxBuf[3] = (Current2) & 0xff;
-      TxBuf[4] = (Current3 >> 8) & 0xff;
-      TxBuf[5] = (Current3) & 0xff;
-      TxBuf[6] = (Current4 >> 8) & 0xff;
-      TxBuf[7] = (Current4) & 0xff;
-      fdcanx_send_data(motor->hcan, 0x1FF, TxBuf, 8);
-    }
-    break;
-
-  case DJI_MOTOR_TYPE_M2006:
-    if (id_range == 0) {
-      TxBuf[0] = (Current1 >> 8) & 0xff;
-      TxBuf[1] = (Current1) & 0xff;
-      TxBuf[2] = (Current2 >> 8) & 0xff;
-      TxBuf[3] = (Current2) & 0xff;
-      TxBuf[4] = (Current3 >> 8) & 0xff;
-      TxBuf[5] = (Current3) & 0xff;
-      TxBuf[6] = (Current4 >> 8) & 0xff;
-      TxBuf[7] = (Current4) & 0xff;
-      fdcanx_send_data(motor->hcan, 0x200, TxBuf, 8);
-    } else {
-      TxBuf[0] = (Current1 >> 8) & 0xff;
-      TxBuf[1] = (Current1) & 0xff;
-      TxBuf[2] = (Current2 >> 8) & 0xff;
-      TxBuf[3] = (Current2) & 0xff;
-      TxBuf[4] = (Current3 >> 8) & 0xff;
-      TxBuf[5] = (Current3) & 0xff;
-      TxBuf[6] = (Current4 >> 8) & 0xff;
-      TxBuf[7] = (Current4) & 0xff;
-      fdcanx_send_data(motor->hcan, 0x1FF, TxBuf, 8);
-    }
-    break;
-
-  case DJI_MOTOR_TYPE_M6020:
-    if (id_range == 0) {
-      TxBuf[0] = (Current1 >> 8) & 0xff;
-      TxBuf[1] = (Current1) & 0xff;
-      TxBuf[2] = (Current2 >> 8) & 0xff;
-      TxBuf[3] = (Current2) & 0xff;
-      TxBuf[4] = (Current3 >> 8) & 0xff;
-      TxBuf[5] = (Current3) & 0xff;
-      TxBuf[6] = (Current4 >> 8) & 0xff;
-      TxBuf[7] = (Current4) & 0xff;
-      fdcanx_send_data(motor->hcan, 0x1FE, TxBuf, 8);
-    } else {
-      TxBuf[0] = (Current1 >> 8) & 0xff;
-      TxBuf[1] = (Current1) & 0xff;
-      TxBuf[2] = (Current2 >> 8) & 0xff;
-      TxBuf[3] = (Current2) & 0xff;
-      TxBuf[4] = (Current3 >> 8) & 0xff;
-      TxBuf[5] = (Current3) & 0xff;
-      TxBuf[6] = (Current4 >> 8) & 0xff;
-      TxBuf[7] = (Current4) & 0xff;
-      fdcanx_send_data(motor->hcan, 0x2FE, TxBuf, 8);
-    }
-    break;
-
-  default:
-    break;
-  }
-}
-
-static int16_t float_to_int16(float x, float x_min, float x_max, uint8_t bits) {
-  float span = x_max - x_min;
-  float offset = x - x_min;
-  if (offset < 0.0f)
-    offset = 0.0f;
-  if (offset > span)
-    offset = span;
-  return (int16_t)(offset / span * 65535);
-}
 static float uint16_to_float(uint16_t x, float x_min, float x_max,
                              uint8_t bits) {
   float span = x_max - x_min;
@@ -265,20 +163,4 @@ static int16_t float_to_int12(float x, float x_min, float x_max) {
 static float int12_to_float(int16_t x, float x_min, float x_max) {
   float span = x_max - x_min;
   return x_min + span * (float)x / 4095.0f;
-}
-static float AngleUnify(float angle) {
-  // 角度范围 [-180, 180]
-  if (angle < -3.1415926) {
-    angle += 6.2831853;
-  }
-  angle = angle / 3.1415926 * 180.0f;
-  return angle;
-}
-static float RadUnify(float rad) {
-  // 角度范围 [-PI, PI]
-  if (rad < -3.1415926) {
-    rad += 6.2831853;
-  }
-  rad = rad / 3.1415926;
-  return rad;
 }

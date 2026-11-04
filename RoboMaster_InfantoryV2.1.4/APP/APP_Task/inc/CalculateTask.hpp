@@ -18,6 +18,5 @@
 
 void CaculateTask(void *pvParameters);
 float angle_to_rad(float degrees);
-void Control_Data_Print(Classic_Data_t *pClassicData);
 void IMU_Data_Print(Classic_Data_t *pClassicData);
 #endif
