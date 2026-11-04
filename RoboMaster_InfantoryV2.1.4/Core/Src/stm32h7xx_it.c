@@ -369,9 +369,6 @@ void UART5_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles DMA2 stream0 global interrupt.
-  */
-/**
   * @brief This function handles FDCAN calibration unit interrupt.
   */
 void FDCAN_CAL_IRQHandler(void)
