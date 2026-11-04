@@ -72,7 +72,10 @@ void Float_PID_Init(Float_PID_Typedef* pid,float Kp,float Ki,float Kd);
 int PID(PID_Typedef* PID,int Target,int Current,int Err_Int_Max);
 int PID_Max(PID_Typedef* PID,int Target,int Current,int Err_Int_Max,int Res_Max);
 float PID_Max_Float(Float_PID_Typedef* PID,float Target,float Current,float Err_Int_Max,float Res_Max);
-float PID_Max_Float_Dt(Float_PID_Typedef* PID,float Target,float Current,float Err_Int_Max,float Res_Max,float dt);
+/* 带真实 dt 的浮点 PID。
+ * Iout_Max 与 Res_Max 均为输出单位；腿长 PID 中均为 N。
+ * 内部 Err_Int 仍保存为 error·s，调用者不应再按其单位设置限幅。 */
+float PID_Max_Float_Dt(Float_PID_Typedef* PID,float Target,float Current,float Iout_Max,float Res_Max,float dt);
 int PID_Loc_Close_Max(PID_Typedef* PID,int Target,int Current,int Err_Int_Max,int Res_Max,int Loc_Max);
 void Loc_and_Speed_PID_Init(PID_Typedef* Loc_Pid,float Loc_Kp,float Loc_Ki,float Loc_Kd,PID_Typedef* Speed_Pid,float Speed_Kp,float Speed_Ki,float Speed_Kd);
 int Loc_and_Speed_PID(PID_Typedef* Loc_Pid,float Loc_Kp,float Loc_Ki,float Loc_Kd,int Loc_Target,int Loc_Current,PID_Typedef* Speed_Pid,float Speed_Kp,float Speed_Ki,float Speed_Kd,int Speed_Current,int Loc_Err_Int_Max,int Spd_Err_Int_Max,int Loc_Res_Max);

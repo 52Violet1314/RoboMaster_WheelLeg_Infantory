@@ -80,13 +80,18 @@ float PID_Max_Float(Float_PID_Typedef *PID, float Target, float Current,
   return PID->Res;
 }
 
-/* 带真实时间步长的浮点 PID：Ki 单位为输出/(误差·s)，Kd 单位为输出·s/误差。 */
+/* 带真实时间步长的浮点 PID：Ki 单位为输出/(误差·s)，Kd 单位为输出·s/误差。
+ * Iout_Max 使用输出单位，而非内部积分状态的 error·s 单位。 */
 float PID_Max_Float_Dt(Float_PID_Typedef *PID, float Target, float Current,
-                       float Err_Int_Max, float Res_Max, float dt) {
+                       float Iout_Max, float Res_Max, float dt) {
   PID->Error = Target - Current;
   if (PID->Ki > 0.0f) {
     PID->Err_Int += PID->Error * dt;
-    PID->Err_Int = fast_clip(PID->Err_Int, -Err_Int_Max, Err_Int_Max);
+    /* 先把积分状态换算为实际输出，再按输出单位限幅并回写状态。
+     * 因而 Iout_Max=20 对腿长 PID 就是积分项最多贡献 ±20 N。 */
+    float iout = PID->Ki * PID->Err_Int;
+    iout = fast_clip(iout, -Iout_Max, Iout_Max);
+    PID->Err_Int = iout / PID->Ki;
   }
   const float error_rate = (PID->Error - PID->Last_Error) / dt;
   PID->Dout = PID->Kd * 0.6f * error_rate + 0.4f * PID->Last_Dout;

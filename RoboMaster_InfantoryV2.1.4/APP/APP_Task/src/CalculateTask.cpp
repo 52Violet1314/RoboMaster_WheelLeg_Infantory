@@ -122,7 +122,7 @@ void CaculateTask(void *pvParameters) {
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
-    Float_PID_Init(&leg_length_pid_r, 0.0f, 0.0f, 0.0f);//200 1.2 0.4
+    Float_PID_Init(&leg_length_pid_r, 250.0f, 10.0f, 0.0f);//200 1.2 0.4
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -311,9 +311,10 @@ void CaculateTask(void *pvParameters) {
             stand_not_up_time = 1.0f;
             }
         }
-        /* 测试版：总使能后全程按已起身处理；正式版使用原起身状态机。 */
+        /* 测试版：固定按已起身处理，独立于总使能开关；正式版使用原起身状态机。
+         * 腿长 PID 是否输出仍由后面的 Channel[9] 总使能控制。 */
 #if LEG_CONTROL_TEST_MODE
-        StandUp_Flag = (SBUS_Data.Channel[9] >= 100);
+        StandUp_Flag = true;
 #else
         StandUp_Flag = (stand_state == StandState_Up);
 #endif
@@ -350,12 +351,18 @@ void CaculateTask(void *pvParameters) {
             lqr_pos_ref_recorded = false;
         }
 
-        /* LQR 仅由 Channel[7] 控制；K 由左右实际腿长均值查 41 点表并线性插值。 */
+        /* LQR 仅由 Channel[7] 控制。正式版用左右实际腿长均值查表；
+         * 右腿标定测试完全隔离，只使用右腿实际 L0_R。 */
         if (lqr_enabled) {
+#if LEG_CONTROL_TEST_MODE
+            const float scheduled_leg_length = pClassicData->Leg_Data.L0_R;
+#else
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
+            const float scheduled_leg_length = average_leg_length;
+#endif
             K_Fixed_Leg_t scheduled_gain;
-            LQR_K_GetInterpolated(average_leg_length, scheduled_gain);
+            LQR_K_GetInterpolated(scheduled_leg_length, scheduled_gain);
             LQR_K_CalculateWithGain(pClassicData, scheduled_gain);
         }
 
@@ -372,17 +379,26 @@ void CaculateTask(void *pvParameters) {
         }
 #endif
 
-        /* 气弹簧预压补偿：在重力补偿之后，按本轮左右实际 L0 分别计算。 */
-        const float spring_preload_f0_l =
+        /* 气弹簧预压补偿：正式版按本轮左右实际 L0 分别计算。
+         * 台架重新标定时必须完全关掉，右腿 F0 才是 PID 为保持该腿长所需的
+         * 原始补偿力，可直接记录回补偿表。 */
+        float spring_preload_f0_l = 0.0f;
+        float spring_preload_f0_r = 0.0f;
+#if !LEG_CONTROL_TEST_MODE
+        spring_preload_f0_l =
                 LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
-        const float spring_preload_f0_r =
+        spring_preload_f0_r =
                 LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
+#endif
 
         /* 腿长旋钮控制：VrB=云台 CH6=底盘 Channel[5]。
          * SBUS 解包后的 Channel[5] 是 raw-1024；此处恢复原始 0~2047 值。
-         * 实测旋钮最低端约 raw=240、最高端约 raw=1814：0~250 为低端
-         * 死区并保持 150 mm，1800~2047 为高端死区并保持 384 mm；
-         * 251~1799 精确线性映射到工作区间 150~384 mm。 */
+         * 实测旋钮最低端约 raw=240、最高端约 raw=1814：0~250 为低端死区。
+         *
+         * 旋钮位置始终先按同一条 140~380 mm 标尺换算。进入起身状态后只将
+         * 140~150 mm、350~380 mm 两端的多余行程裁为 150/350 mm 死区，绝不把
+         * 整段旋钮重新映射到 150~350 mm。因而例如 250 mm 对应的旋钮位置，在
+         * 起身前后目标仍严格为 250 mm，不会发生目标突变。 */
         constexpr int32_t leg_knob_raw_min = 0;
         constexpr int32_t leg_knob_raw_max = 2047;
         constexpr int32_t leg_knob_low_deadband_raw = 250;
@@ -391,35 +407,49 @@ void CaculateTask(void *pvParameters) {
         constexpr int32_t leg_knob_active_max_raw = leg_knob_high_deadband_raw - 1;
         constexpr float leg_knob_active_span_raw =
                 (float)(leg_knob_active_max_raw - leg_knob_active_min_raw);
-        constexpr float leg_knob_length_min_m = 0.150f;
-        constexpr float leg_knob_length_max_m = 0.384f;
         int32_t leg_knob_raw = (int32_t)SBUS_Data.Channel[5] + 1024;
         if (leg_knob_raw < leg_knob_raw_min) {
             leg_knob_raw = leg_knob_raw_min;
         } else if (leg_knob_raw > leg_knob_raw_max) {
             leg_knob_raw = leg_knob_raw_max;
         }
-        float leg_knob_target_m = leg_knob_length_min_m;
+        constexpr float leg_knob_full_min_m = 0.140f;
+        constexpr float leg_knob_full_max_m = 0.380f;
+#if !LEG_CONTROL_TEST_MODE
+        constexpr float leg_knob_stand_min_m = 0.150f;
+        constexpr float leg_knob_stand_max_m = 0.350f;
+#endif
+        float leg_knob_full_target_m = leg_knob_full_min_m;
         if (leg_knob_raw <= leg_knob_low_deadband_raw) {
-            leg_knob_target_m = leg_knob_length_min_m;
+            leg_knob_full_target_m = leg_knob_full_min_m;
         } else if (leg_knob_raw >= leg_knob_high_deadband_raw) {
-            leg_knob_target_m = leg_knob_length_max_m;
+            leg_knob_full_target_m = leg_knob_full_max_m;
         } else {
             const float leg_knob_ratio =
                     (float)(leg_knob_raw - leg_knob_active_min_raw) / leg_knob_active_span_raw;
-            leg_knob_target_m = leg_knob_length_min_m +
-                    (leg_knob_length_max_m - leg_knob_length_min_m) * leg_knob_ratio;
+            leg_knob_full_target_m = leg_knob_full_min_m +
+                    (leg_knob_full_max_m - leg_knob_full_min_m) * leg_knob_ratio;
         }
-        /* 测试版保留完整旋钮行程；正式版起身后，350~384 mm 为高端死区。 */
-#if LEG_CONTROL_TEST_MODE
-        pClassicData->Target_Data.Target_LegLong = leg_knob_target_m;
-#else
-        pClassicData->Target_Data.Target_LegLong = StandUp_Flag
-                ? fminf(leg_knob_target_m, 0.350f)
-                : leg_knob_target_m;
+        float leg_knob_target_m = leg_knob_full_target_m;
+        /* 测试版虽固定为“已起身”，但仍必须测试完整 140~380 mm 行程。
+         * 仅正式版在起身后将多余两端裁为 150/350 mm 死区。 */
+#if !LEG_CONTROL_TEST_MODE
+        if (StandUp_Flag) {
+            /* 起身可用行程之外的旋钮位置直接视为端点死区。 */
+            if (leg_knob_target_m < leg_knob_stand_min_m) {
+                leg_knob_target_m = leg_knob_stand_min_m;
+            } else if (leg_knob_target_m > leg_knob_stand_max_m) {
+                leg_knob_target_m = leg_knob_stand_max_m;
+            }
+        }
 #endif
-        /* 当前旋钮目标就是左右腿共用的平均腿长目标；后续若加入左右独立目标，
-         * 在此处拆为 Target_LegLong_L / Target_LegLong_R 即可。 */
+        pClassicData->Target_Data.Target_LegLong = leg_knob_target_m;
+#if LEG_CONTROL_TEST_MODE
+        /* 测试版 Target_LegLong 的语义固定为“右腿目标”。左腿不参与目标、
+         * 误差、积分或 F0 输出，避免把左腿状态混入右腿补偿标定。 */
+#else
+        /* 正式版的旋钮目标由左右腿共用。 */
+#endif
 
         /* 测试版关闭 roll 差分；正式版仅已起身时计算原左右反向 F0 补偿。 */
         float roll_comp = 0.0f;
@@ -439,30 +469,47 @@ void CaculateTask(void *pvParameters) {
 #endif
 
         /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
-        const float leg_target = pClassicData->Target_Data.Target_LegLong;
-        const float leg_err_l = leg_target - pClassicData->Leg_Data.L0_L;
-        const float leg_err_r = leg_target - pClassicData->Leg_Data.L0_R;
+        const float leg_target_r = pClassicData->Target_Data.Target_LegLong;
+#if !LEG_CONTROL_TEST_MODE
+        const float leg_target_l = leg_target_r;
+        const float leg_err_l = leg_target_l - pClassicData->Leg_Data.L0_L;
+#endif
+        const float leg_err_r = leg_target_r - pClassicData->Leg_Data.L0_R;
+        /* 仅用于腿长 PID 的 ±1 mm 误差死区。保留原始误差给调试和目标切换判断；
+         * 死区内不产生新的 P/I/D 修正，但不清已有积分维持力。 */
+        constexpr float leg_pid_deadband_m = 0.001f;
+        float leg_pid_current_r = pClassicData->Leg_Data.L0_R;
+#if !LEG_CONTROL_TEST_MODE
+        float leg_pid_current_l = pClassicData->Leg_Data.L0_L;
+        if (fabsf(leg_err_l) <= leg_pid_deadband_m) {
+            leg_pid_current_l = leg_target_l;
+        }
+#endif
+        if (fabsf(leg_err_r) <= leg_pid_deadband_m) {
+            leg_pid_current_r = leg_target_r;
+        }
         static float last_leg_target = 0.0f;
-        if (fabsf(leg_target - last_leg_target) > 0.001f) {//发生换档
+        if (fabsf(leg_target_r - last_leg_target) > 0.001f) {//发生换档
             /* 切换腿长档位时丢弃上一目标的积分，避免换挡冲击。 */
             leg_length_pid_l.Err_Int = 0.0f;
             leg_length_pid_r.Err_Int = 0.0f;//清左右腿长积分
+#if !LEG_CONTROL_TEST_MODE
             leg_length_pid_l.Last_Error = leg_err_l;
+#endif
             leg_length_pid_r.Last_Error = leg_err_r;//更新误差长度
             leg_length_pid_l.Last_Dout = 0.0f;
             leg_length_pid_r.Last_Dout = 0.0f;//清输出
-            last_leg_target = leg_target;
+            last_leg_target = leg_target_r;
         }
-        /* 共用安全逻辑：仅腿长 PID 按总使能切换限制；旋钮目标始终更新。
-         * 总使能前仅观察、禁止积分，F0 最大 ±10 N；
-         * 总使能后才开放积分。原收腿保护保留：误差小于 -50 mm 时积分限为 1，
-         * 其余为 50；PID 输出和总 F0 均使用对称 ±50 N 限幅。 */
-        const float leg_l_int_limit = leg_pid_enabled ?
-                (leg_err_l < -0.05f ? 1.0f : 50.0f) : 0.0f;
-        const float leg_r_int_limit = leg_pid_enabled ?
-                (leg_err_r < -0.05f ? 1.0f : 50.0f) : 0.0f;
-        const float leg_l_out_limit = leg_pid_enabled ? 50.0f : 10.0f;
-        const float leg_r_out_limit = leg_pid_enabled ? 50.0f : 10.0f;
+        /* 总使能前禁止积分；限幅直接使用积分输出单位 N。
+         * 测试版仅右腿参与。 */
+        constexpr float leg_pid_iout_limit_n = 20.0f;
+        const float leg_r_iout_limit_n = leg_pid_enabled ? leg_pid_iout_limit_n : 0.0f;
+        const float leg_r_out_limit = leg_pid_enabled ? 50.0f : 0.0f;
+#if !LEG_CONTROL_TEST_MODE
+        const float leg_l_iout_limit_n = leg_pid_enabled ? leg_pid_iout_limit_n : 0.0f;
+        const float leg_l_out_limit = leg_pid_enabled ? 50.0f : 0.0f;
+#endif
         /* PID_Max_Float 由 Ki 是否为正决定是否累加积分；失能时临时置零，
          * 调用后恢复参数，避免未使能期间产生任何积分项。 */
         const float leg_l_ki = leg_length_pid_l.Ki;
@@ -473,12 +520,20 @@ void CaculateTask(void *pvParameters) {
             leg_length_pid_l.Ki = 0.0f;
             leg_length_pid_r.Ki = 0.0f;
         }
-        float leg_l_out = PID_Max_Float_Dt(&leg_length_pid_l, leg_target,
-                                           pClassicData->Leg_Data.L0_L,
-                                           leg_l_int_limit, leg_l_out_limit, cal_dt);
-        float leg_r_out = PID_Max_Float_Dt(&leg_length_pid_r, leg_target,
-                                           pClassicData->Leg_Data.L0_R,
-                                           leg_r_int_limit, leg_r_out_limit, cal_dt);
+        float leg_l_out = 0.0f;
+#if LEG_CONTROL_TEST_MODE
+        /* 右腿标定期间左 PID 保持完全失能，防止任何残留积分施加到左腿。 */
+        leg_length_pid_l.Err_Int = 0.0f;
+        leg_length_pid_l.Last_Error = 0.0f;
+        leg_length_pid_l.Last_Dout = 0.0f;
+#else
+        leg_l_out = PID_Max_Float_Dt(&leg_length_pid_l, leg_target_l,
+                                     leg_pid_current_l,
+                                     leg_l_iout_limit_n, leg_l_out_limit, cal_dt);
+#endif
+        float leg_r_out = PID_Max_Float_Dt(&leg_length_pid_r, leg_target_r,
+                                           leg_pid_current_r,
+                                           leg_r_iout_limit_n, leg_r_out_limit, cal_dt);
         leg_length_pid_l.Ki = leg_l_ki;
         leg_length_pid_r.Ki = leg_r_ki;
         // pClassicData->Contronller_Data.F0_L = 15.5f + leg_l_out;
@@ -560,7 +615,7 @@ void CaculateTask(void *pvParameters) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
-                // LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
+                 LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
                 // IMU_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
