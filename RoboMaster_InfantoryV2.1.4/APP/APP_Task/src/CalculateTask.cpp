@@ -9,7 +9,6 @@
 #include "WS2812.h"
 #include "app_Task.hpp"
 #include "app_Data_Task.hpp"
-#include "app_ins_cal.h"
 #include "app_leg_angle_target.hpp"
 #include "app_leg_force_compensation.hpp"
 #include "app_leg_gravity_compensation.hpp"
@@ -90,8 +89,6 @@ void State_Data_Print(Classic_Data_t *pClassicData);
 
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
-
-void IMU_Temp_Control(float Target_Temp);
 
 static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                                     K_Fixed_Leg_t gain);

@@ -29,10 +29,6 @@ extern TaskHandle_t EnmegencyHandle;
 extern TaskHandle_t INS_TaskHandle;
 
 
-extern QueueHandle_t SBUSQueue;
-
-extern SemaphoreHandle_t IMUSemaphore;
-
 extern EventGroupHandle_t ControlEventGroup;
 extern EventGroupHandle_t DataGroup;
 extern EventGroupHandle_t EnmegencyEventGroup;

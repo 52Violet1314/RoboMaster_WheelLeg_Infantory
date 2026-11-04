@@ -33,26 +33,17 @@ TaskHandle_t RemoteTaskHandle;
 
 
 
-QueueHandle_t SBUSQueue;
-
 EventGroupHandle_t ControlEventGroup;
 EventGroupHandle_t DataGroup;
 EventGroupHandle_t EnmegencyEventGroup;
 
-SemaphoreHandle_t IMUSemaphore;
-
-void CreatTask(void);
 void CreateEventGroup(void);
-void CreateQueue(void);
-void CreateSemaphore(void);
 
 
 
 
 void Task_Init(void) {
-  CreateQueue();
   CreateEventGroup();
-  CreateSemaphore();
   CreatTask();
 }
 
@@ -130,7 +121,6 @@ void CreatTask(void) {
     uart_print_blocking("BoardLinkTaskCreate fail\r\n");
   }
 }
-
 void CreateEventGroup(void)
 {
   ControlEventGroup = xEventGroupCreate();
@@ -148,17 +138,3 @@ void CreateEventGroup(void)
   }
 }
 
-void CreateQueue(void)
-{
-    SBUSQueue = xQueueCreate(16, 16 * sizeof(int16_t));
-  if (SBUSQueue == NULL) {
-    uart_print_blocking("SBUSQueue creat fail\r\n");
-  }
-}
-
-void CreateSemaphore(void) {
-  IMUSemaphore = xSemaphoreCreateBinary();
-  if (IMUSemaphore == NULL) {
-    uart_print_blocking("IMUSemaphore creat fail\r\n");
-  }
-}

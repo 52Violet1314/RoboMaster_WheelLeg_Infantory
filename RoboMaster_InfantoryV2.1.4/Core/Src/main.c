@@ -32,12 +32,10 @@
 #include "event_groups.h"
 #include "task.h"
 #include "../BSP/bsp_UART.h"
-#include "BMI088driver.h"
 #include "DMIMU.h"
 #include "FreeRTOS.h"
 #include "WS2812.h"
 #include "app_Task.hpp"
-#include "app_ins_cal.h"
 #include "app_main.hpp"
 #include "bsp_fdcan.h"
 #include "BoardLinkTask.hpp"
@@ -154,13 +152,8 @@ int main(void)
   // HAL_TIM_Base_Start_IT(&htim3);
   // TIM5以1MHx计数
   HAL_TIM_Base_Start(&htim5);
-#if USE_HIPNUC_HI14
   memset(&Hipnuc_HI14, 0, sizeof(Hipnuc_HI14));
   HAL_UARTEx_ReceiveToIdle_DMA(&huart7, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
-#else
-   INS_Init();
-  while (BMI088_init() != BMI088_NO_ERROR);
-#endif
   uart_print_blocking("初始化完毕\r\n");
   app_main();
   if (USE_CMSIS_OS) {

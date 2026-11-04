@@ -8,15 +8,9 @@
 #include "usart.h"
 #include "main.h"
 #include "app_motor.h"
-#include "app_ins_cal.h"
 #include "tim.h"
 #include "Hipnuv_hi14.h"
-#define a 0.4f  // 一阶低通滤波（roll/pitch）
-#define a_yaw 0.05f  // yaw 单独加强滤波，抑制噪声抖动
-
 #define GRAVITY 9.81f  // 重力加速度 (m/s²)
-
-void IMU_Temp_Control(float Target_Temp);
 
 void app_INSTask(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -24,7 +18,6 @@ void app_INSTask(void *pvParameters) {
     uint32_t ulNotificationValue = 0;
     xEventGroupSetBits(ControlEventGroup,Control_OK_BIT);
     while (1) {
-#if USE_HIPNUC_HI14
     xTaskNotifyWait(0, 0, &ulNotificationValue, portMAX_DELAY);
     bool new_data = false;
     if (hi14_rx_size > 0) {
@@ -54,27 +47,7 @@ void app_INSTask(void *pvParameters) {
     if (!new_data) {
         continue;  // 未解析到有效帧，等下一包
     }
-#else
-    xEventGroupWaitBits(ControlEventGroup, Control_OK_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-    INS_Task();
-    ClassData->IMU_Data.roll = angle_to_rad(INS.Roll);
-    /* INS 陀螺仪角速度 (rad/s) */
-    ClassData->IMU_Data.gyro[0] = INS.Gyro[0];
-    ClassData->IMU_Data.gyro[1] = INS.Gyro[1];
-    ClassData->IMU_Data.gyro[2] = INS.Gyro[2];
-    /* INS 加速度 (m/s²) — 使用原始含重力测量值 */
-    ClassData->IMU_Data.accel[0] = INS.Accel[0];
-    ClassData->IMU_Data.accel[1] = INS.Accel[1];
-    ClassData->IMU_Data.accel[2] = INS.Accel[2];
-    ClassData->IMU_Data.pitch = angle_to_rad(INS.Pitch);
-    ClassData->IMU_Data.yaw = angle_to_rad(INS.Yaw);
-#endif
-
-    /* 保存当前 accel，HI14 路径下在 new_data 分支已填 */
-    /* INS 路径下在上方已填，此处统一使用 */
-
     ClassData->Data_Time.imu_time = __HAL_TIM_GET_COUNTER(&htim5);
-#if USE_HIPNUC_GYRO_RATE
     /*
      * HI14 安装坐标：X 右、Y 前、Z 上。
      * 与当前欧拉角处理保持一致：roll 不变、pitch = -raw_pitch、yaw 不变。
@@ -84,53 +57,10 @@ void app_INSTask(void *pvParameters) {
     ClassData->IMU_Data.delta_pitch = -ClassData->IMU_Data.gyro[0];
     ClassData->IMU_Data.delta_yaw = ClassData->IMU_Data.gyro[2];
 
-    /* 保持历史角度同步，切回旧差分路径时不会使用陈旧值。 */
+    /* 保持历史角度字段同步。 */
     ClassData->IMU_Data.last_roll = ClassData->IMU_Data.roll;
     ClassData->IMU_Data.last_pitch = ClassData->IMU_Data.pitch;
     ClassData->IMU_Data.last_yaw = ClassData->IMU_Data.yaw;
-#else
-    float time_diff = (ClassData->Data_Time.imu_time -
-                    ClassData->Data_Time.last_imu_time) *
-                   1e-6f;
-    if (time_diff > 1e-6f) { // 确保时间差大于0
-      // 处理 roll 跳变，得到滤波后的 roll 角速度
-      float roll_change = ClassData->IMU_Data.roll - ClassData->IMU_Data.last_roll;
-      if (roll_change > 3.14159f)
-          roll_change -= 6.28318f;
-      else if (roll_change < -3.14159f)
-          roll_change += 6.28318f;
-      ClassData->IMU_Data.delta_roll =
-          a * roll_change / time_diff +
-          (1 - a) * ClassData->IMU_Data.delta_roll;
-      ClassData->IMU_Data.last_roll = ClassData->IMU_Data.roll;
-
-      // 处理 pitch 跳变
-      float pitch_change = ClassData->IMU_Data.pitch - ClassData->IMU_Data.last_pitch;
-      if (pitch_change > 3.14159f)
-          pitch_change -= 6.28318f;
-      else if (pitch_change < -3.14159f)
-          pitch_change += 6.28318f;
-      ClassData->IMU_Data.delta_pitch =
-          a * pitch_change / time_diff +
-          (1 - a) * ClassData->IMU_Data.delta_pitch;
-      ClassData->IMU_Data.last_pitch = ClassData->IMU_Data.pitch;
-
-      // 处理 yaw 跳变
-      float yaw_change = ClassData->IMU_Data.yaw - ClassData->IMU_Data.last_yaw;
-      if (yaw_change > 3.14159f)
-          yaw_change -= 6.28318f;
-      else if (yaw_change < -3.14159f)
-          yaw_change += 6.28318f;
-      ClassData->IMU_Data.delta_yaw =
-          a_yaw * yaw_change / time_diff + (1 - a_yaw) * ClassData->IMU_Data.delta_yaw;
-      ClassData->IMU_Data.last_yaw = ClassData->IMU_Data.yaw;
-    }
-      else {
-      ClassData->IMU_Data.delta_roll = 0.0f;
-      ClassData->IMU_Data.delta_pitch = 0.0f;
-      ClassData->IMU_Data.delta_yaw = 0.0f;
-    }
-#endif
 
     // ================================================================
     // 向量旋转：机体加速度 → 世界系竖直/水平加速度
@@ -168,29 +98,8 @@ void app_INSTask(void *pvParameters) {
     }
 
     ClassData->Data_Time.last_imu_time = ClassData->Data_Time.imu_time;
-    #if USE_HIPNUC_HI14
     htim3.Instance->CCR4 = 1;
-    #else
-    IMU_Temp_Control(40.0f);
-    #endif
     xEventGroupSetBits(DataGroup,IMU_DATA_READY_BIT);
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
   }
-}
-
-float err = 0.0f, err_l = 0.0f, err_ll = 0.0f;
-
-void IMU_Temp_Control(float Target_Temp) {
-  const uint16_t Kp = 10, Ki = 0, Kd = 0, MAX_OUT = 800;
-  int32_t out = 0;
-  err_ll = err_l;
-  err_l = err;
-  err = Target_Temp - BMI088.Temperature;
-  out = (int32_t)(Kp * err + Ki * (err + err_l + err_ll) + Kd * (err - err_l));
-  if (out > MAX_OUT)
-    out = MAX_OUT;
-  if (out < 0)
-    out = 0;
-  // uart_print("IMU_Temp_Control:%d\r\n", out);
-  htim3.Instance->CCR4 = (uint16_t)out;
 }
