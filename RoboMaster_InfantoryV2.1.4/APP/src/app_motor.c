@@ -145,6 +145,30 @@ void DM_Motor_3519_Data_Get(DM_Motor_t *motor, uint8_t *data) {
   motor->data.temp_COIL_C = (float)data[7];
 }
 
+void DM_Motor_3507_Data_Get(DM_Motor_t *motor, uint8_t *data) {
+  motor->data.err = (data[0] >> 4) & 0x0F;
+  uint16_t pos_raw = (uint16_t)((data[1] << 8) | data[2]);
+  uint16_t vel_raw = (uint16_t)((data[3] << 4) | (data[4] >> 4));
+  uint16_t tor_raw = (uint16_t)(((data[4] & 0x0F) << 8) | data[5]);
+  motor->data.position_rad = uint16_to_float(pos_raw, -P_MAX_RAD_3507, P_MAX_RAD_3507, 16);
+  motor->data.velocity_rad_s = uint16_to_float(vel_raw, -V_MAX_RAD_S_3507, V_MAX_RAD_S_3507, 12);
+  motor->data.torque_Nm = uint16_to_float(tor_raw, -T_MAX_NM_3507, T_MAX_NM_3507, 12);
+  motor->data.temp_MOS_C = (float)data[6];
+  motor->data.temp_COIL_C = (float)data[7];
+}
+
+void DM_Motor_4310_Data_Get(DM_Motor_t *motor, uint8_t *data) {
+  motor->data.err = (data[0] >> 4) & 0x0F;
+  uint16_t pos_raw = (uint16_t)((data[1] << 8) | data[2]);
+  uint16_t vel_raw = (uint16_t)((data[3] << 4) | (data[4] >> 4));
+  uint16_t tor_raw = (uint16_t)(((data[4] & 0x0F) << 8) | data[5]);
+  motor->data.position_rad = uint16_to_float(pos_raw, -P_MAX_RAD, P_MAX_RAD, 16);
+  motor->data.velocity_rad_s = uint16_to_float(vel_raw, -V_MAX_RAD_S, V_MAX_RAD_S, 12);
+  motor->data.torque_Nm = uint16_to_float(tor_raw, -T_MAX_NM, T_MAX_NM, 12);
+  motor->data.temp_MOS_C = (float)data[6];
+  motor->data.temp_COIL_C = (float)data[7];
+}
+
 static float uint16_to_float(uint16_t x, float x_min, float x_max,
                              uint8_t bits) {
   float span = x_max - x_min;

@@ -46,12 +46,30 @@ extern volatile uint32_t fdcan2_rx_fifo1_full_count;
 extern volatile uint32_t fdcan3_rx_fifo0_full_count;
 extern volatile uint32_t fdcan3_rx_fifo1_full_count;
 
+typedef enum {
+  DM_MOTOR_FAULT_NONE = 0,
+  DM_MOTOR_FAULT_INVALID_FRAME,
+  DM_MOTOR_FAULT_DRIVER_STATUS,
+} DM_Motor_Fault_Reason_t;
+
+/* 所有达妙电机共用的一份故障记录；由接收 ISR 写入，后续故障处理读取。 */
+typedef struct {
+  uint32_t count;
+  uint16_t feedback_id;
+  uint8_t motor_id;
+  uint8_t status;
+  uint8_t reason;
+} DM_Motor_Fault_Record_t;
+
+extern volatile DM_Motor_Fault_Record_t dm_motor_fault_record;
+
 void bsp_can_init(void);
 void can_filter_init(void);
 void bsp_fdcan_set_baud(hcan_t *hfdcan, uint8_t mode, uint8_t baud);
 uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, uint8_t *data, uint32_t len);
 void fdcan1_rx_callback(void);
 void fdcan2_rx_callback(void);
+void fdcan2_rx_fifo1_callback(void);
 void fdcan3_rx_callback(void);
 
 #ifdef __cplusplus

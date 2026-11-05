@@ -73,6 +73,8 @@ void DM_Motor_Speed_Control(DM_Motor_t *motor, float Spd_Des);
 void DM_Motor_8009_Data_Get(DM_Motor_t *motor, uint8_t *data);
 
 void DM_Motor_3519_Data_Get(DM_Motor_t *motor, uint8_t *data);
+void DM_Motor_3507_Data_Get(DM_Motor_t *motor, uint8_t *data);
+void DM_Motor_4310_Data_Get(DM_Motor_t *motor, uint8_t *data);
 
 #ifdef __cplusplus
 }

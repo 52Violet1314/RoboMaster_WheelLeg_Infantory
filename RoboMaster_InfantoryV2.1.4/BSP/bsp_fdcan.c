@@ -20,6 +20,47 @@
 **/
 static uint8_t   Motor_Data_ReadyBit       = 0;
 static TickType_t Motor_Data_LastComplete  = 0;
+volatile DM_Motor_Fault_Record_t dm_motor_fault_record = {0};
+
+static void dm_motor_record_fault(uint16_t feedback_id, uint8_t motor_id,
+                                   uint8_t status,
+                                   DM_Motor_Fault_Reason_t reason) {
+  dm_motor_fault_record.feedback_id = feedback_id;
+  dm_motor_fault_record.motor_id = motor_id;
+  dm_motor_fault_record.status = status;
+  dm_motor_fault_record.reason = (uint8_t)reason;
+  dm_motor_fault_record.count++;
+}
+
+/* 达妙反馈帧：标准数据帧、固定 8 字节，首字节低四位为电机 ID。 */
+static uint8_t dm_motor_feedback_valid(const FDCAN_RxHeaderTypeDef *header,
+                                       const uint8_t *data,
+                                       uint16_t expected_feedback_id,
+                                       uint8_t expected_motor_id) {
+  uint8_t status;
+
+  if ((header->IdType != FDCAN_STANDARD_ID) ||
+      (header->RxFrameType != FDCAN_DATA_FRAME) ||
+      (header->DataLength != FDCAN_DLC_BYTES_8) ||
+      (header->Identifier != expected_feedback_id) ||
+      ((data[0] & 0x0F) != expected_motor_id)) {
+    dm_motor_record_fault(header->Identifier, expected_motor_id,
+                          (header->DataLength == FDCAN_DLC_BYTES_8)
+                              ? (uint8_t)(data[0] >> 4)
+                              : 0xFF,
+                          DM_MOTOR_FAULT_INVALID_FRAME);
+    return 0;
+  }
+
+  status = (uint8_t)(data[0] >> 4);
+  if ((status != 0U) && (status != 1U)) {
+    dm_motor_record_fault(expected_feedback_id, expected_motor_id, status,
+                          DM_MOTOR_FAULT_DRIVER_STATUS);
+    return 0;
+  }
+
+  return 1;
+}
 
 void bsp_can_init(void) {
 
@@ -39,7 +80,7 @@ void bsp_can_init(void) {
   HAL_FDCAN_ActivateNotification(&hfdcan2,
       FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_FULL, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan2,
-      FDCAN_IT_RX_FIFO1_WATERMARK | FDCAN_IT_RX_FIFO1_FULL, 0);
+      FDCAN_IT_RX_FIFO1_NEW_MESSAGE | FDCAN_IT_RX_FIFO1_FULL, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan2,
       FDCAN_IT_BUS_OFF | FDCAN_IT_ARB_PROTOCOL_ERROR |
           FDCAN_IT_DATA_PROTOCOL_ERROR | FDCAN_IT_ERROR_PASSIVE |
@@ -82,6 +123,14 @@ void can_filter_init(void) {
   fdcan_filter2.FilterID1 = 0x095;
   fdcan_filter2.FilterID2 = 0x096;
 
+  FDCAN_FilterTypeDef fdcan_filter2_fifo1;
+  fdcan_filter2_fifo1.IdType = FDCAN_STANDARD_ID;
+  fdcan_filter2_fifo1.FilterIndex = 1;
+  fdcan_filter2_fifo1.FilterType = FDCAN_FILTER_DUAL;
+  fdcan_filter2_fifo1.FilterConfig = FDCAN_FILTER_TO_RXFIFO1;
+  fdcan_filter2_fifo1.FilterID1 = 0x097; // 拨弹 DM_3507 反馈
+  fdcan_filter2_fifo1.FilterID2 = 0x098; // yaw DM_4310 反馈
+
   FDCAN_FilterTypeDef fdcan_filter3;
 
   fdcan_filter3.IdType = FDCAN_STANDARD_ID;             // 标准ID
@@ -99,10 +148,12 @@ void can_filter_init(void) {
   HAL_FDCAN_ConfigRxFifoOverwrite(&hfdcan1, FDCAN_RX_FIFO0, FDCAN_RX_FIFO_BLOCKING);
   HAL_FDCAN_ConfigFifoWatermark(&hfdcan1, FDCAN_CFG_RX_FIFO0, 5);
   HAL_FDCAN_ConfigFilter(&hfdcan2, &fdcan_filter2); // 接收ID2
+  HAL_FDCAN_ConfigFilter(&hfdcan2, &fdcan_filter2_fifo1);
   // 拒绝接收匹配不成功的标准ID和扩展ID,不接受远程帧
   HAL_FDCAN_ConfigGlobalFilter(&hfdcan2, FDCAN_REJECT, FDCAN_REJECT,
                                FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
   HAL_FDCAN_ConfigFifoWatermark(&hfdcan2, FDCAN_CFG_RX_FIFO0, 1);
+  HAL_FDCAN_ConfigFifoWatermark(&hfdcan2, FDCAN_CFG_RX_FIFO1, 1);
 
   HAL_FDCAN_ConfigFilter(&hfdcan3, &fdcan_filter3); // FDCAN3滤波器配置
   HAL_FDCAN_ConfigGlobalFilter(&hfdcan3, FDCAN_ACCEPT_IN_RX_FIFO0,
@@ -329,20 +380,28 @@ void fdcan1_rx_callback(void) {
     // 软件过滤特定ID
     switch (rec_id) {
       case 0x091: //  8009电机1ID
-        DM_Motor_8009_Data_Get(&DM_8009P1, buf);
-        Motor_Data_ReadyBit |= (1 << 0);
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x091, 0x01)) {
+          DM_Motor_8009_Data_Get(&DM_8009P1, buf);
+          Motor_Data_ReadyBit |= (1 << 0);
+        }
         break;
       case 0x092: //  8009电机2ID
-        DM_Motor_8009_Data_Get(&DM_8009P2, buf);
-        Motor_Data_ReadyBit |= (1 << 1);
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x092, 0x02)) {
+          DM_Motor_8009_Data_Get(&DM_8009P2, buf);
+          Motor_Data_ReadyBit |= (1 << 1);
+        }
         break;
       case 0x093: //  8009电机3ID
-        DM_Motor_8009_Data_Get(&DM_8009P3, buf);
-        Motor_Data_ReadyBit |= (1 << 2);
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x093, 0x03)) {
+          DM_Motor_8009_Data_Get(&DM_8009P3, buf);
+          Motor_Data_ReadyBit |= (1 << 2);
+        }
         break;
       case 0x094: //  8009电机4ID
-        DM_Motor_8009_Data_Get(&DM_8009P4, buf);
-        Motor_Data_ReadyBit |= (1 << 3);
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x094, 0x04)) {
+          DM_Motor_8009_Data_Get(&DM_8009P4, buf);
+          Motor_Data_ReadyBit |= (1 << 3);
+        }
         break;
       default:
         // 忽略其他ID
@@ -360,18 +419,45 @@ void fdcan2_rx_callback(void) {
          HAL_OK) {
     switch (pRxHeader.Identifier) {
       case 0x095:
-        DM_Motor_3519_Data_Get(&DM_3519L, buf);
-        Motor_Data_ReadyBit |= (1 << 4);
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x095, 0x05)) {
+          DM_Motor_3519_Data_Get(&DM_3519L, buf);
+          Motor_Data_ReadyBit |= (1 << 4);
+        }
         break;
       case 0x096:
-        DM_Motor_3519_Data_Get(&DM_3519R, buf);
-        Motor_Data_ReadyBit |= (1 << 5);
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x096, 0x06)) {
+          DM_Motor_3519_Data_Get(&DM_3519R, buf);
+          Motor_Data_ReadyBit |= (1 << 5);
+        }
         break;
       default:
         break;
     }
   }
   motor_data_ready_check_from_isr();
+}
+
+void fdcan2_rx_fifo1_callback(void) {
+  uint8_t buf[64];
+  FDCAN_RxHeaderTypeDef pRxHeader;
+
+  while (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO1, &pRxHeader, buf) ==
+         HAL_OK) {
+    switch (pRxHeader.Identifier) {
+      case 0x097: // 拨弹 DM_3507
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x097, 0x07)) {
+          DM_Motor_3507_Data_Get(&DM_3507, buf);
+        }
+        break;
+      case 0x098: // yaw DM_4310
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x098, 0x08)) {
+          DM_Motor_4310_Data_Get(&DM_4310, buf);
+        }
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 void fdcan3_rx_callback(void) {
@@ -423,7 +509,7 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan,
     }
   }
   if (hfdcan == &hfdcan2) {
-    fdcan2_rx_callback();
+    fdcan2_rx_fifo1_callback();
   }
 }
 
