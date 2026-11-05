@@ -95,7 +95,6 @@ void app_Remote_Task(void *pvParameters) {
             remote_snapshot.sbus_data = SBUS_Data;
             remote_snapshot.target_x_vel = target_x_vel;
             remote_snapshot.target_yaw_vel = target_yaw_vel;
-            remote_snapshot.valid_tick = xTaskGetTickCount();
             if (xQueueOverwrite(Remote_ControlQueueHandle, &remote_snapshot) == pdPASS) {
                 DataTimeout_MarkRemoteValid();
             }

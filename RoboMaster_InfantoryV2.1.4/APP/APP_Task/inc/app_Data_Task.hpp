@@ -46,20 +46,17 @@ typedef struct {
 /* Complete, by-value producer-to-Calculate snapshots. */
 typedef struct {
     IMU_Data_t data;
-    TickType_t valid_tick;
 } IMU_ControlSnapshot_t;
 
 typedef struct {
     SBUS_Data_t sbus_data;
     float target_x_vel;
     float target_yaw_vel;
-    TickType_t valid_tick;
 } Remote_ControlSnapshot_t;
 
 #define MOTOR_CONTROL_SNAPSHOT_COUNT 8U
 typedef struct {
     DM_Motor_Data_t data[MOTOR_CONTROL_SNAPSHOT_COUNT];
-    TickType_t valid_tick[MOTOR_CONTROL_SNAPSHOT_COUNT];
     uint8_t driver_fault_state[MOTOR_CONTROL_SNAPSHOT_COUNT];
     uint8_t driver_fault_flag;
 } Motor_ControlSnapshot_t;
@@ -67,11 +64,6 @@ typedef struct {
 typedef struct {
     IMU_Data_t IMU_Data;
     Motor_Data_t Motor_Data;
-
-    struct {
-        int imu_time;
-        int last_imu_time;
-    } Data_Time;
 
     struct {
         float phi_0_L;

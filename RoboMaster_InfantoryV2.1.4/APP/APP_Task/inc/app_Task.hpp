@@ -13,7 +13,6 @@
 
 //控制事件组位（Data_UPDATE_OK_BIT 已移除：Data Task 合并到 Calculate Task）
 #define Calculate_OK_BIT (1 << 0)
-#define Control_OK_BIT (1 << 1)
 
 #define ENMEGENCY_POWER_BIT           (1 << 3)  // 紧急停止位
 

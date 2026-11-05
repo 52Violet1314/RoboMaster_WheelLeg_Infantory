@@ -44,7 +44,6 @@ void MotorControlTask(void *pvParameters) {
                 &DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f,
                 -((Classic_Data->Contronller_Data.Fw_R / 15.8f) * 19.2f));
         }
-        xEventGroupSetBits(ControlEventGroup, Control_OK_BIT);
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
 }

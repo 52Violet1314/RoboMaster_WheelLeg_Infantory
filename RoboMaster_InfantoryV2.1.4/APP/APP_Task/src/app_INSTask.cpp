@@ -17,7 +17,6 @@ void app_INSTask(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     IMU_ControlSnapshot_t imu_snapshot = {};
     (void)pvParameters;
-    xEventGroupSetBits(ControlEventGroup,Control_OK_BIT);
     while (1) {
     Hi14_RxBlock_t rx_block;
     if ((HI14_RxQueueHandle == NULL) ||
@@ -52,7 +51,6 @@ void app_INSTask(void *pvParameters) {
     if (!new_data) {
         continue;  // 未解析到有效帧，等下一包
     }
-    imu_snapshot.valid_tick = xTaskGetTickCount();
     /*
      * HI14 安装坐标：X 右、Y 前、Z 上。
      * 与当前欧拉角处理保持一致：roll 不变、pitch = -raw_pitch、yaw 不变。

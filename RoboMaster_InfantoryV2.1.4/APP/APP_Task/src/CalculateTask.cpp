@@ -185,7 +185,7 @@ void CaculateTask(void *pvParameters) {
         if ((dm_motor_feedback_timeout_flag != 0U) ||
             (imu_data_timeout_flag != 0U) ||
             (remote_data_timeout_flag != 0U) ||
-            (dm_motor_driver_fault_flag != 0U)) {
+            (motor_snapshot.driver_fault_flag != 0U)) {
             pClassicData->Contronller_Data.Fw_L = 0.0f;
             pClassicData->Contronller_Data.Fw_R = 0.0f;
             pClassicData->Contronller_Data.Tp_L = 0.0f;

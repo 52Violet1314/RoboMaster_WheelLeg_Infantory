@@ -153,12 +153,12 @@ void CreatTask(void) {
   if (res != pdPASS) {
     uart_print_blocking("DefaultTaskCreate fail\r\n");
   }
-  res =xTaskCreate(app_INSTask, "INS", 256 * 4, &Classic_Data, 7, &INS_TaskHandle);
+  res =xTaskCreate(app_INSTask, "INS", 256 * 4, NULL, 7, &INS_TaskHandle);
   if (res != pdPASS) {
     uart_print_blocking("INSTTaskCreate fail\r\n");
   }
   // Data Task 已合并到 Calculate Task，不再单独创建
-  res =xTaskCreate(app_Remote_Task, "Remote", 256 * 4, &Classic_Data, 8, &RemoteTaskHandle);
+  res =xTaskCreate(app_Remote_Task, "Remote", 256 * 4, NULL, 8, &RemoteTaskHandle);
   if (res != pdPASS) {
     uart_print_blocking("RemoteTaskCreate fail\r\n");
   }

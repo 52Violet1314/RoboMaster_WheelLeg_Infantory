@@ -45,7 +45,6 @@ static void motor_control_snapshot_publish_from_isr(void) {
 
   for (uint32_t i = 0; i < DM_MOTOR_FEEDBACK_COUNT; ++i) {
     motor_control_snapshot.data[i] = motors[i]->data;
-    motor_control_snapshot.valid_tick[i] = dm_motor_last_feedback_tick[i];
     motor_control_snapshot.driver_fault_state[i] =
         dm_motor_driver_fault_state[i];
   }
