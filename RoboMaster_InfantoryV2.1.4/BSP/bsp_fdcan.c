@@ -4,6 +4,7 @@
 #include <string.h>
 #include "FreeRTOS.h"
 #include "portmacro.h"
+#include "timers.h"
 #include "stm32h7xx_hal_tim.h"
 #include "task.h"
 #include "main.h"
@@ -21,6 +22,33 @@
 static uint8_t   Motor_Data_ReadyBit       = 0;
 static TickType_t Motor_Data_LastComplete  = 0;
 volatile DM_Motor_Fault_Record_t dm_motor_fault_record = {0};
+volatile uint8_t dm_motor_feedback_timeout_flag = 1U;
+
+#define DM_MOTOR_FEEDBACK_COUNT       8U
+#define DM_MOTOR_FEEDBACK_TIMEOUT_MS  10U
+
+static volatile TickType_t dm_motor_last_feedback_tick[DM_MOTOR_FEEDBACK_COUNT] = {0};
+static StaticTimer_t dm_motor_timeout_timer_buffer;
+static TimerHandle_t dm_motor_timeout_timer = NULL;
+
+static void dm_motor_timeout_timer_callback(TimerHandle_t xTimer) {
+  TickType_t now = xTaskGetTickCount();
+  (void)xTimer;
+
+  for (uint32_t i = 0; i < DM_MOTOR_FEEDBACK_COUNT; ++i) {
+    TickType_t last = dm_motor_last_feedback_tick[i];
+    if ((last == 0U) ||
+        ((now - last) > pdMS_TO_TICKS(DM_MOTOR_FEEDBACK_TIMEOUT_MS))) {
+      dm_motor_feedback_timeout_flag = 1U;
+      return;
+    }
+  }
+  dm_motor_feedback_timeout_flag = 0U;
+}
+
+static void dm_motor_feedback_mark_received(uint32_t index) {
+  dm_motor_last_feedback_tick[index] = xTaskGetTickCountFromISR();
+}
 
 static void dm_motor_record_fault(uint16_t feedback_id, uint8_t motor_id,
                                    uint8_t status,
@@ -96,6 +124,13 @@ void bsp_can_init(void) {
           FDCAN_IT_DATA_PROTOCOL_ERROR | FDCAN_IT_ERROR_PASSIVE |
           FDCAN_IT_ERROR_WARNING,
       0);
+
+  dm_motor_timeout_timer = xTimerCreateStatic(
+      "DMFbWd", pdMS_TO_TICKS(1), pdTRUE, NULL,
+      dm_motor_timeout_timer_callback, &dm_motor_timeout_timer_buffer);
+  if (dm_motor_timeout_timer != NULL) {
+    xTimerStart(dm_motor_timeout_timer, 0);
+  }
 }
 /**
 ************************************************************************
@@ -353,13 +388,13 @@ static void motor_data_ready_check_from_isr(void) {
     Motor_Data_ReadyBit = 0;
     Motor_Data_LastComplete = xTaskGetTickCountFromISR();
   }
-  /* 超时强制清零：5ms 内未凑齐 6 个电机数据则丢弃当前累积，防止死锁
+  /* 该旧六电机同步位保留给其他任务；10ms 内未凑齐则丢弃当前累积。
    * 首次凑不齐时也会超时清零。 */
   else if (Motor_Data_ReadyBit != 0) {
     TickType_t now = xTaskGetTickCountFromISR();
     if (Motor_Data_LastComplete == 0) {
       Motor_Data_LastComplete = now;  /* 初始计时起点 */
-    } else if ((now - Motor_Data_LastComplete) > pdMS_TO_TICKS(5)) {
+    } else if ((now - Motor_Data_LastComplete) > pdMS_TO_TICKS(10)) {
       Motor_Data_ReadyBit = 0;
       Motor_Data_LastComplete = 0;    /* 重置，下一轮重新计时 */
     }
@@ -382,24 +417,28 @@ void fdcan1_rx_callback(void) {
       case 0x091: //  8009电机1ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x091, 0x01)) {
           DM_Motor_8009_Data_Get(&DM_8009P1, buf);
+          dm_motor_feedback_mark_received(0);
           Motor_Data_ReadyBit |= (1 << 0);
         }
         break;
       case 0x092: //  8009电机2ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x092, 0x02)) {
           DM_Motor_8009_Data_Get(&DM_8009P2, buf);
+          dm_motor_feedback_mark_received(1);
           Motor_Data_ReadyBit |= (1 << 1);
         }
         break;
       case 0x093: //  8009电机3ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x093, 0x03)) {
           DM_Motor_8009_Data_Get(&DM_8009P3, buf);
+          dm_motor_feedback_mark_received(2);
           Motor_Data_ReadyBit |= (1 << 2);
         }
         break;
       case 0x094: //  8009电机4ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x094, 0x04)) {
           DM_Motor_8009_Data_Get(&DM_8009P4, buf);
+          dm_motor_feedback_mark_received(3);
           Motor_Data_ReadyBit |= (1 << 3);
         }
         break;
@@ -421,12 +460,14 @@ void fdcan2_rx_callback(void) {
       case 0x095:
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x095, 0x05)) {
           DM_Motor_3519_Data_Get(&DM_3519L, buf);
+          dm_motor_feedback_mark_received(4);
           Motor_Data_ReadyBit |= (1 << 4);
         }
         break;
       case 0x096:
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x096, 0x06)) {
           DM_Motor_3519_Data_Get(&DM_3519R, buf);
+          dm_motor_feedback_mark_received(5);
           Motor_Data_ReadyBit |= (1 << 5);
         }
         break;
@@ -447,11 +488,13 @@ void fdcan2_rx_fifo1_callback(void) {
       case 0x097: // 拨弹 DM_3507
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x097, 0x07)) {
           DM_Motor_3507_Data_Get(&DM_3507, buf);
+          dm_motor_feedback_mark_received(6);
         }
         break;
       case 0x098: // yaw DM_4310
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x098, 0x08)) {
           DM_Motor_4310_Data_Get(&DM_4310, buf);
+          dm_motor_feedback_mark_received(7);
         }
         break;
       default:

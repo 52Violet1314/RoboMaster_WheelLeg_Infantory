@@ -62,6 +62,8 @@ typedef struct {
 } DM_Motor_Fault_Record_t;
 
 extern volatile DM_Motor_Fault_Record_t dm_motor_fault_record;
+/* 八台底盘达妙电机任一台超过 10 ms 未收到有效反馈时置位。 */
+extern volatile uint8_t dm_motor_feedback_timeout_flag;
 
 void bsp_can_init(void);
 void can_filter_init(void);

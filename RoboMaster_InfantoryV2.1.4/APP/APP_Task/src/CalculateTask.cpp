@@ -132,7 +132,6 @@ void CaculateTask(void *pvParameters) {
 
     // uart_print("CaculateTask start\r\n");
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    TickType_t last_sensor_valid_tick = xLastWakeTime;
     uint32_t last_cal_tick = 0;  // 使用 htim5 微秒计数器跟踪真实 dt
     while (1) {
         /* 总使能关闭时，无论本轮随后等到完整反馈、超时，还是走测试保持分支，
@@ -149,26 +148,9 @@ void CaculateTask(void *pvParameters) {
         //                        (unsigned)xEventGroupGetBits(DataGroup));
         //     xLastAlivePrint = xAliveNow;
         // }
-        // ====== 原 Data Task：等待传感器数据就绪（5ms 超时保护） ======
-        EventBits_t uxBits = xEventGroupWaitBits(
-            DataGroup, MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT,
-            pdTRUE, pdTRUE, pdMS_TO_TICKS(10));
-
-        if ((uxBits & (MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT))
-            != (MOTOR_Data_READY_BIT | IMU_DATA_READY_BIT)) {
-#if LEG_CONTROL_TEST_MODE && LEG_CONTROL_TEST_HOLD_LAST_TORQUE_ON_SENSOR_GAP
-            /* 台架标定中，偶发缺一帧时短暂保持上一拍关节力矩，避免一次 10 ms
-             * 等待超时就令腿卸力。保持窗口有严格上限，通信持续异常仍会清零。 */
-            const TickType_t xSensorGapNow = xTaskGetTickCount();
-            if ((xSensorGapNow - last_sensor_valid_tick)
-                    <= pdMS_TO_TICKS(LEG_CONTROL_TEST_SENSOR_HOLD_MS)) {
-                xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
-                vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
-                continue;
-            }
-#endif
-            /* 传感器帧未成套到达时，禁止沿用上一周期的轮速控制量。
-             * 否则 ControlTask 仍会按旧的 Fw_R/Fw_L 发包，表现为单侧电机持续转动。 */
+        /* 固定 1 ms 调度：不等待反馈事件。八台电机任一台超过 10 ms
+         * 无有效反馈时，由 FDCAN 接收层置统一超时标志；本任务只读取它。 */
+        if (dm_motor_feedback_timeout_flag != 0U) {
             pClassicData->Contronller_Data.Fw_L = 0.0f;
             pClassicData->Contronller_Data.Fw_R = 0.0f;
             pClassicData->Contronller_Data.Tp_L = 0.0f;
@@ -177,21 +159,10 @@ void CaculateTask(void *pvParameters) {
             pClassicData->Contronller_Data.T2_L = 0.0f;
             pClassicData->Contronller_Data.T1_R = 0.0f;
             pClassicData->Contronller_Data.T2_R = 0.0f;
-            /* 节流打印：每 500ms 最多输出一次，避免串口洪水拖慢调度 */
-            static TickType_t xLastTimeoutPrint = 0;
-            // extern uint32_t fdcan_tx_fail_count;
-            TickType_t xNow = xTaskGetTickCount();
-            if ((xNow - xLastTimeoutPrint) > pdMS_TO_TICKS(500)) {
-                // uart_print("Cal: sensor timeout bits=0x%02X TX_fail=%lu\r\n",
-                //            (unsigned)uxBits, fdcan_tx_fail_count);
-                xLastTimeoutPrint = xNow;
-            }
             xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
             vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
             continue;
         }
-
-        last_sensor_valid_tick = xTaskGetTickCount();
 
         // ====== 计算本周期真实时间步长 (s) ======
         uint32_t now_tick = __HAL_TIM_GET_COUNTER(&htim5);
