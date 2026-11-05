@@ -36,7 +36,6 @@ void DM_Motor_Init(DM_Motor_t *motor, uint16_t id, uint8_t mode,
   motor->MODE = mode;
   motor->hcan = hcan;
   motor->Enable_Flag = 1;
-  motor->CheckTimes = 0;
   DM_Motor_Enable(motor);
 }
 

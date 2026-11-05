@@ -24,14 +24,23 @@ extern "C" {
 #endif
 
 extern uint32_t fdcan_tx_fail_count;
+/* 仅用于诊断：发送 FIFO 当前无法入队、Bus-Off 及 RX FIFO 满次数。 */
+extern volatile uint32_t fdcan1_tx_fifo_full_count;
+extern volatile uint32_t fdcan2_tx_fifo_full_count;
+extern volatile uint32_t fdcan3_tx_fifo_full_count;
+extern volatile uint32_t fdcan1_bus_off_count;
+extern volatile uint32_t fdcan2_bus_off_count;
+extern volatile uint32_t fdcan3_bus_off_count;
+extern volatile uint32_t fdcan1_rx_fifo0_full_count;
+extern volatile uint32_t fdcan2_rx_fifo0_full_count;
+extern volatile uint32_t fdcan2_rx_fifo1_full_count;
+extern volatile uint32_t fdcan3_rx_fifo0_full_count;
+extern volatile uint32_t fdcan3_rx_fifo1_full_count;
 
 void bsp_can_init(void);
 void can_filter_init(void);
 void bsp_fdcan_set_baud(hcan_t *hfdcan, uint8_t mode, uint8_t baud);
 uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, uint8_t *data, uint32_t len);
-uint8_t fdcanx_send_data_fast(hcan_t *hfdcan, uint16_t id, uint8_t *data,
-                              uint32_t len, FDCAN_TxHeaderTypeDef *header);
-uint8_t fdcanx_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf);
 void fdcan1_rx_callback(void);
 void fdcan2_rx_callback(void);
 void fdcan3_rx_callback(void);

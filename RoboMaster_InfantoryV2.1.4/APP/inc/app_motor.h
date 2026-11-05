@@ -39,7 +39,6 @@ typedef struct {
   uint16_t ID;
   uint8_t MODE;
   uint8_t Enable_Flag;
-  uint8_t CheckTimes;
   FDCAN_HandleTypeDef *hcan;
   DM_Motor_Data_t data;
 } DM_Motor_t;

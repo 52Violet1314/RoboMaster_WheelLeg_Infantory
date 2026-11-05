@@ -20,7 +20,6 @@
 **/
 static uint8_t   Motor_Data_ReadyBit       = 0;
 static TickType_t Motor_Data_LastComplete  = 0;
-static uint8_t   Motor_Data_HasCompleted   = 0;
 
 void bsp_can_init(void) {
 
@@ -29,27 +28,28 @@ void bsp_can_init(void) {
   HAL_FDCAN_Start(&hfdcan2);
   HAL_FDCAN_Start(&hfdcan3);
   /* FDCAN1: 逐帧 RX + 错误通知 */
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_FIFO1_WATERMARK, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan1, FDCAN_IT_RX_BUFFER_NEW_MESSAGE, 0);
+  HAL_FDCAN_ActivateNotification(&hfdcan1,
+      FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_FULL, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan1,
       FDCAN_IT_BUS_OFF | FDCAN_IT_ARB_PROTOCOL_ERROR |
           FDCAN_IT_DATA_PROTOCOL_ERROR | FDCAN_IT_ERROR_PASSIVE |
           FDCAN_IT_ERROR_WARNING,
       0);
   /* FDCAN2: 逐帧 RX + 错误通知 */
-  HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO1_WATERMARK, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_BUFFER_NEW_MESSAGE, 0);
+  HAL_FDCAN_ActivateNotification(&hfdcan2,
+      FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_FULL, 0);
+  HAL_FDCAN_ActivateNotification(&hfdcan2,
+      FDCAN_IT_RX_FIFO1_WATERMARK | FDCAN_IT_RX_FIFO1_FULL, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan2,
       FDCAN_IT_BUS_OFF | FDCAN_IT_ARB_PROTOCOL_ERROR |
           FDCAN_IT_DATA_PROTOCOL_ERROR | FDCAN_IT_ERROR_PASSIVE |
           FDCAN_IT_ERROR_WARNING,
       0);
   /* FDCAN3: 逐帧 RX + 错误通知 */
-  HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO1_WATERMARK, 0);
-  HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_BUFFER_NEW_MESSAGE, 0);
+  HAL_FDCAN_ActivateNotification(&hfdcan3,
+      FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_RX_FIFO0_FULL, 0);
+  HAL_FDCAN_ActivateNotification(&hfdcan3,
+      FDCAN_IT_RX_FIFO1_WATERMARK | FDCAN_IT_RX_FIFO1_FULL, 0);
   HAL_FDCAN_ActivateNotification(&hfdcan3,
       FDCAN_IT_BUS_OFF | FDCAN_IT_ARB_PROTOCOL_ERROR |
           FDCAN_IT_DATA_PROTOCOL_ERROR | FDCAN_IT_ERROR_PASSIVE |
@@ -251,6 +251,17 @@ static FDCAN_TxHeaderTypeDef pTxHeaderBase = {
 };
 
 uint32_t fdcan_tx_fail_count = 0;
+volatile uint32_t fdcan1_tx_fifo_full_count = 0;
+volatile uint32_t fdcan2_tx_fifo_full_count = 0;
+volatile uint32_t fdcan3_tx_fifo_full_count = 0;
+volatile uint32_t fdcan1_bus_off_count = 0;
+volatile uint32_t fdcan2_bus_off_count = 0;
+volatile uint32_t fdcan3_bus_off_count = 0;
+volatile uint32_t fdcan1_rx_fifo0_full_count = 0;
+volatile uint32_t fdcan2_rx_fifo0_full_count = 0;
+volatile uint32_t fdcan2_rx_fifo1_full_count = 0;
+volatile uint32_t fdcan3_rx_fifo0_full_count = 0;
+volatile uint32_t fdcan3_rx_fifo1_full_count = 0;
 
 uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, uint8_t *data,
                          uint32_t len) {
@@ -259,51 +270,14 @@ uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, uint8_t *data,
   pTxHeader.DataLength = len_to_dlc(len);
   if (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan, &pTxHeader, data) != HAL_OK) {
     fdcan_tx_fail_count++;
+    if (hfdcan == &hfdcan1) {
+      fdcan1_tx_fifo_full_count++;
+    } else if (hfdcan == &hfdcan2) {
+      fdcan2_tx_fifo_full_count++;
+    } else if (hfdcan == &hfdcan3) {
+      fdcan3_tx_fifo_full_count++;
+    }
     return 1;
-  }
-  return 0;
-}
-
-uint8_t fdcanx_send_data_fast(hcan_t *hfdcan, uint16_t id, uint8_t *data,
-                              uint32_t len, FDCAN_TxHeaderTypeDef *header) {
-  header->Identifier = id;
-  header->DataLength = len_to_dlc(len);
-  return (HAL_FDCAN_AddMessageToTxFifoQ(hfdcan, header, data) != HAL_OK);
-}
-/**
-************************************************************************
-* @brief:      	fdcanx_receive(FDCAN_HandleTypeDef *hfdcan, uint8_t *buf)
-* @param:       hfdcan：FDCAN句柄
-* @param:       buf：接收数据缓存
-* @retval:     	接收的数据长度
-* @details:    	接收数据
-************************************************************************
-**/
-uint8_t fdcanx_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf) {
-  FDCAN_RxHeaderTypeDef pRxHeader;
-  uint8_t len = 0;
-
-  if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &pRxHeader, buf) ==
-      HAL_OK) {
-    *rec_id = pRxHeader.Identifier;
-    if (pRxHeader.DataLength <= FDCAN_DLC_BYTES_8)
-      len = pRxHeader.DataLength;
-    else if (pRxHeader.DataLength == FDCAN_DLC_BYTES_12)
-      len = 12;
-    else if (pRxHeader.DataLength == FDCAN_DLC_BYTES_16)
-      len = 16;
-    else if (pRxHeader.DataLength == FDCAN_DLC_BYTES_20)
-      len = 20;
-    else if (pRxHeader.DataLength == FDCAN_DLC_BYTES_24)
-      len = 24;
-    else if (pRxHeader.DataLength == FDCAN_DLC_BYTES_32)
-      len = 32;
-    else if (pRxHeader.DataLength == FDCAN_DLC_BYTES_48)
-      len = 48;
-    else if (pRxHeader.DataLength == FDCAN_DLC_BYTES_64)
-      len = 64;
-
-    return len; // 接收数据
   }
   return 0;
 }
@@ -318,10 +292,9 @@ static void motor_data_ready_check_from_isr(void) {
     }
     Motor_Data_ReadyBit = 0;
     Motor_Data_LastComplete = xTaskGetTickCountFromISR();
-    Motor_Data_HasCompleted = 1;
   }
   /* 超时强制清零：5ms 内未凑齐 6 个电机数据则丢弃当前累积，防止死锁
-   * 去掉 Motor_Data_HasCompleted 前置条件：首次凑不齐时也会超时清零 */
+   * 首次凑不齐时也会超时清零。 */
   else if (Motor_Data_ReadyBit != 0) {
     TickType_t now = xTaskGetTickCountFromISR();
     if (Motor_Data_LastComplete == 0) {
@@ -348,22 +321,18 @@ void fdcan1_rx_callback(void) {
     switch (rec_id) {
       case 0x091: //  8009电机1ID
         DM_Motor_8009_Data_Get(&DM_8009P1, buf);
-        DM_8009P1.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 0);
         break;
       case 0x092: //  8009电机2ID
         DM_Motor_8009_Data_Get(&DM_8009P2, buf);
-        DM_8009P2.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 1);
         break;
       case 0x093: //  8009电机3ID
         DM_Motor_8009_Data_Get(&DM_8009P3, buf);
-        DM_8009P3.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 2);
         break;
       case 0x094: //  8009电机4ID
         DM_Motor_8009_Data_Get(&DM_8009P4, buf);
-        DM_8009P4.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 3);
         break;
       default:
@@ -383,12 +352,10 @@ void fdcan2_rx_callback(void) {
     switch (pRxHeader.Identifier) {
       case 0x095:
         DM_Motor_3519_Data_Get(&DM_3519L, buf);
-        DM_3519L.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 4);
         break;
       case 0x096:
         DM_Motor_3519_Data_Get(&DM_3519R, buf);
-        DM_3519R.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 5);
         break;
       default:
@@ -417,6 +384,15 @@ void fdcan3_rx_callback(void) {
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
                                uint32_t RxFifo0ITs) {
+  if (RxFifo0ITs & FDCAN_IT_RX_FIFO0_FULL) {
+    if (hfdcan == &hfdcan1) {
+      fdcan1_rx_fifo0_full_count++;
+    } else if (hfdcan == &hfdcan2) {
+      fdcan2_rx_fifo0_full_count++;
+    } else if (hfdcan == &hfdcan3) {
+      fdcan3_rx_fifo0_full_count++;
+    }
+  }
   if (hfdcan == &hfdcan1) {
     fdcan1_rx_callback();
   }
@@ -430,6 +406,13 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan,
 
 void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan,
                                uint32_t RxFifo1ITs) {
+  if (RxFifo1ITs & FDCAN_IT_RX_FIFO1_FULL) {
+    if (hfdcan == &hfdcan2) {
+      fdcan2_rx_fifo1_full_count++;
+    } else if (hfdcan == &hfdcan3) {
+      fdcan3_rx_fifo1_full_count++;
+    }
+  }
   if (hfdcan == &hfdcan2) {
     fdcan2_rx_callback();
   }
@@ -438,6 +421,13 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan,
 void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
                                    uint32_t ErrorStatusITs) {
   if (ErrorStatusITs & FDCAN_IR_BO) {
+    if (hfdcan == &hfdcan1) {
+      fdcan1_bus_off_count++;
+    } else if (hfdcan == &hfdcan2) {
+      fdcan2_bus_off_count++;
+    } else if (hfdcan == &hfdcan3) {
+      fdcan3_bus_off_count++;
+    }
     CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
   }
   if (ErrorStatusITs & FDCAN_IR_EP) {

@@ -98,7 +98,6 @@ void app_INSTask(void *pvParameters) {
     }
 
     ClassData->Data_Time.last_imu_time = ClassData->Data_Time.imu_time;
-    htim3.Instance->CCR4 = 1;
     xEventGroupSetBits(DataGroup,IMU_DATA_READY_BIT);
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
   }

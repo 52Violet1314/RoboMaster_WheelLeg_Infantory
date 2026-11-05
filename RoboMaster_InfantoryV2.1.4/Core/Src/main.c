@@ -133,7 +133,6 @@ int main(void)
   MX_USART1_UART_Init();
   MX_UART5_Init();
   MX_USART3_UART_Init();
-  MX_TIM3_Init();
   MX_TIM5_Init();
   MX_SPI6_Init();
   MX_UART7_Init();
@@ -144,7 +143,6 @@ int main(void)
   // 初始化SBUS环形缓冲区
   SBUS_RingBuffer_Init();
   SCB_InvalidateDCache_by_Addr((void *)rx_buff, BUFF_SIZE * 2);
-  // HAL_TIM_Base_Start_IT(&htim3);
   // TIM5以1MHx计数
   HAL_TIM_Base_Start(&htim5);
   memset(&Hipnuc_HI14, 0, sizeof(Hipnuc_HI14));
@@ -385,39 +383,6 @@ void MPU_Config(void)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
-  if (htim->Instance == TIM3) {
-  DM_8009P1.CheckTimes++;
-  DM_8009P2.CheckTimes++;
-  DM_8009P3.CheckTimes++;
-  DM_8009P4.CheckTimes++;
-  DM_3519L.CheckTimes++;
-  DM_3519R.CheckTimes++;
-  if(DM_8009P1.CheckTimes >= 100)
-  {
-    DM_8009P1.Enable_Flag = 0;
-  }
-  if(DM_8009P2.CheckTimes >= 100)
-  {
-    DM_8009P2.Enable_Flag = 0;
-  }
-  if(DM_8009P3.CheckTimes >= 100)
-  {
-    DM_8009P3.Enable_Flag = 0;
-  }
-  if(DM_8009P4.CheckTimes >= 100)
-  {
-    DM_8009P4.Enable_Flag = 0;
-  }
-  if(DM_3519L.CheckTimes >= 100)
-  {
-    DM_3519L.Enable_Flag = 0;
-  }
-  if(DM_3519R.CheckTimes >= 100)
-  {
-    DM_3519R.Enable_Flag = 0;
-  }
-    //  uart_print("TIM3 Period Elapsed\r\n");
-  }
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM2)
   {
