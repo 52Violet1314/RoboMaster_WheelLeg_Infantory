@@ -128,7 +128,10 @@ void CaculateTask(void *pvParameters) {
     WheelKalman_Init(&Wheel_Kalman_R, 0.001f, 0.0f, 0.0f);
 
     // 串口 DMA 接收初始化（从 Data Task 移入）
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE * 2);
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE);
+    if (huart5.hdmarx != nullptr) {
+        __HAL_DMA_DISABLE_IT(huart5.hdmarx, DMA_IT_HT);
+    }
 
     // uart_print("CaculateTask start\r\n");
     TickType_t xLastWakeTime = xTaskGetTickCount();

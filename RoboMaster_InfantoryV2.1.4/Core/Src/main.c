@@ -141,7 +141,7 @@ int main(void)
   uart_print_blocking("初始化开始\r\n");
   // 初始化SBUS环形缓冲区
   SBUS_RingBuffer_Init();
-  SCB_InvalidateDCache_by_Addr((void *)rx_buff, BUFF_SIZE * 2);
+  SCB_InvalidateDCache_by_Addr((void *)rx_buff, BUFF_SIZE);
   // TIM5以1MHx计数
   HAL_TIM_Base_Start(&htim5);
   memset(&Hipnuc_HI14, 0, sizeof(Hipnuc_HI14));

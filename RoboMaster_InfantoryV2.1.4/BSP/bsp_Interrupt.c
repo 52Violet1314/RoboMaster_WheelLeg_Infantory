@@ -13,15 +13,30 @@
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
   if (huart->Instance == UART5) {
+    /* UART5 DMA buffer holds exactly one SBUS frame.  Reject any impossible
+     * callback length before it reaches the ring buffer. */
+    if (Size == 0U) {
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE);
+      if (huart5.hdmarx != NULL) {
+        __HAL_DMA_DISABLE_IT(huart5.hdmarx, DMA_IT_HT);
+      }
+      return;
+    }
+    if (Size > BUFF_SIZE) {
+      Size = BUFF_SIZE;
+    }
     SCB_InvalidateDCache_by_Addr((void *)rx_buff, Size);
     SBUS_Data_Input(&sbus_ring_buffer, rx_buff, Size);
-    SCB_CleanDCache_by_Addr((void *)rx_buff, BUFF_SIZE * 2);
+    SCB_CleanDCache_by_Addr((void *)rx_buff, BUFF_SIZE);
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xEventGroupSetBitsFromISR(DataGroup, SBUS_DATA_READY_BIT, &xHigherPriorityTaskWoken);
     if (xHigherPriorityTaskWoken == pdTRUE) {
       portYIELD();
     }
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE * 2);
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE);
+    if (huart5.hdmarx != NULL) {
+      __HAL_DMA_DISABLE_IT(huart5.hdmarx, DMA_IT_HT);
+    }
   }
 
   if (huart->Instance == UART7) {
@@ -46,10 +61,13 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == UART5) {
-    SCB_InvalidateDCache_by_Addr((void *)rx_buff, BUFF_SIZE * 2);
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE * 2);
+    SCB_InvalidateDCache_by_Addr((void *)rx_buff, BUFF_SIZE);
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE);
+    if (huart5.hdmarx != NULL) {
+      __HAL_DMA_DISABLE_IT(huart5.hdmarx, DMA_IT_HT);
+    }
     memset(rx_buff, 0, BUFF_SIZE);
-    SCB_CleanDCache_by_Addr((void *)rx_buff, BUFF_SIZE * 2);
+    SCB_CleanDCache_by_Addr((void *)rx_buff, BUFF_SIZE);
   }
 
   if (huart->Instance == UART7) {
