@@ -71,16 +71,16 @@ void can_filter_init(void) {
   fdcan_filter.FilterIndex = 0;            // 滤波器索引
   fdcan_filter.FilterType = FDCAN_FILTER_RANGE;
   fdcan_filter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0; // 过滤器0关联到FIFO0
-  fdcan_filter.FilterID1 = 0x090;
-  fdcan_filter.FilterID2 = 0x09F;          // 只接收电机反馈 0x091-0x096
+  fdcan_filter.FilterID1 = 0x091;
+  fdcan_filter.FilterID2 = 0x094;          // 只接收四个髋关节电机反馈
   FDCAN_FilterTypeDef fdcan_filter2;
 
   fdcan_filter2.IdType = FDCAN_STANDARD_ID; // 标准ID
   fdcan_filter2.FilterIndex = 0;            // 滤波器索引
-  fdcan_filter2.FilterType = FDCAN_FILTER_MASK;
-  fdcan_filter2.FilterConfig = FDCAN_FILTER_TO_RXFIFO1; // 过滤器0关联到FIFO1
-  fdcan_filter2.FilterID1 = 0x00;
-  fdcan_filter2.FilterID2 = 0x7FF;
+  fdcan_filter2.FilterType = FDCAN_FILTER_RANGE;
+  fdcan_filter2.FilterConfig = FDCAN_FILTER_TO_RXFIFO0; // 两个轮毂反馈进入FIFO0
+  fdcan_filter2.FilterID1 = 0x095;
+  fdcan_filter2.FilterID2 = 0x096;
 
   FDCAN_FilterTypeDef fdcan_filter3;
 
@@ -92,8 +92,8 @@ void can_filter_init(void) {
   fdcan_filter3.FilterID2 = 0x7FF; // 结束ID，允许接收所有标准ID
 
   HAL_FDCAN_ConfigFilter(&hfdcan1, &fdcan_filter); // 接收ID2
-  // 允许匹配的消息进入FIFO0，拒绝不匹配的标准ID和扩展ID,不接受远程帧
-  HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_ACCEPT_IN_RX_FIFO0, FDCAN_REJECT,
+  // 只允许匹配的消息进入FIFO0，拒绝不匹配的标准ID和扩展ID,不接受远程帧
+  HAL_FDCAN_ConfigGlobalFilter(&hfdcan1, FDCAN_REJECT, FDCAN_REJECT,
                                FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
   // 配置FIFO0为阻塞模式，FIFO已满时拒绝新消息，避免旧消息被覆盖
   HAL_FDCAN_ConfigRxFifoOverwrite(&hfdcan1, FDCAN_RX_FIFO0, FDCAN_RX_FIFO_BLOCKING);
@@ -102,7 +102,7 @@ void can_filter_init(void) {
   // 拒绝接收匹配不成功的标准ID和扩展ID,不接受远程帧
   HAL_FDCAN_ConfigGlobalFilter(&hfdcan2, FDCAN_REJECT, FDCAN_REJECT,
                                FDCAN_REJECT_REMOTE, FDCAN_REJECT_REMOTE);
-  HAL_FDCAN_ConfigFifoWatermark(&hfdcan2, FDCAN_CFG_RX_FIFO1, 1);
+  HAL_FDCAN_ConfigFifoWatermark(&hfdcan2, FDCAN_CFG_RX_FIFO0, 1);
 
   HAL_FDCAN_ConfigFilter(&hfdcan3, &fdcan_filter3); // FDCAN3滤波器配置
   HAL_FDCAN_ConfigGlobalFilter(&hfdcan3, FDCAN_ACCEPT_IN_RX_FIFO0,
@@ -308,6 +308,31 @@ uint8_t fdcanx_receive(hcan_t *hfdcan, uint16_t *rec_id, uint8_t *buf) {
   return 0;
 }
 
+static void motor_data_ready_check_from_isr(void) {
+  BaseType_t pxHighPriorityTaskWoken = pdFALSE;
+  if (Motor_Data_ReadyBit == 0x3F) {
+    xEventGroupSetBitsFromISR(DataGroup, MOTOR_Data_READY_BIT,
+                              &pxHighPriorityTaskWoken);
+    if (pxHighPriorityTaskWoken == pdTRUE) {
+      portYIELD();
+    }
+    Motor_Data_ReadyBit = 0;
+    Motor_Data_LastComplete = xTaskGetTickCountFromISR();
+    Motor_Data_HasCompleted = 1;
+  }
+  /* 超时强制清零：5ms 内未凑齐 6 个电机数据则丢弃当前累积，防止死锁
+   * 去掉 Motor_Data_HasCompleted 前置条件：首次凑不齐时也会超时清零 */
+  else if (Motor_Data_ReadyBit != 0) {
+    TickType_t now = xTaskGetTickCountFromISR();
+    if (Motor_Data_LastComplete == 0) {
+      Motor_Data_LastComplete = now;  /* 初始计时起点 */
+    } else if ((now - Motor_Data_LastComplete) > pdMS_TO_TICKS(5)) {
+      Motor_Data_ReadyBit = 0;
+      Motor_Data_LastComplete = 0;    /* 重置，下一轮重新计时 */
+    }
+  }
+}
+
 void fdcan1_rx_callback(void) {
   uint16_t rec_id;
   uint8_t buf[64];
@@ -341,46 +366,37 @@ void fdcan1_rx_callback(void) {
         DM_8009P4.CheckTimes = 0;
         Motor_Data_ReadyBit |= (1 << 3);
         break;
-      case 0x095: //  8009电机5ID
-        DM_Motor_3519_Data_Get(&DM_3519L, buf);
-        DM_3519L.CheckTimes = 0;
-        Motor_Data_ReadyBit |= (1 << 4);
-        break;
-      case 0x096: //  8009电机6ID
-        DM_Motor_3519_Data_Get(&DM_3519R, buf);
-        DM_3519R.CheckTimes = 0;
-        Motor_Data_ReadyBit |= (1 << 5);
-        break;
       default:
         // 忽略其他ID
         break;
     }
   }
-  BaseType_t pxHighPriorityTaskWoken = pdFALSE;
-  if (Motor_Data_ReadyBit == 0x3F) {
-    xEventGroupSetBitsFromISR(DataGroup, MOTOR_Data_READY_BIT,
-                              &pxHighPriorityTaskWoken);
-    if (pxHighPriorityTaskWoken == pdTRUE) {
-      portYIELD();
-    }
-    Motor_Data_ReadyBit = 0;
-    Motor_Data_LastComplete = xTaskGetTickCountFromISR();
-    Motor_Data_HasCompleted = 1;
-  }
-  /* 超时强制清零：5ms 内未凑齐 6 个电机数据则丢弃当前累积，防止死锁
-   * 去掉 Motor_Data_HasCompleted 前置条件：首次凑不齐时也会超时清零 */
-  else if (Motor_Data_ReadyBit != 0) {
-    TickType_t now = xTaskGetTickCountFromISR();
-    if (Motor_Data_LastComplete == 0) {
-      Motor_Data_LastComplete = now;  /* 初始计时起点 */
-    } else if ((now - Motor_Data_LastComplete) > pdMS_TO_TICKS(5)) {
-      Motor_Data_ReadyBit = 0;
-      Motor_Data_LastComplete = 0;    /* 重置，下一轮重新计时 */
-    }
-  }
+  motor_data_ready_check_from_isr();
 }
 
-void fdcan2_rx_callback(void) {}
+void fdcan2_rx_callback(void) {
+  uint8_t buf[64];
+  FDCAN_RxHeaderTypeDef pRxHeader;
+
+  while (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO0, &pRxHeader, buf) ==
+         HAL_OK) {
+    switch (pRxHeader.Identifier) {
+      case 0x095:
+        DM_Motor_3519_Data_Get(&DM_3519L, buf);
+        DM_3519L.CheckTimes = 0;
+        Motor_Data_ReadyBit |= (1 << 4);
+        break;
+      case 0x096:
+        DM_Motor_3519_Data_Get(&DM_3519R, buf);
+        DM_3519R.CheckTimes = 0;
+        Motor_Data_ReadyBit |= (1 << 5);
+        break;
+      default:
+        break;
+    }
+  }
+  motor_data_ready_check_from_isr();
+}
 
 void fdcan3_rx_callback(void) {
   uint8_t buf[64];

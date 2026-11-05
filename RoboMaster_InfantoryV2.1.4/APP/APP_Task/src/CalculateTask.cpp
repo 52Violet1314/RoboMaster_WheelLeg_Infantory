@@ -115,8 +115,8 @@ void CaculateTask(void *pvParameters) {
     DM_Motor_Init(&DM_8009P2, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P3, 0x053, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P4, 0x054, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_3519L, 0x055, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_3519R, 0x056, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_3519L, 0x055, DM_MOTOR_MODE_MIT, &hfdcan2);
+    DM_Motor_Init(&DM_3519R, 0x056, DM_MOTOR_MODE_MIT, &hfdcan2);
     DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0);
     DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
     DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0);
