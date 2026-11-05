@@ -15,6 +15,7 @@
 #include "task.h"
 #include "bsp_UART.h"
 #include "POWER.h"
+#include "Hipnuv_hi14.h"
 #include <cstdint>
 
 void DefaultTask(void *pvParameters);
@@ -27,6 +28,7 @@ void EnmegencyTask(void *pvParameters);
 TaskHandle_t ControlHandle;
 TaskHandle_t CaculateHandle;
 TaskHandle_t INS_TaskHandle;
+QueueHandle_t HI14_RxQueueHandle;
 TaskHandle_t DefalutHandle;
 TaskHandle_t RemoteTaskHandle;
 
@@ -43,6 +45,10 @@ void CreateEventGroup(void);
 
 void Task_Init(void) {
   CreateEventGroup();
+  HI14_RxQueueHandle = xQueueCreate(2, sizeof(Hi14_RxBlock_t));
+  if (HI14_RxQueueHandle == NULL) {
+    uart_print_blocking("HI14RxQueueCreate fail\r\n");
+  }
   CreatTask();
 }
 

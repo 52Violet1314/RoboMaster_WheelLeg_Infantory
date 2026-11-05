@@ -27,6 +27,7 @@ extern TaskHandle_t CaculateHandle;
 extern TaskHandle_t DefalutHandle;
 extern TaskHandle_t EnmegencyHandle;
 extern TaskHandle_t INS_TaskHandle;
+extern QueueHandle_t HI14_RxQueueHandle;
 
 
 extern EventGroupHandle_t ControlEventGroup;

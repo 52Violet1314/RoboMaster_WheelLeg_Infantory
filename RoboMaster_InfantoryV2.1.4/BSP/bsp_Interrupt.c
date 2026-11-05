@@ -41,7 +41,14 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 
   if (huart->Instance == UART7) {
     if (Size == 0) {
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart7, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
+      if (huart7.hdmarx != NULL) {
+        __HAL_DMA_DISABLE_IT(huart7.hdmarx, DMA_IT_HT);
+      }
       return;
+    }
+    if (Size > UART_RX_BUF_SIZE) {
+      Size = UART_RX_BUF_SIZE;
     }
 
     /* DMA writes physical RAM, so invalidate any stale CPU cache lines first. */
@@ -49,12 +56,28 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
         (uint32_t *)hi14_dma_rx_buf,
         (Size + 31) & ~31u);
 
-    memcpy(hi14_uart_rx_buf, hi14_dma_rx_buf, Size);
-    hi14_rx_size = Size;
+    if (HI14_RxQueueHandle != NULL) {
+      static Hi14_RxBlock_t rx_block;
+      static Hi14_RxBlock_t discarded_block;
+      BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+      rx_block.length = Size;
+      memcpy(rx_block.data, hi14_dma_rx_buf, Size);
+      if (xQueueSendFromISR(HI14_RxQueueHandle, &rx_block,
+                            &xHigherPriorityTaskWoken) != pdPASS) {
+        /* IMU control only needs the newest frame: discard the oldest block
+         * before publishing this one when the two-slot queue is full. */
+        (void)xQueueReceiveFromISR(HI14_RxQueueHandle, &discarded_block,
+                                   &xHigherPriorityTaskWoken);
+        (void)xQueueSendFromISR(HI14_RxQueueHandle, &rx_block,
+                                &xHigherPriorityTaskWoken);
+      }
+      portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
     HAL_UARTEx_ReceiveToIdle_DMA(&huart7, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    vTaskNotifyGiveFromISR(INS_TaskHandle, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    if (huart7.hdmarx != NULL) {
+      __HAL_DMA_DISABLE_IT(huart7.hdmarx, DMA_IT_HT);
+    }
   }
 }
 
@@ -75,5 +98,8 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         (uint32_t *)hi14_dma_rx_buf,
         (UART_RX_BUF_SIZE + 31) & ~31u);
     HAL_UARTEx_ReceiveToIdle_DMA(&huart7, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
+    if (huart7.hdmarx != NULL) {
+      __HAL_DMA_DISABLE_IT(huart7.hdmarx, DMA_IT_HT);
+    }
   }
 }

@@ -41,11 +41,16 @@ typedef struct
     hi14_data_t hi14data;
 } hi14_t;
 
+/* One raw UART7 DMA block transferred from the ISR to app_INSTask. */
+typedef struct
+{
+    uint8_t data[UART_RX_BUF_SIZE];
+    uint16_t length;
+} Hi14_RxBlock_t;
+
 
 extern hi14_t Hipnuc_HI14;
-extern uint8_t hi14_uart_rx_buf[UART_RX_BUF_SIZE];
 extern uint8_t hi14_dma_rx_buf[UART_RX_BUF_SIZE];
-extern uint16_t hi14_rx_size;
 
 /**
  * @brief Process one byte of input data for HiPNUC decoder

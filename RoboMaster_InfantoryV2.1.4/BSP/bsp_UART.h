@@ -56,14 +56,12 @@ void SBUS_Data_Input(RingBuffer_t *rb, uint8_t *data, uint16_t len);
 uint8_t SBUS_Frame_Parse_From_Buffer(RingBuffer_t *rb, SBUS_Data_t *sbus_data);
 void SBUS_Debug_Print(RingBuffer_t *rb);
 
-// 原有函数保持不变
+// UART utility functions
 void bsp_UART_Init(void);
 void uart_print(const char *fmt, ...);
 
 // 阻塞式打印：轮询 HAL_UART_Transmit，不依赖 DMA/RTOS，适合调度器启动前和临界区
 void uart_print_blocking(const char *fmt, ...);
-
-void sbus_frame_parse(SBUS_Data_t *sbus_data, uint8_t *rx_buff);
 
 #ifdef __cplusplus
 }

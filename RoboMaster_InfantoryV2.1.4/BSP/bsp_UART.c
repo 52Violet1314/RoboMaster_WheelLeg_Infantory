@@ -230,54 +230,6 @@ void SBUS_Debug_Print(RingBuffer_t *rb)
   uart_print("  Error Count: %d\r\n", rb->error_count);
 }
 
-// 原始SBUS数据帧解析函数（保持兼容）
-void sbus_frame_parse(SBUS_Data_t *sbus_data, uint8_t* rx_buff) {
-  if ((rx_buff[0] != SBUS_HEAD) || (rx_buff[24] != SBUS_END))
-    return;
-
-  if (rx_buff[23] == 0x0C)
-    sbus_data->SBUS_Status = Data_Error;
-  else
-    sbus_data->SBUS_Status = Data_Ok;
-
-  sbus_data->Channel[0] = 
-      ((rx_buff[1] | rx_buff[2] << 8) & 0x07FF);
-  sbus_data->Channel[1] = 
-      ((rx_buff[2] >> 3 | rx_buff[3] << 5) & 0x07FF);
-  sbus_data->Channel[2] = ((rx_buff[3] >> 6 | rx_buff[4] << 2 | 
-                            rx_buff[5] << 10) & 
-                           0x07FF);
-  sbus_data->Channel[3] = 
-      ((rx_buff[5] >> 1 | rx_buff[6] << 7) & 0x07FF);
-  sbus_data->Channel[4] = 
-      ((rx_buff[6] >> 4 | rx_buff[7] << 4) & 0x07FF);
-  sbus_data->Channel[5] = ((rx_buff[7] >> 7 | rx_buff[8] << 1 | 
-                            rx_buff[9] << 9) & 
-                           0x07FF);
-  sbus_data->Channel[6] = 
-      ((rx_buff[9] >> 2 | rx_buff[10] << 6) & 0x07FF);
-  sbus_data->Channel[7] = 
-      ((rx_buff[10] >> 5 | rx_buff[11] << 3) & 0x07FF);
-  sbus_data->Channel[8] = 
-      ((rx_buff[12] | rx_buff[13] << 8) & 0x07FF);
-  sbus_data->Channel[9] = 
-      ((rx_buff[13] >> 3 | rx_buff[14] << 5) & 0x07FF);
-  sbus_data->Channel[10] = ((rx_buff[14] >> 6 | rx_buff[15] << 2 | 
-                            rx_buff[16] << 10) & 
-                           0x07FF);
-  sbus_data->Channel[11] = 
-      ((rx_buff[16] >> 1 | rx_buff[17] << 7) & 0x07FF);
-  sbus_data->Channel[12] = 
-      ((rx_buff[17] >> 4 | rx_buff[18] << 4) & 0x07FF);
-  sbus_data->Channel[13] = ((rx_buff[18] >> 7 | rx_buff[19] << 1 | 
-                            rx_buff[20] << 9) & 
-                           0x07FF);
-  sbus_data->Channel[14] = 
-      ((rx_buff[20] >> 2 | rx_buff[21] << 6) & 0x07FF);
-  sbus_data->Channel[15] = 
-      ((rx_buff[21] >> 5 | rx_buff[22] << 3) & 0x07FF);
-}
-
 // DMA 发送完成信号量（在 bsp_UART_Init 中创建，初始为 available）
 static SemaphoreHandle_t uart_dma_done = NULL;
 

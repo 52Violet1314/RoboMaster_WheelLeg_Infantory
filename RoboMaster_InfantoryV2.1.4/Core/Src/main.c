@@ -146,6 +146,9 @@ int main(void)
   HAL_TIM_Base_Start(&htim5);
   memset(&Hipnuc_HI14, 0, sizeof(Hipnuc_HI14));
   HAL_UARTEx_ReceiveToIdle_DMA(&huart7, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
+  if (huart7.hdmarx != NULL) {
+    __HAL_DMA_DISABLE_IT(huart7.hdmarx, DMA_IT_HT);
+  }
   uart_print_blocking("初始化完毕\r\n");
   app_main();
   if (USE_CMSIS_OS) {

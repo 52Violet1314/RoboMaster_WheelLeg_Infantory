@@ -14,12 +14,6 @@ hi14_t Hipnuc_HI14;
 uint8_t hi14_dma_rx_buf[UART_RX_BUF_SIZE]
     __attribute__((aligned(32), section(".sram4")));
 
-/* ─── 处理缓冲区：仅在 CPU 域使用，可放在 DTCM ─── */
-uint8_t hi14_uart_rx_buf[UART_RX_BUF_SIZE];
-
-/* ISR 与主循环共享 */
-uint16_t hi14_rx_size = 0;
-
 /* The driver file for decoding HiPNUC protocol, DO NOT MODIFTY*/
 
 /* HiPNUC protocol constants */

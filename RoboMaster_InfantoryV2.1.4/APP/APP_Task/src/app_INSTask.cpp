@@ -1,4 +1,5 @@
 #include "app_Data_Task.hpp"
+#include "app_Task.hpp"
 #include "CalculateTask.hpp"
 #include "bsp_UART.h"
 #include "portmacro.h"
@@ -15,15 +16,18 @@
 void app_INSTask(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     Classic_Data_t *ClassData = (Classic_Data_t *)pvParameters;
-    uint32_t ulNotificationValue = 0;
     xEventGroupSetBits(ControlEventGroup,Control_OK_BIT);
     while (1) {
-    xTaskNotifyWait(0, 0, &ulNotificationValue, portMAX_DELAY);
+    Hi14_RxBlock_t rx_block;
+    if ((HI14_RxQueueHandle == NULL) ||
+        (xQueueReceive(HI14_RxQueueHandle, &rx_block, portMAX_DELAY) != pdPASS)) {
+        continue;
+    }
     bool new_data = false;
-    if (hi14_rx_size > 0) {
-        for (uint16_t i = 0; i < hi14_rx_size; i++)
+    if (rx_block.length > 0) {
+        for (uint16_t i = 0; i < rx_block.length; i++)
         {
-            int ret = hipnuc_input(&Hipnuc_HI14, hi14_uart_rx_buf[i]);
+            int ret = hipnuc_input(&Hipnuc_HI14, rx_block.data[i]);
             if (ret == 1)
             {
                 /* HI14 输出的 roll/pitch/yaw 单位为度，需转换为弧度 */
@@ -42,7 +46,6 @@ void app_INSTask(void *pvParameters) {
                 new_data = true;
             }
         }
-        hi14_rx_size = 0;  // 处理完清零，防止下一轮重复解析旧数据导致 delta 衰减
     }
     if (!new_data) {
         continue;  // 未解析到有效帧，等下一包
