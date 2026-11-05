@@ -257,6 +257,15 @@ volatile uint32_t fdcan3_tx_fifo_full_count = 0;
 volatile uint32_t fdcan1_bus_off_count = 0;
 volatile uint32_t fdcan2_bus_off_count = 0;
 volatile uint32_t fdcan3_bus_off_count = 0;
+volatile uint32_t fdcan1_error_warning_count = 0;
+volatile uint32_t fdcan2_error_warning_count = 0;
+volatile uint32_t fdcan3_error_warning_count = 0;
+volatile uint32_t fdcan1_error_passive_count = 0;
+volatile uint32_t fdcan2_error_passive_count = 0;
+volatile uint32_t fdcan3_error_passive_count = 0;
+volatile uint32_t fdcan1_restart_count = 0;
+volatile uint32_t fdcan2_restart_count = 0;
+volatile uint32_t fdcan3_restart_count = 0;
 volatile uint32_t fdcan1_rx_fifo0_full_count = 0;
 volatile uint32_t fdcan2_rx_fifo0_full_count = 0;
 volatile uint32_t fdcan2_rx_fifo1_full_count = 0;
@@ -418,8 +427,24 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan,
   }
 }
 
+static void fdcan_restart_from_error_isr(FDCAN_HandleTypeDef *hfdcan) {
+  /* 保留 CubeMX 的时序、滤波器和 Message RAM 配置，仅重启该控制器。 */
+  SET_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
+  CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
+
+  if (hfdcan == &hfdcan1) {
+    fdcan1_restart_count++;
+  } else if (hfdcan == &hfdcan2) {
+    fdcan2_restart_count++;
+  } else if (hfdcan == &hfdcan3) {
+    fdcan3_restart_count++;
+  }
+}
+
 void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
                                    uint32_t ErrorStatusITs) {
+  uint8_t restart_required = 0;
+
   if (ErrorStatusITs & FDCAN_IR_BO) {
     if (hfdcan == &hfdcan1) {
       fdcan1_bus_off_count++;
@@ -428,10 +453,30 @@ void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan,
     } else if (hfdcan == &hfdcan3) {
       fdcan3_bus_off_count++;
     }
-    CLEAR_BIT(hfdcan->Instance->CCCR, FDCAN_CCCR_INIT);
+    restart_required = 1;
   }
   if (ErrorStatusITs & FDCAN_IR_EP) {
-    // MX_FDCAN1_Init();
-    // bsp_can_init();
+    if (hfdcan == &hfdcan1) {
+      fdcan1_error_passive_count++;
+    } else if (hfdcan == &hfdcan2) {
+      fdcan2_error_passive_count++;
+    } else if (hfdcan == &hfdcan3) {
+      fdcan3_error_passive_count++;
+    }
+    restart_required = 1;
+  }
+  if (ErrorStatusITs & FDCAN_IR_EW) {
+    if (hfdcan == &hfdcan1) {
+      fdcan1_error_warning_count++;
+    } else if (hfdcan == &hfdcan2) {
+      fdcan2_error_warning_count++;
+    } else if (hfdcan == &hfdcan3) {
+      fdcan3_error_warning_count++;
+    }
+    restart_required = 1;
+  }
+
+  if (restart_required) {
+    fdcan_restart_from_error_isr(hfdcan);
   }
 }
