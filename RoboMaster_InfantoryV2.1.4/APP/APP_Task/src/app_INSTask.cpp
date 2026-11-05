@@ -51,6 +51,7 @@ void app_INSTask(void *pvParameters) {
     if (!new_data) {
         continue;  // 未解析到有效帧，等下一包
     }
+    DataTimeout_MarkImuValid();
     ClassData->Data_Time.imu_time = __HAL_TIM_GET_COUNTER(&htim5);
     /*
      * HI14 安装坐标：X 右、Y 前、Z 上。

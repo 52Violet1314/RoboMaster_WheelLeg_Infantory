@@ -32,6 +32,39 @@ QueueHandle_t HI14_RxQueueHandle;
 TaskHandle_t DefalutHandle;
 TaskHandle_t RemoteTaskHandle;
 
+volatile uint8_t imu_data_timeout_flag = 1U;
+volatile uint8_t remote_data_timeout_flag = 1U;
+static volatile TickType_t imu_last_valid_tick = 0U;
+static volatile TickType_t remote_last_valid_tick = 0U;
+static StaticTimer_t data_timeout_timer_buffer;
+static TimerHandle_t data_timeout_timer = NULL;
+
+#define INPUT_DATA_TIMEOUT_MS 10U
+
+static void data_timeout_timer_callback(TimerHandle_t xTimer) {
+  const TickType_t now = xTaskGetTickCount();
+  (void)xTimer;
+
+  imu_data_timeout_flag =
+      ((imu_last_valid_tick == 0U) ||
+       ((now - imu_last_valid_tick) > pdMS_TO_TICKS(INPUT_DATA_TIMEOUT_MS)))
+          ? 1U : 0U;
+  remote_data_timeout_flag =
+      ((remote_last_valid_tick == 0U) ||
+       ((now - remote_last_valid_tick) > pdMS_TO_TICKS(INPUT_DATA_TIMEOUT_MS)))
+          ? 1U : 0U;
+}
+
+void DataTimeout_MarkImuValid(void) {
+  imu_last_valid_tick = xTaskGetTickCount();
+  imu_data_timeout_flag = 0U;
+}
+
+void DataTimeout_MarkRemoteValid(void) {
+  remote_last_valid_tick = xTaskGetTickCount();
+  remote_data_timeout_flag = 0U;
+}
+
 
 
 EventGroupHandle_t ControlEventGroup;
@@ -47,6 +80,12 @@ void Task_Init(void) {
   HI14_RxQueueHandle = xQueueCreate(2, sizeof(Hi14_RxBlock_t));
   if (HI14_RxQueueHandle == NULL) {
     uart_print_blocking("HI14RxQueueCreate fail\r\n");
+  }
+  data_timeout_timer = xTimerCreateStatic(
+      "InputWd", pdMS_TO_TICKS(1), pdTRUE, NULL,
+      data_timeout_timer_callback, &data_timeout_timer_buffer);
+  if (data_timeout_timer != NULL) {
+    xTimerStart(data_timeout_timer, 0);
   }
   CreatTask();
 }

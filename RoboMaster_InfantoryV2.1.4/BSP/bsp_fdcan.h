@@ -62,6 +62,9 @@ typedef struct {
 } DM_Motor_Fault_Record_t;
 
 extern volatile DM_Motor_Fault_Record_t dm_motor_fault_record;
+/* 八台电机各自的驱动状态故障锁存；任一非零时总标志置位。 */
+extern volatile uint8_t dm_motor_driver_fault_state[8];
+extern volatile uint8_t dm_motor_driver_fault_flag;
 /* 八台底盘达妙电机任一台超过 10 ms 未收到有效反馈时置位。 */
 extern volatile uint8_t dm_motor_feedback_timeout_flag;
 

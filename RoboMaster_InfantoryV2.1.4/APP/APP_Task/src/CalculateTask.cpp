@@ -150,9 +150,13 @@ void CaculateTask(void *pvParameters) {
         //     uart_print_blocking("CAL_ALIVE\r\n");
         //     xLastAlivePrint = xAliveNow;
         // }
-        /* 固定 1 ms 调度：不等待反馈事件。八台电机任一台超过 10 ms
-         * 无有效反馈时，由 FDCAN 接收层置统一超时标志；本任务只读取它。 */
-        if (dm_motor_feedback_timeout_flag != 0U) {
+        /* 固定 1 ms 调度：不等待反馈事件。四类统一状态机任一异常时，
+         * 本轮全部底盘输出清零：八电机反馈超时、IMU 超时、遥控超时，
+         * 或八电机任一驱动状态码故障。 */
+        if ((dm_motor_feedback_timeout_flag != 0U) ||
+            (imu_data_timeout_flag != 0U) ||
+            (remote_data_timeout_flag != 0U) ||
+            (dm_motor_driver_fault_flag != 0U)) {
             pClassicData->Contronller_Data.Fw_L = 0.0f;
             pClassicData->Contronller_Data.Fw_R = 0.0f;
             pClassicData->Contronller_Data.Tp_L = 0.0f;

@@ -22,6 +22,8 @@
 static uint8_t   Motor_Data_ReadyBit       = 0;
 static TickType_t Motor_Data_LastComplete  = 0;
 volatile DM_Motor_Fault_Record_t dm_motor_fault_record = {0};
+volatile uint8_t dm_motor_driver_fault_state[8] = {0};
+volatile uint8_t dm_motor_driver_fault_flag = 0U;
 volatile uint8_t dm_motor_feedback_timeout_flag = 1U;
 
 #define DM_MOTOR_FEEDBACK_COUNT       8U
@@ -60,6 +62,22 @@ static void dm_motor_record_fault(uint16_t feedback_id, uint8_t motor_id,
   dm_motor_fault_record.count++;
 }
 
+static void dm_motor_update_driver_fault(uint8_t motor_id, uint8_t fault) {
+  uint8_t any_fault = 0U;
+
+  if ((motor_id == 0U) || (motor_id > DM_MOTOR_FEEDBACK_COUNT)) {
+    return;
+  }
+  dm_motor_driver_fault_state[motor_id - 1U] = fault;
+  for (uint32_t i = 0; i < DM_MOTOR_FEEDBACK_COUNT; ++i) {
+    if (dm_motor_driver_fault_state[i] != 0U) {
+      any_fault = 1U;
+      break;
+    }
+  }
+  dm_motor_driver_fault_flag = any_fault;
+}
+
 /* 达妙反馈帧：标准数据帧、固定 8 字节，首字节低四位为电机 ID。 */
 static uint8_t dm_motor_feedback_valid(const FDCAN_RxHeaderTypeDef *header,
                                        const uint8_t *data,
@@ -82,10 +100,13 @@ static uint8_t dm_motor_feedback_valid(const FDCAN_RxHeaderTypeDef *header,
 
   status = (uint8_t)(data[0] >> 4);
   if ((status != 0U) && (status != 1U)) {
+    dm_motor_update_driver_fault(expected_motor_id, status);
     dm_motor_record_fault(expected_feedback_id, expected_motor_id, status,
                           DM_MOTOR_FAULT_DRIVER_STATUS);
     return 0;
   }
+
+  dm_motor_update_driver_fault(expected_motor_id, 0U);
 
   return 1;
 }

@@ -24,12 +24,18 @@ void app_Remote_Task(void *pvParameters) {
     vTaskDelay(pdMS_TO_TICKS(1));
     DM_Motor_Init(&DM_3519_Shoot_R, 0x013, DM_MOTOR_MODE_SPEED, &hfdcan3);
     uint8_t Ammo_Push_Flag = 0;
+    TickType_t xLastWakeTime = xTaskGetTickCount();
     while (1) {
         Classic_Data_t *Classic_Data = (Classic_Data_t *) pvParameters;
         /* Like the gimbal InputTask, poll the raw ring buffer on this task's
          * own cycle.  No complete frame means SBUS_Data stays at its last
          * successfully parsed value. */
+        bool remote_updated = false;
         while (SBUS_Frame_Parse_From_Buffer(&sbus_ring_buffer, &SBUS_Data) != 0U) {
+            remote_updated = true;
+        }
+        if (remote_updated) {
+            DataTimeout_MarkRemoteValid();
         }
         if(SBUS_Data.Channel[9] < -100)
         {
@@ -85,10 +91,8 @@ void app_Remote_Task(void *pvParameters) {
             DM_Motor_Speed_Control(&DM_3507, 0.0f); 
              Ammo_Push_Flag = 0;
         }
-        vTaskDelay(pdMS_TO_TICKS(1));
         DM_Motor_Speed_Control(&DM_3519_Gimbal_Pitch, Gimbal_Pitch_Vel);
-        vTaskDelay(pdMS_TO_TICKS(1));
         DM_Motor_Speed_Control(&DM_4310, Gimbal_Yaw_Vel);
-        vTaskDelay(pdMS_TO_TICKS(2));
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
 }
