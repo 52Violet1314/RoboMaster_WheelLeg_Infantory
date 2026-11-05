@@ -20,7 +20,8 @@ void app_INSTask(void *pvParameters) {
     while (1) {
     Hi14_RxBlock_t rx_block;
     if ((HI14_RxQueueHandle == NULL) ||
-        (xQueueReceive(HI14_RxQueueHandle, &rx_block, portMAX_DELAY) != pdPASS)) {
+        (xQueueReceive(HI14_RxQueueHandle, &rx_block, 0U) != pdPASS)) {
+        vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
         continue;
     }
     bool new_data = false;
@@ -101,7 +102,6 @@ void app_INSTask(void *pvParameters) {
     }
 
     ClassData->Data_Time.last_imu_time = ClassData->Data_Time.imu_time;
-    xEventGroupSetBits(DataGroup,IMU_DATA_READY_BIT);
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
   }
 }

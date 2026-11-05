@@ -22,8 +22,10 @@ uint8_t hi14_dma_rx_buf[UART_RX_BUF_SIZE]
 #define CH_HDR_SIZE             (0x06)              /* CHAOHE protocol header size */
 
 
-/* new HiPNUC standard packet */
+/* Current HI14 configuration outputs one fixed HI91 packet:
+ * 6-byte protocol header + 76-byte HI91 payload. */
 #define HIPNUC_ID_HI91        (0x91)
+#define HIPNUC_HI91_PAYLOAD_SIZE (76U)
 
 #ifndef D2R
 #define D2R (0.0174532925199433F)
@@ -80,25 +82,14 @@ static uint64_t U8(uint8_t *p)
 /* parse the payload of a frame and feed into data section */
 static int parse_data(hi14_t *raw)
 {
-    int ofs = 0;
     uint8_t *p = &raw->buf[CH_HDR_SIZE];
-    
-    /* ignore all previous data */
-    raw->hi14data.tag = 0;
 
-    while (ofs < raw->len)
-    {
-        switch (p[ofs])
-        {
-        case HIPNUC_ID_HI91:
-            memcpy(&raw->hi14data, p + ofs, sizeof(hi14_data_t));
-            ofs += sizeof(hi14_data_t);
-            break;
-        default:
-            ofs++;
-            break;
-        }
+    if ((raw->len != (int)HIPNUC_HI91_PAYLOAD_SIZE) ||
+        (p[0] != HIPNUC_ID_HI91)) {
+        return 0;
     }
+
+    memcpy(&raw->hi14data, p, sizeof(hi14_data_t));
     return 1;
 }
 
@@ -148,7 +139,7 @@ int hipnuc_input(hi14_t *raw, uint8_t data)
 
     if (raw->nbyte == CH_HDR_SIZE)
     {
-        if ((raw->len = U2(raw->buf + 2)) > (HIPNUC_MAX_RAW_SIZE - CH_HDR_SIZE))
+        if ((raw->len = U2(raw->buf + 2)) != (int)HIPNUC_HI91_PAYLOAD_SIZE)
         {
             printf("ch length error: len=%d\n", raw->len);
             raw->nbyte = 0;

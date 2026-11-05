@@ -189,10 +189,17 @@ uint8_t SBUS_Frame_Parse_From_Buffer(RingBuffer_t *rb, SBUS_Data_t *sbus_data)
     return 0;
   }
 
-  if (temp_buffer[23] == 0x0C)
+  /* SBUS has no CRC.  Its frame-lost and failsafe bits are therefore part of
+   * the frame-validity check: never overwrite the last valid command with a
+   * flagged frame. */
+  if ((temp_buffer[23] & SBUS_FLAG_INVALID_MASK) != 0U)
+  {
     sbus_data->SBUS_Status = Data_Error;
-  else
-    sbus_data->SBUS_Status = Data_Ok;
+    rb->error_count++;
+    return 0;
+  }
+
+  sbus_data->SBUS_Status = Data_Ok;
 
   sbus_data->Channel[0] = (((temp_buffer[1] | temp_buffer[2] << 8) & 0x07FF) - 1024);
   sbus_data->Channel[1] = (((temp_buffer[2] >> 3 | temp_buffer[3] << 5) & 0x07FF) - 1024);

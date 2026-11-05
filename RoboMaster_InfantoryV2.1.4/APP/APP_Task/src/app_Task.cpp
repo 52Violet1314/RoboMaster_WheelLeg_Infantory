@@ -35,7 +35,6 @@ TaskHandle_t RemoteTaskHandle;
 
 
 EventGroupHandle_t ControlEventGroup;
-EventGroupHandle_t DataGroup;
 EventGroupHandle_t EnmegencyEventGroup;
 
 void CreateEventGroup(void);
@@ -128,11 +127,6 @@ void CreateEventGroup(void)
   if (ControlEventGroup == NULL) {
     uart_print_blocking("ControlEventGroup creat fail\r\n");
   }
-  DataGroup = xEventGroupCreate();
-  if (DataGroup == NULL) {
-    uart_print_blocking("DataGroup creat fail\r\n");
-  }
-  
   EnmegencyEventGroup = xEventGroupCreate();
   if (EnmegencyEventGroup == NULL) {
     uart_print_blocking("EnmegencyEventGroup creat fail\r\n");

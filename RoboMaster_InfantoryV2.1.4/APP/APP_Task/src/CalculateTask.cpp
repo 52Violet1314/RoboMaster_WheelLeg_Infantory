@@ -147,8 +147,7 @@ void CaculateTask(void *pvParameters) {
         // static TickType_t xLastAlivePrint = 0;
         // TickType_t xAliveNow = xTaskGetTickCount();
         // if ((xAliveNow - xLastAlivePrint) > pdMS_TO_TICKS(1000)) {
-        //     uart_print_blocking("CAL_ALIVE bits=0x%02X\r\n",
-        //                        (unsigned)xEventGroupGetBits(DataGroup));
+        //     uart_print_blocking("CAL_ALIVE\r\n");
         //     xLastAlivePrint = xAliveNow;
         // }
         /* 固定 1 ms 调度：不等待反馈事件。八台电机任一台超过 10 ms

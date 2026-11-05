@@ -11,11 +11,6 @@
 #include "app_motor.h"
 #include "app_Data_Task.hpp"
 
-//数据事件组位
-#define SBUS_DATA_READY_BIT (1 << 0)
-#define MOTOR_Data_READY_BIT (1 << 1)
-#define IMU_DATA_READY_BIT      (1 << 2)  // IMU数据就绪
-
 //控制事件组位（Data_UPDATE_OK_BIT 已移除：Data Task 合并到 Calculate Task）
 #define Calculate_OK_BIT (1 << 0)
 #define Control_OK_BIT (1 << 1)
@@ -31,7 +26,6 @@ extern QueueHandle_t HI14_RxQueueHandle;
 
 
 extern EventGroupHandle_t ControlEventGroup;
-extern EventGroupHandle_t DataGroup;
 extern EventGroupHandle_t EnmegencyEventGroup;
 
 #ifdef __cplusplus

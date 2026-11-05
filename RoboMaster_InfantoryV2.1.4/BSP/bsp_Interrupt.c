@@ -28,11 +28,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     SCB_InvalidateDCache_by_Addr((void *)rx_buff, Size);
     SBUS_Data_Input(&sbus_ring_buffer, rx_buff, Size);
     SCB_CleanDCache_by_Addr((void *)rx_buff, BUFF_SIZE);
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xEventGroupSetBitsFromISR(DataGroup, SBUS_DATA_READY_BIT, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken == pdTRUE) {
-      portYIELD();
-    }
     HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE);
     if (huart5.hdmarx != NULL) {
       __HAL_DMA_DISABLE_IT(huart5.hdmarx, DMA_IT_HT);

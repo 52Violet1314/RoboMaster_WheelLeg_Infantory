@@ -378,13 +378,7 @@ uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, uint8_t *data,
 }
 
 static void motor_data_ready_check_from_isr(void) {
-  BaseType_t pxHighPriorityTaskWoken = pdFALSE;
   if (Motor_Data_ReadyBit == 0x3F) {
-    xEventGroupSetBitsFromISR(DataGroup, MOTOR_Data_READY_BIT,
-                              &pxHighPriorityTaskWoken);
-    if (pxHighPriorityTaskWoken == pdTRUE) {
-      portYIELD();
-    }
     Motor_Data_ReadyBit = 0;
     Motor_Data_LastComplete = xTaskGetTickCountFromISR();
   }

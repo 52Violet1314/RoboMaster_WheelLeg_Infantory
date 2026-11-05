@@ -26,8 +26,11 @@ void app_Remote_Task(void *pvParameters) {
     uint8_t Ammo_Push_Flag = 0;
     while (1) {
         Classic_Data_t *Classic_Data = (Classic_Data_t *) pvParameters;
-        xEventGroupWaitBits(DataGroup, SBUS_DATA_READY_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-        SBUS_Frame_Parse_From_Buffer(&sbus_ring_buffer, &SBUS_Data);
+        /* Like the gimbal InputTask, poll the raw ring buffer on this task's
+         * own cycle.  No complete frame means SBUS_Data stays at its last
+         * successfully parsed value. */
+        while (SBUS_Frame_Parse_From_Buffer(&sbus_ring_buffer, &SBUS_Data) != 0U) {
+        }
         if(SBUS_Data.Channel[9] < -100)
         {
             DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
