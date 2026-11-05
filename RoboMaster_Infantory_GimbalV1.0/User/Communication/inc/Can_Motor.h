@@ -62,8 +62,11 @@
 
 /* 达妙 CAN/MIT 协议编码范围：仅供打包和反馈解包使用，不代表运行安全值。 */
 #define DM_S3519_PROTOCOL_PMAX_RAD       (12.5f)
-#define DM_S3519_PROTOCOL_VMAX_RAD_S     (30.0f)
-#define DM_S3519_PROTOCOL_TMAX_NM        (10.0f)
+/* DM-S3519 output-shaft protocol mapping: 435 rpm no-load = 45.553 rad/s,
+ * 7.8 N·m peak torque.  These ranges are used symmetrically for CAN command
+ * encoding and feedback decoding; runtime command limits remain separate. */
+#define DM_S3519_PROTOCOL_VMAX_RAD_S     (45.553f)
+#define DM_S3519_PROTOCOL_TMAX_NM        (7.8f)
 
 /* 三台电机的回帧在线阈值。时间戳只在 CanTask 消费 ISR 事件时更新，
  * GimbalTask 不再自行维护电机时间戳。 */
