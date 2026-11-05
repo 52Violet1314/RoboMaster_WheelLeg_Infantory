@@ -136,10 +136,39 @@ void CaculateTask(void *pvParameters) {
     // uart_print("CaculateTask start\r\n");
     TickType_t xLastWakeTime = xTaskGetTickCount();
     uint32_t last_cal_tick = 0;  // 使用 htim5 微秒计数器跟踪真实 dt
+    /* Calculate 只读取这三份队列快照，不直接读取 ISR/解析任务正在写的
+     * 成品数据。队列均为深度 1；本轮没有新快照时继续使用上一次完整副本。 */
+    IMU_ControlSnapshot_t imu_snapshot = {};
+    Remote_ControlSnapshot_t remote_snapshot = {};
+    Motor_ControlSnapshot_t motor_snapshot = {};
     while (1) {
+        IMU_ControlSnapshot_t received_imu;
+        Remote_ControlSnapshot_t received_remote;
+        Motor_ControlSnapshot_t received_motor;
+
+        if ((IMU_ControlQueueHandle != NULL) &&
+            (xQueueReceive(IMU_ControlQueueHandle, &received_imu, 0) == pdPASS)) {
+            imu_snapshot = received_imu;
+        }
+        if ((Remote_ControlQueueHandle != NULL) &&
+            (xQueueReceive(Remote_ControlQueueHandle, &received_remote, 0) == pdPASS)) {
+            remote_snapshot = received_remote;
+        }
+        if ((Motor_ControlQueueHandle != NULL) &&
+            (xQueueReceive(Motor_ControlQueueHandle, &received_motor, 0) == pdPASS)) {
+            motor_snapshot = received_motor;
+        }
+
+        /* Classic_Data 从这里起由 Calculate 持有并使用本周期输入快照。 */
+        pClassicData->IMU_Data = imu_snapshot.data;
+        pClassicData->Target_Data.Target_X_vel = remote_snapshot.target_x_vel;
+        pClassicData->Target_Data.Target_yaw_vel = remote_snapshot.target_yaw_vel;
+        pClassicData->Contronller_Data.total_enable =
+                (remote_snapshot.sbus_data.Channel[9] >= 100) ? 1U : 0U;
+
         /* 总使能关闭时，无论本轮随后等到完整反馈、超时，还是走测试保持分支，
          * F0 状态都不能保留上一拍的值。 */
-        if (SBUS_Data.Channel[9] < 100) {
+        if (pClassicData->Contronller_Data.total_enable == 0U) {
             pClassicData->Contronller_Data.F0_L = 0.0f;
             pClassicData->Contronller_Data.F0_R = 0.0f;
         }
@@ -203,21 +232,21 @@ void CaculateTask(void *pvParameters) {
 
         // ====== 原 Data Task：读取电机数据 ======
         pClassicData->Motor_Data.L1_Motor_POS =
-                DM_8009P1.data.position_rad + 3.1415926f;
+                motor_snapshot.data[0].position_rad + 3.1415926f;
         pClassicData->Motor_Data.L2_Motor_POS =
-                DM_8009P2.data.position_rad + 6.2831853f;
+                motor_snapshot.data[1].position_rad + 6.2831853f;
         pClassicData->Motor_Data.R1_Motor_POS =
-                -DM_8009P4.data.position_rad - 3.1415926f;
+                -motor_snapshot.data[3].position_rad - 3.1415926f;
         pClassicData->Motor_Data.R2_Motor_POS =
-                -DM_8009P3.data.position_rad;
-        pClassicData->Motor_Data.L1_Motor_VEL = DM_8009P1.data.velocity_rad_s;
-        pClassicData->Motor_Data.L2_Motor_VEL = DM_8009P2.data.velocity_rad_s;
-        pClassicData->Motor_Data.R1_Motor_VEL = DM_8009P4.data.velocity_rad_s;
-        pClassicData->Motor_Data.R2_Motor_VEL = DM_8009P3.data.velocity_rad_s;
+                -motor_snapshot.data[2].position_rad;
+        pClassicData->Motor_Data.L1_Motor_VEL = motor_snapshot.data[0].velocity_rad_s;
+        pClassicData->Motor_Data.L2_Motor_VEL = motor_snapshot.data[1].velocity_rad_s;
+        pClassicData->Motor_Data.R1_Motor_VEL = motor_snapshot.data[3].velocity_rad_s;
+        pClassicData->Motor_Data.R2_Motor_VEL = motor_snapshot.data[2].velocity_rad_s;
         pClassicData->Motor_Data.Left_Wheel_Motor_VEL =
-                -(DM_3519L.data.velocity_rad_s / 15.8f * 19.2f + 0.048f);
+                -(motor_snapshot.data[4].velocity_rad_s / 15.8f * 19.2f + 0.048f);
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
-                +(DM_3519R.data.velocity_rad_s / 15.8f * 19.2f + 0.048f);
+                +(motor_snapshot.data[5].velocity_rad_s / 15.8f * 19.2f + 0.048f);
 
         /* 本轮四个髋电机反馈已经就绪。先完成正运动学并写入 Leg_Data，
          * 后面的 Kalman、起身判断、LQR、PID 与补偿都只使用本轮同一套腿状态。 */
@@ -321,8 +350,8 @@ void CaculateTask(void *pvParameters) {
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
-        const bool lqr_enabled = (SBUS_Data.Channel[7] > 100);
-        const bool leg_pid_enabled = (SBUS_Data.Channel[9] >= 100);
+        const bool lqr_enabled = (remote_snapshot.sbus_data.Channel[7] > 100);
+        const bool leg_pid_enabled = (remote_snapshot.sbus_data.Channel[9] >= 100);
         /* LQR 起身后以当前位姿作为位置/yaw 工作点。 */
         const bool pos_ref_ready = leg_pid_enabled && lqr_enabled && StandUp_Flag;
         if (pos_ref_ready && !lqr_pos_ref_recorded) {
@@ -390,7 +419,7 @@ void CaculateTask(void *pvParameters) {
         constexpr int32_t leg_knob_active_max_raw = leg_knob_high_deadband_raw - 1;
         constexpr float leg_knob_active_span_raw =
                 (float)(leg_knob_active_max_raw - leg_knob_active_min_raw);
-        int32_t leg_knob_raw = (int32_t)SBUS_Data.Channel[5] + 1024;
+        int32_t leg_knob_raw = (int32_t)remote_snapshot.sbus_data.Channel[5] + 1024;
         if (leg_knob_raw < leg_knob_raw_min) {
             leg_knob_raw = leg_knob_raw_min;
         } else if (leg_knob_raw > leg_knob_raw_max) {
@@ -768,10 +797,10 @@ void Motor_Data_Print(Classic_Data_t *pClassicData) {
         pClassicData->Motor_Data.R2_Motor_VEL,
         pClassicData->Motor_Data.Left_Wheel_Motor_VEL,
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL,
-        DM_8009P1.data.position_rad,
-        DM_8009P2.data.position_rad,
-        DM_8009P4.data.position_rad,
-        DM_8009P3.data.position_rad,
+        pClassicData->Motor_Data.L1_Motor_POS - 3.1415926f,
+        pClassicData->Motor_Data.L2_Motor_POS - 6.2831853f,
+        -pClassicData->Motor_Data.R1_Motor_POS - 3.1415926f,
+        -pClassicData->Motor_Data.R2_Motor_POS,
     };
     int milli[14];
     for (uint32_t index = 0; index < 14U; ++index)
@@ -896,8 +925,10 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
     /* 后四列统一放在 State_Data_Print 的 CSV 行中，单位为度：
      * P1/P2raw 是达妙直接反馈；phi1/phi4 是加偏置后送入 VMC 的角。 */
     const float rad_to_mdeg = 180000.0f / PI;
-    const int p1_raw_mdeg = (int)lroundf(DM_8009P1.data.position_rad * rad_to_mdeg);
-    const int p2_raw_mdeg = (int)lroundf(DM_8009P2.data.position_rad * rad_to_mdeg);
+    const int p1_raw_mdeg = (int)lroundf(
+            (pClassicData->Motor_Data.L1_Motor_POS - 3.1415926f) * rad_to_mdeg);
+    const int p2_raw_mdeg = (int)lroundf(
+            (pClassicData->Motor_Data.L2_Motor_POS - 6.2831853f) * rad_to_mdeg);
     const int phi1_mdeg = (int)lroundf(pClassicData->Motor_Data.L1_Motor_POS * rad_to_mdeg);
     const int phi4_mdeg = (int)lroundf(pClassicData->Motor_Data.L2_Motor_POS * rad_to_mdeg);
 

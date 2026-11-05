@@ -29,6 +29,9 @@ TaskHandle_t ControlHandle;
 TaskHandle_t CaculateHandle;
 TaskHandle_t INS_TaskHandle;
 QueueHandle_t HI14_RxQueueHandle;
+QueueHandle_t IMU_ControlQueueHandle;
+QueueHandle_t Remote_ControlQueueHandle;
+QueueHandle_t Motor_ControlQueueHandle;
 TaskHandle_t DefalutHandle;
 TaskHandle_t RemoteTaskHandle;
 
@@ -80,6 +83,14 @@ void Task_Init(void) {
   HI14_RxQueueHandle = xQueueCreate(2, sizeof(Hi14_RxBlock_t));
   if (HI14_RxQueueHandle == NULL) {
     uart_print_blocking("HI14RxQueueCreate fail\r\n");
+  }
+  IMU_ControlQueueHandle = xQueueCreate(1, sizeof(IMU_ControlSnapshot_t));
+  Remote_ControlQueueHandle = xQueueCreate(1, sizeof(Remote_ControlSnapshot_t));
+  Motor_ControlQueueHandle = xQueueCreate(1, sizeof(Motor_ControlSnapshot_t));
+  if ((IMU_ControlQueueHandle == NULL) ||
+      (Remote_ControlQueueHandle == NULL) ||
+      (Motor_ControlQueueHandle == NULL)) {
+    uart_print_blocking("ControlSnapshotQueueCreate fail\r\n");
   }
   data_timeout_timer = xTimerCreateStatic(
       "InputWd", pdMS_TO_TICKS(1), pdTRUE, NULL,

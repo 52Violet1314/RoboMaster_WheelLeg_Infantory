@@ -5,47 +5,68 @@
 #include "SBUS.h"
 #include "main.h"
 #include "app_motor.h"
+#include "bsp_UART.h"
 
 typedef struct {
-    struct {
-        float roll;
-        float delta_roll;
-        float pitch;
-        float delta_pitch;
-        float yaw;
-        float delta_yaw;
-        float last_roll;
-        float last_pitch;
-        float last_yaw;
+    float roll;
+    float delta_roll;
+    float pitch;
+    float delta_pitch;
+    float yaw;
+    float delta_yaw;
+    float last_roll;
+    float last_pitch;
+    float last_yaw;
+    float gyro[3];
+    float accel[3];
+    float accel_v;
+    float accel_x;
+    float accel_h;
+} IMU_Data_t;
 
-        /* 机体角速度 (rad/s)，陀螺仪原始三轴输出 */
-        float gyro[3];
+typedef struct {
+    float L1_Motor_POS;
+    float L1_Motor_VEL;
+    float L2_Motor_POS;
+    float L2_Motor_VEL;
+    float R1_Motor_POS;
+    float R1_Motor_VEL;
+    float R2_Motor_POS;
+    float R2_Motor_VEL;
+    float Left_Wheel_Motor_VEL;
+    float Right_Wheel_Motor_VEL;
+} Motor_Data_t;
 
-        /* 机体加速度 (m/s²)，含重力分量，机体系下未旋转 */
-        float accel[3];
+typedef struct {
+    float Target_X_vel;
+    float Target_yaw_vel;
+    float Target_LegLong;
+} Target_Data_t;
 
-        /* 世界系竖直加速度 (m/s²)，向上为正，已去除重力 */
-        float accel_v;
+/* Complete, by-value producer-to-Calculate snapshots. */
+typedef struct {
+    IMU_Data_t data;
+    TickType_t valid_tick;
+} IMU_ControlSnapshot_t;
 
-        /* 世界系前向加速度（带符号，m/s²） */
-        float accel_x;
+typedef struct {
+    SBUS_Data_t sbus_data;
+    float target_x_vel;
+    float target_yaw_vel;
+    TickType_t valid_tick;
+} Remote_ControlSnapshot_t;
 
-        /* 世界系水平加速度幅值 (m/s²)，仅用于诊断 */
-        float accel_h;
-    } IMU_Data;
+#define MOTOR_CONTROL_SNAPSHOT_COUNT 8U
+typedef struct {
+    DM_Motor_Data_t data[MOTOR_CONTROL_SNAPSHOT_COUNT];
+    TickType_t valid_tick[MOTOR_CONTROL_SNAPSHOT_COUNT];
+    uint8_t driver_fault_state[MOTOR_CONTROL_SNAPSHOT_COUNT];
+    uint8_t driver_fault_flag;
+} Motor_ControlSnapshot_t;
 
-    struct {
-        float L1_Motor_POS;
-        float L1_Motor_VEL;
-        float L2_Motor_POS;
-        float L2_Motor_VEL;
-        float R1_Motor_POS;
-        float R1_Motor_VEL;
-        float R2_Motor_POS;
-        float R2_Motor_VEL;
-        float Left_Wheel_Motor_VEL;
-        float Right_Wheel_Motor_VEL;
-    } Motor_Data;
+typedef struct {
+    IMU_Data_t IMU_Data;
+    Motor_Data_t Motor_Data;
 
     struct {
         int imu_time;
@@ -82,6 +103,7 @@ typedef struct {
         float Fw_R;
         float Tp_L;
         float Tp_R;
+        uint8_t total_enable;
     } Contronller_Data;
 
     struct {
@@ -104,11 +126,7 @@ typedef struct {
         float d_yaw_err;
     } States_Data;
 
-    struct {
-        float Target_X_vel;
-        float Target_yaw_vel;
-        float Target_LegLong;
-    } Target_Data;
+    Target_Data_t Target_Data;
 } Classic_Data_t;
 
 extern Classic_Data_t Classic_Data;

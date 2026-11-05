@@ -23,6 +23,9 @@ extern TaskHandle_t DefalutHandle;
 extern TaskHandle_t EnmegencyHandle;
 extern TaskHandle_t INS_TaskHandle;
 extern QueueHandle_t HI14_RxQueueHandle;
+extern QueueHandle_t IMU_ControlQueueHandle;
+extern QueueHandle_t Remote_ControlQueueHandle;
+extern QueueHandle_t Motor_ControlQueueHandle;
 
 /* 成品 IMU / 遥控数据超过 10 ms 未更新时置位；Calculate 统一读取。 */
 extern volatile uint8_t imu_data_timeout_flag;

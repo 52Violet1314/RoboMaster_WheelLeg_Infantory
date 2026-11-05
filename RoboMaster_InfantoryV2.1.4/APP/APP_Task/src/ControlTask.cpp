@@ -21,7 +21,7 @@ void MotorControlTask(void *pvParameters) {
     Classic_Data_t *Classic_Data = (Classic_Data_t *) pvParameters;
     while (1) {
         xEventGroupWaitBits(ControlEventGroup, Calculate_OK_BIT, pdTRUE, pdTRUE, portMAX_DELAY);
-        if (SBUS_Data.Channel[9] < 100) {
+        if (Classic_Data->Contronller_Data.total_enable == 0U) {
             DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0);
             DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
             DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0);

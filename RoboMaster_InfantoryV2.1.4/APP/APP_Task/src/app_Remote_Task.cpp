@@ -25,17 +25,15 @@ void app_Remote_Task(void *pvParameters) {
     DM_Motor_Init(&DM_3519_Shoot_R, 0x013, DM_MOTOR_MODE_SPEED, &hfdcan3);
     uint8_t Ammo_Push_Flag = 0;
     TickType_t xLastWakeTime = xTaskGetTickCount();
+    Remote_ControlSnapshot_t remote_snapshot = {};
+    (void)pvParameters;
     while (1) {
-        Classic_Data_t *Classic_Data = (Classic_Data_t *) pvParameters;
         /* Like the gimbal InputTask, poll the raw ring buffer on this task's
          * own cycle.  No complete frame means SBUS_Data stays at its last
          * successfully parsed value. */
         bool remote_updated = false;
         while (SBUS_Frame_Parse_From_Buffer(&sbus_ring_buffer, &SBUS_Data) != 0U) {
             remote_updated = true;
-        }
-        if (remote_updated) {
-            DataTimeout_MarkRemoteValid();
         }
         if(SBUS_Data.Channel[9] < -100)
         {
@@ -53,8 +51,8 @@ void app_Remote_Task(void *pvParameters) {
         const int16_t chassis_x_channel =
                 (SBUS_Data.Channel[1] > 5 || SBUS_Data.Channel[1] < -5)
                     ? SBUS_Data.Channel[1] : 0;
-        Classic_Data->Target_Data.Target_yaw_vel = chassis_yaw_channel / 783.0f * 4.0f;
-        Classic_Data->Target_Data.Target_X_vel =  chassis_x_channel / 783.0f * 4.0f - Classic_Data->Target_Data.Target_yaw_vel*0.240f;
+        const float target_yaw_vel = chassis_yaw_channel / 783.0f * 4.0f;
+        const float target_x_vel = chassis_x_channel / 783.0f * 4.0f - target_yaw_vel * 0.240f;
         if(SBUS_Data.Channel[2] > 10 || SBUS_Data.Channel[2] < -10)
         {
             Gimbal_Pitch_Vel = SBUS_Data.Channel[2] / 783.0f * 4.0f;
@@ -93,6 +91,15 @@ void app_Remote_Task(void *pvParameters) {
         }
         DM_Motor_Speed_Control(&DM_3519_Gimbal_Pitch, Gimbal_Pitch_Vel);
         DM_Motor_Speed_Control(&DM_4310, Gimbal_Yaw_Vel);
+        if (remote_updated && (Remote_ControlQueueHandle != NULL)) {
+            remote_snapshot.sbus_data = SBUS_Data;
+            remote_snapshot.target_x_vel = target_x_vel;
+            remote_snapshot.target_yaw_vel = target_yaw_vel;
+            remote_snapshot.valid_tick = xTaskGetTickCount();
+            if (xQueueOverwrite(Remote_ControlQueueHandle, &remote_snapshot) == pdPASS) {
+                DataTimeout_MarkRemoteValid();
+            }
+        }
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
 }

@@ -31,6 +31,34 @@ static volatile TickType_t dm_motor_last_feedback_tick[DM_MOTOR_FEEDBACK_COUNT] 
 static StaticTimer_t dm_motor_timeout_timer_buffer;
 static TimerHandle_t dm_motor_timeout_timer = NULL;
 
+/* CAN RX 中断完成协议校验和物理量解码后，将八台电机的最新完整副本
+ * 作为一个快照交给 Calculate。队列深度固定为 1，只保留最新一帧，绝不
+ * 让旧反馈在队列中堆积。 */
+static Motor_ControlSnapshot_t motor_control_snapshot = {0};
+
+static void motor_control_snapshot_publish_from_isr(void) {
+  static DM_Motor_t *const motors[DM_MOTOR_FEEDBACK_COUNT] = {
+      &DM_8009P1, &DM_8009P2, &DM_8009P3, &DM_8009P4,
+      &DM_3519L,  &DM_3519R,  &DM_3507,   &DM_4310,
+  };
+  BaseType_t higher_priority_task_woken = pdFALSE;
+
+  for (uint32_t i = 0; i < DM_MOTOR_FEEDBACK_COUNT; ++i) {
+    motor_control_snapshot.data[i] = motors[i]->data;
+    motor_control_snapshot.valid_tick[i] = dm_motor_last_feedback_tick[i];
+    motor_control_snapshot.driver_fault_state[i] =
+        dm_motor_driver_fault_state[i];
+  }
+  motor_control_snapshot.driver_fault_flag = dm_motor_driver_fault_flag;
+
+  if (Motor_ControlQueueHandle != NULL) {
+    (void)xQueueOverwriteFromISR(Motor_ControlQueueHandle,
+                                 &motor_control_snapshot,
+                                 &higher_priority_task_woken);
+    portYIELD_FROM_ISR(higher_priority_task_woken);
+  }
+}
+
 static void dm_motor_timeout_timer_callback(TimerHandle_t xTimer) {
   TickType_t now = xTaskGetTickCount();
   (void)xTimer;
@@ -438,6 +466,7 @@ void fdcan1_rx_callback(void) {
         break;
     }
   }
+  motor_control_snapshot_publish_from_isr();
 }
 
 void fdcan2_rx_callback(void) {
@@ -463,6 +492,7 @@ void fdcan2_rx_callback(void) {
         break;
     }
   }
+  motor_control_snapshot_publish_from_isr();
 }
 
 void fdcan2_rx_fifo1_callback(void) {
@@ -488,6 +518,7 @@ void fdcan2_rx_fifo1_callback(void) {
         break;
     }
   }
+  motor_control_snapshot_publish_from_isr();
 }
 
 void fdcan3_rx_callback(void) {
