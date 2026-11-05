@@ -37,7 +37,6 @@
 #include "app_Task.hpp"
 #include "app_main.hpp"
 #include "bsp_fdcan.h"
-#include "BoardLinkTask.hpp"
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -132,7 +131,6 @@ int main(void)
   MX_FDCAN3_Init();
   MX_USART1_UART_Init();
   MX_UART5_Init();
-  MX_USART3_UART_Init();
   MX_TIM5_Init();
   MX_SPI6_Init();
   MX_UART7_Init();
@@ -305,18 +303,6 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
     vTaskNotifyGiveFromISR(INS_TaskHandle, &xHigherPriorityTaskWoken);
    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
    }
-  if (huart->Instance == USART3)
-  {
-    HAL_UART_RxEventTypeTypeDef event = HAL_UARTEx_GetRxEventType(huart);
-    if (Size > 0U && (event == HAL_UART_RXEVENT_IDLE ||
-                      event == HAL_UART_RXEVENT_TC))
-    {
-      SCB_InvalidateDCache_by_Addr((uint32_t *)BoardLink_DmaRxBuffer,
-                                    (Size + 31U) & ~31U);
-      BoardLink_OnRx(BoardLink_DmaRxBuffer, Size);
-      BoardLink_RestartRx();
-    }
-  }
        
 }
 
@@ -335,11 +321,6 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
         /* 错误恢复：重新启动 DMA 接收 */
         HAL_UARTEx_ReceiveToIdle_DMA(&huart7, hi14_dma_rx_buf, UART_RX_BUF_SIZE);
     }
-  if (huart->Instance == USART3)
-  {
-    BoardLink_RestartRx();
-  }
-
 }
 /* USER CODE END 4 */
 
