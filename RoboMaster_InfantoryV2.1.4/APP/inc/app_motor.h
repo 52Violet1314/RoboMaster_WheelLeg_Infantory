@@ -6,16 +6,22 @@
 #include <stdint.h>
 
 #define P_MAX_RAD       3.14f     
-#define V_MAX_RAD_S     30.0f   
-#define T_MAX_NM        10.0f   
+/* DM-J4310 at the rated 24 V supply: 200 rpm no-load = 20.944 rad/s,
+ * 7 N·m peak torque.  Used for CAN feedback physical-unit mapping. */
+#define V_MAX_RAD_S     20.944f
+#define T_MAX_NM        7.0f
 
 #define P_MAX_8009     3.14f
-#define V_MAX_RAD_S_8009    45.0f
-#define T_MAX_NM_8009      54.0f   
+/* DM-J8009P at the rated 24 V supply: 160 rpm no-load = 16.755 rad/s,
+ * 40 N·m peak torque.  Used for CAN feedback physical-unit mapping. */
+#define V_MAX_RAD_S_8009    16.755f
+#define T_MAX_NM_8009      40.0f
 
 #define P_MAX_RAD_3519       12.5f   
-#define V_MAX_RAD_S_3519     200.0f   
-#define T_MAX_NM_3519        10.0f   
+/* DM3519 output-shaft limits: 435 rpm no-load = 45.553 rad/s,
+ * 7.8 N·m peak torque.  Used for CAN feedback physical-unit mapping. */
+#define V_MAX_RAD_S_3519     45.553f
+#define T_MAX_NM_3519        7.8f
 
 #define P_MAX_RAD_3507       12.566f   
 #define V_MAX_RAD_S_3507     50.0f   
