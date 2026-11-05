@@ -19,8 +19,6 @@
 * @details:    	CAN 使能
 ************************************************************************
 **/
-static uint8_t   Motor_Data_ReadyBit       = 0;
-static TickType_t Motor_Data_LastComplete  = 0;
 volatile DM_Motor_Fault_Record_t dm_motor_fault_record = {0};
 volatile uint8_t dm_motor_driver_fault_state[8] = {0};
 volatile uint8_t dm_motor_driver_fault_flag = 0U;
@@ -398,24 +396,6 @@ uint8_t fdcanx_send_data(hcan_t *hfdcan, uint16_t id, uint8_t *data,
   return 0;
 }
 
-static void motor_data_ready_check_from_isr(void) {
-  if (Motor_Data_ReadyBit == 0x3F) {
-    Motor_Data_ReadyBit = 0;
-    Motor_Data_LastComplete = xTaskGetTickCountFromISR();
-  }
-  /* 该旧六电机同步位保留给其他任务；10ms 内未凑齐则丢弃当前累积。
-   * 首次凑不齐时也会超时清零。 */
-  else if (Motor_Data_ReadyBit != 0) {
-    TickType_t now = xTaskGetTickCountFromISR();
-    if (Motor_Data_LastComplete == 0) {
-      Motor_Data_LastComplete = now;  /* 初始计时起点 */
-    } else if ((now - Motor_Data_LastComplete) > pdMS_TO_TICKS(10)) {
-      Motor_Data_ReadyBit = 0;
-      Motor_Data_LastComplete = 0;    /* 重置，下一轮重新计时 */
-    }
-  }
-}
-
 void fdcan1_rx_callback(void) {
   uint16_t rec_id;
   uint8_t buf[64];
@@ -433,28 +413,24 @@ void fdcan1_rx_callback(void) {
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x091, 0x01)) {
           DM_Motor_8009_Data_Get(&DM_8009P1, buf);
           dm_motor_feedback_mark_received(0);
-          Motor_Data_ReadyBit |= (1 << 0);
         }
         break;
       case 0x092: //  8009电机2ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x092, 0x02)) {
           DM_Motor_8009_Data_Get(&DM_8009P2, buf);
           dm_motor_feedback_mark_received(1);
-          Motor_Data_ReadyBit |= (1 << 1);
         }
         break;
       case 0x093: //  8009电机3ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x093, 0x03)) {
           DM_Motor_8009_Data_Get(&DM_8009P3, buf);
           dm_motor_feedback_mark_received(2);
-          Motor_Data_ReadyBit |= (1 << 2);
         }
         break;
       case 0x094: //  8009电机4ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x094, 0x04)) {
           DM_Motor_8009_Data_Get(&DM_8009P4, buf);
           dm_motor_feedback_mark_received(3);
-          Motor_Data_ReadyBit |= (1 << 3);
         }
         break;
       default:
@@ -462,7 +438,6 @@ void fdcan1_rx_callback(void) {
         break;
     }
   }
-  motor_data_ready_check_from_isr();
 }
 
 void fdcan2_rx_callback(void) {
@@ -476,21 +451,18 @@ void fdcan2_rx_callback(void) {
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x095, 0x05)) {
           DM_Motor_3519_Data_Get(&DM_3519L, buf);
           dm_motor_feedback_mark_received(4);
-          Motor_Data_ReadyBit |= (1 << 4);
         }
         break;
       case 0x096:
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x096, 0x06)) {
           DM_Motor_3519_Data_Get(&DM_3519R, buf);
           dm_motor_feedback_mark_received(5);
-          Motor_Data_ReadyBit |= (1 << 5);
         }
         break;
       default:
         break;
     }
   }
-  motor_data_ready_check_from_isr();
 }
 
 void fdcan2_rx_fifo1_callback(void) {
