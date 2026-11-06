@@ -68,6 +68,16 @@ extern volatile uint8_t dm_motor_driver_fault_flag;
 /* 八台底盘达妙电机任一台超过 10 ms 未收到有效反馈时置位。 */
 extern volatile uint8_t dm_motor_feedback_timeout_flag;
 
+/*
+ * 临时四髋电机台架检查开关。
+ *
+ * 置 1 时，反馈健康门只要求 P1~P4（数组 0~3）四台髋电机；两台轮毂和
+ * RemoteTask 中的 3507/4310 可以不接，不会因其超时或状态码而让底盘输出
+ * 清零。P1~P4 任一台超时/驱动故障仍保持原有的清零保护，遥控器和 IMU
+ * 超时、遥控总使能关闭也完全不受影响。完成四髋检查后必须恢复为 0。
+ */
+#define DM_FOUR_HIP_BENCH_TEST_BYPASS 1U
+
 void bsp_can_init(void);
 void can_filter_init(void);
 void bsp_fdcan_set_baud(hcan_t *hfdcan, uint8_t mode, uint8_t baud);

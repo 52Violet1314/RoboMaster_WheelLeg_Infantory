@@ -71,7 +71,12 @@ static void DM_Motor_EnableAllMonitored(void) {
         &DM_8009P1, &DM_8009P2, &DM_8009P3, &DM_8009P4,
         &DM_3519L, &DM_3519R, &DM_3507, &DM_4310,
     };
-    for (uint32_t i = 0; i < (sizeof(motors) / sizeof(motors[0])); ++i) {
+    uint32_t monitored_count = sizeof(motors) / sizeof(motors[0]);
+#if DM_FOUR_HIP_BENCH_TEST_BYPASS
+    /* 台架恢复只触及已接的 P1~P4，绝不向未接电机反复广播使能。 */
+    monitored_count = 4U;
+#endif
+    for (uint32_t i = 0; i < monitored_count; ++i) {
         /* 3507/4310 在 RemoteTask 初始化；未初始化时 ID 为 0，不能发 ID 0。 */
         if (motors[i]->ID != 0U) {
             DM_Motor_Enable(motors[i]);
@@ -163,12 +168,25 @@ void CaculateTask(void *pvParameters) {
         //     uart_print_blocking("CAL_ALIVE\r\n");
         //     xLastAlivePrint = xAliveNow;
         // }
-        /* 固定 1 ms 调度：不等待反馈事件。四类统一状态机任一异常时，
-         * 本轮全部底盘输出清零：八电机反馈超时、IMU 超时、遥控超时，
-         * 或八电机任一驱动状态码故障。 */
+        /* 固定 1 ms 调度：不等待反馈事件。正常版本中，八电机反馈超时、
+         * 任一驱动状态码故障、IMU 超时或遥控超时都会令底盘输出清零。
+         * 四髋台架开关只将电机健康范围收窄为 P1~P4；这四台的超时/故障
+         * 仍会清零，IMU、遥控以及遥控总使能的保护不变。 */
+        bool hip_driver_fault = false;
+        for (uint32_t i = 0; i < 4U; ++i) {
+            if (motor_snapshot.driver_fault_state[i] != 0U) {
+                hip_driver_fault = true;
+                break;
+            }
+        }
+#if DM_FOUR_HIP_BENCH_TEST_BYPASS
+        const bool motor_feedback_fault =
+                (dm_motor_feedback_timeout_flag != 0U) || hip_driver_fault;
+#else
         const bool motor_feedback_fault =
                 (dm_motor_feedback_timeout_flag != 0U) ||
                 (motor_snapshot.driver_fault_flag != 0U);
+#endif
         if (motor_feedback_fault ||
             (imu_data_timeout_flag != 0U) ||
             (remote_data_timeout_flag != 0U)) {

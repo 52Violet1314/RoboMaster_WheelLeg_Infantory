@@ -60,9 +60,15 @@ static void motor_control_snapshot_publish_from_isr(void) {
 
 static void dm_motor_timeout_timer_callback(TimerHandle_t xTimer) {
   TickType_t now = xTaskGetTickCount();
+  uint32_t required_feedback_count = DM_MOTOR_FEEDBACK_COUNT;
   (void)xTimer;
 
-  for (uint32_t i = 0; i < DM_MOTOR_FEEDBACK_COUNT; ++i) {
+#if DM_FOUR_HIP_BENCH_TEST_BYPASS
+  /* 台架只接 P1~P4：未接轮毂/云台电机不参与底盘反馈放行判定。 */
+  required_feedback_count = 4U;
+#endif
+
+  for (uint32_t i = 0; i < required_feedback_count; ++i) {
     TickType_t last = dm_motor_last_feedback_tick[i];
     if ((last == 0U) ||
         ((now - last) > pdMS_TO_TICKS(DM_MOTOR_FEEDBACK_TIMEOUT_MS))) {
