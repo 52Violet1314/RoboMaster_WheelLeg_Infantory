@@ -52,15 +52,12 @@ void app_INSTask(void *pvParameters) {
         continue;  // 未解析到有效帧，等下一包
     }
     /*
-     * HI14 安装坐标：X 右、Y 前、Z 上。
-     * 与当前欧拉角处理保持一致：roll 不变、pitch = -raw_pitch、yaw 不变。
-     * 因此欧拉角速度映射为：roll<-gyro_y，pitch<- -gyro_x，yaw<-gyro_z。
+     * e5b... 的 main.h 定义 USE_HIPNUC_GYRO_RATE=1：实际控制使用原始
+     * HI14 陀螺仪轴值，不做欧拉角差分或低通。只保留原始安装轴映射。
      */
     imu_snapshot.data.delta_roll = imu_snapshot.data.gyro[1];
     imu_snapshot.data.delta_pitch = -imu_snapshot.data.gyro[0];
     imu_snapshot.data.delta_yaw = imu_snapshot.data.gyro[2];
-
-    /* 保持历史角度字段同步。 */
     imu_snapshot.data.last_roll = imu_snapshot.data.roll;
     imu_snapshot.data.last_pitch = imu_snapshot.data.pitch;
     imu_snapshot.data.last_yaw = imu_snapshot.data.yaw;
