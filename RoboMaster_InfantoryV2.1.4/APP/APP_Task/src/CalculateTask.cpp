@@ -791,7 +791,6 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
                phi4_mdeg < 0 ? '-' : ' ', abs(phi4_mdeg) / 1000, abs(phi4_mdeg) % 1000);
 }
 
-// 固定腿长 K 的状态反馈计算；输出限幅在 VMC 后的 Controler_Limit() 中执行。
 #if 0 /* LQR implementation moved to APP/src/app_K_value.cpp. */
 static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                                      K_Fixed_Leg_t gain) {
@@ -822,36 +821,5 @@ static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
     pClassicData->Contronller_Data.Fw_R = control[1];
     pClassicData->Contronller_Data.Tp_L = control[2];
     pClassicData->Contronller_Data.Tp_R = control[3];
-}
-#endif
-
-#if 0 /* Output limiter moved to APP/src/app_control_limit.cpp. */
-void Controler_Limit(Classic_Data_t *pClassicData) {
-  // Fw 限幅：±6.0 N（轮子力，不经过 VMC）
-  if (pClassicData->Contronller_Data.Fw_L > 6.0f)
-    pClassicData->Contronller_Data.Fw_L = 6.0f;
-  if (pClassicData->Contronller_Data.Fw_L < -6.0f)
-    pClassicData->Contronller_Data.Fw_L = -6.0f;
-  if (pClassicData->Contronller_Data.Fw_R > 6.0f)
-    pClassicData->Contronller_Data.Fw_R = 6.0f;
-  if (pClassicData->Contronller_Data.Fw_R < -6.0f)
-    pClassicData->Contronller_Data.Fw_R = -6.0f;
-  // T1/T2 限幅：±20.5 N·m
-  if (pClassicData->Contronller_Data.T1_L > 20.5f)
-    pClassicData->Contronller_Data.T1_L = 20.5f;
-  if (pClassicData->Contronller_Data.T1_L < -20.5f)
-    pClassicData->Contronller_Data.T1_L = -20.5f;
-  if (pClassicData->Contronller_Data.T1_R > 20.5f)
-    pClassicData->Contronller_Data.T1_R = 20.5f;
-  if (pClassicData->Contronller_Data.T1_R < -20.5f)
-    pClassicData->Contronller_Data.T1_R = -20.5f;
-  if (pClassicData->Contronller_Data.T2_L > 20.5f)
-    pClassicData->Contronller_Data.T2_L = 20.5f;
-  if (pClassicData->Contronller_Data.T2_L < -20.5f)
-    pClassicData->Contronller_Data.T2_L = -20.5f;
-  if (pClassicData->Contronller_Data.T2_R > 20.5f)
-    pClassicData->Contronller_Data.T2_R = 20.5f;
-  if (pClassicData->Contronller_Data.T2_R < -20.5f)
-    pClassicData->Contronller_Data.T2_R = -20.5f;
 }
 #endif
