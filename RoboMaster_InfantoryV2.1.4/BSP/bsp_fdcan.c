@@ -63,7 +63,7 @@ static void dm_motor_timeout_timer_callback(TimerHandle_t xTimer) {
   uint32_t required_feedback_count = DM_MOTOR_FEEDBACK_COUNT;
   (void)xTimer;
 
-#if DM_FOUR_HIP_BENCH_TEST_BYPASS
+#if DM_FOUR_HIP_COMMISSIONING_BYPASS
   /* 台架只接 P1~P4：未接轮毂/云台电机不参与底盘反馈放行判定。 */
   required_feedback_count = 4U;
 #endif

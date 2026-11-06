@@ -40,7 +40,7 @@ float d_theta_R_ref = 0.0f; // 期望右腿角速度
 float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
-bool StandUp_Flag = true;
+bool StandUp_Flag = false;
 
 typedef enum
 {
@@ -60,7 +60,7 @@ void IMU_Data_Print(Classic_Data_t *pClassicData);
 
 void State_Data_Print(Classic_Data_t *pClassicData);
 
-/* 台架诊断：放在安全早退之前，只打印状态，不参与放行或输出决策。 */
+/* 健康诊断：放在安全早退之前，只打印状态，不参与放行或输出决策。 */
 static void ControlHealth_Data_Print(bool imu_snapshot_updated,
                                      bool remote_snapshot_updated,
                                      bool motor_snapshot_updated,
@@ -72,15 +72,15 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
 /* 仅供电机反馈超时/驱动故障恢复使用。
  * 先向当前受反馈状态机监管、且已初始化的电机下发零命令，再重发使能帧。
- * 正式版覆盖八台受监管电机；四髋台架仅覆盖已接的 P1~P4。 */
+ * 正常配置覆盖八台受监管电机；四髋接线调试仅覆盖已接的 P1~P4。 */
 static void DM_Motor_SafeZeroAndEnableAllMonitored(void) {
     static DM_Motor_t *const motors[] = {
         &DM_8009P1, &DM_8009P2, &DM_8009P3, &DM_8009P4,
         &DM_3519L, &DM_3519R, &DM_3507, &DM_4310,
     };
     uint32_t monitored_count = sizeof(motors) / sizeof(motors[0]);
-#if DM_FOUR_HIP_BENCH_TEST_BYPASS
-    /* 台架恢复只触及已接的 P1~P4，绝不向未接电机反复广播使能。 */
+#if DM_FOUR_HIP_COMMISSIONING_BYPASS
+    /* 四髋接线调试只触及已接的 P1~P4，绝不向未接电机反复广播使能。 */
     monitored_count = 4U;
 #endif
     for (uint32_t i = 0; i < monitored_count; ++i) {
@@ -175,13 +175,13 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Contronller_Data.total_enable =
                 (remote_snapshot.sbus_data.Channel[9] >= 100) ? 1U : 0U;
 
-        /* 总使能关闭时，无论本轮随后等到完整反馈、超时，还是走测试保持分支，
+        /* 总使能关闭时，无论本轮随后等到完整反馈或超时，
          * F0 状态都不能保留上一拍的值。 */
         if (pClassicData->Contronller_Data.total_enable == 0U) {
             pClassicData->Contronller_Data.F0_L = 0.0f;
             pClassicData->Contronller_Data.F0_R = 0.0f;
         }
-        /* 台架腿长 PID 测试：关闭任务心跳调试串口输出。 */
+        /* 可选任务心跳调试串口输出，默认关闭。 */
         // static TickType_t xLastAlivePrint = 0;
         // TickType_t xAliveNow = xTaskGetTickCount();
         // if ((xAliveNow - xLastAlivePrint) > pdMS_TO_TICKS(1000)) {
@@ -190,7 +190,7 @@ void CaculateTask(void *pvParameters) {
         // }
         /* 固定 1 ms 调度：不等待反馈事件。正常版本中，八电机反馈超时、
          * 任一驱动状态码故障、IMU 超时或遥控超时都会令底盘输出清零。
-         * 四髋台架开关只将电机健康范围收窄为 P1~P4；这四台的超时/故障
+         * 四髋接线调试配置只将电机健康范围收窄为 P1~P4；这四台的超时/故障
          * 仍会清零，IMU、遥控以及遥控总使能的保护不变。 */
         bool hip_driver_fault = false;
         for (uint32_t i = 0; i < 4U; ++i) {
@@ -199,7 +199,7 @@ void CaculateTask(void *pvParameters) {
                 break;
             }
         }
-#if DM_FOUR_HIP_BENCH_TEST_BYPASS
+#if DM_FOUR_HIP_COMMISSIONING_BYPASS
         const bool motor_feedback_fault =
                 (dm_motor_feedback_timeout_flag != 0U) || hip_driver_fault;
 #else
@@ -331,13 +331,8 @@ void CaculateTask(void *pvParameters) {
             stand_not_up_time = 1.0f;
             }
         }
-        /* 测试版：固定按已起身处理，独立于总使能开关；正式版使用原起身状态机。
-         * 腿长 PID 是否输出仍由后面的 Channel[9] 总使能控制。 */
-#if LEG_CONTROL_TEST_MODE
-        StandUp_Flag = true;
-#else
+        /* 起身状态完全由原状态机判定；腿长 PID 是否输出由 Channel[9] 总使能控制。 */
         StandUp_Flag = (stand_state == StandState_Up);
-#endif
 
         // WheelKalman_Print(&Wheel_Kalman_L, 'L');
         // WheelKalman_Print(&Wheel_Kalman_R, 'R');
@@ -371,16 +366,11 @@ void CaculateTask(void *pvParameters) {
             lqr_pos_ref_recorded = false;
         }
 
-        /* LQR 仅由 Channel[7] 控制。正式版用左右实际腿长均值查表；
-         * 右腿标定测试完全隔离，只使用右腿实际 L0_R。 */
+        /* LQR 仅由 Channel[7] 控制，并用左右实际腿长均值查表。 */
         if (lqr_enabled) {
-#if LEG_CONTROL_TEST_MODE
-            const float scheduled_leg_length = pClassicData->Leg_Data.L0_R;
-#else
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
             const float scheduled_leg_length = average_leg_length;
-#endif
             K_Fixed_Leg_t scheduled_gain;
             LQR_K_GetInterpolated(scheduled_leg_length, scheduled_gain);
             LQR_K_CalculateWithGain(pClassicData, scheduled_gain,
@@ -391,26 +381,17 @@ void CaculateTask(void *pvParameters) {
         /* LQR 自己负责不经 VMC 的轮端虚拟力 Fw 限幅。 */
         LQR_LimitWheelForces(pClassicData);
 
-        /* 正式版总使能且已起身后叠加双腿重力补偿；台架可单独开右腿重力补偿。
-         * 任一模式下，总使能关闭时 ControlTask 均向全部电机发送零力矩。 */
+        /* 总使能且已起身后叠加双腿重力补偿；起身前不叠加。
+         * 总使能关闭时 ControlTask 向全部电机发送零力矩。 */
         float gravity_tp_l = 0.0f;
         float gravity_tp_r = 0.0f;
 #if LEG_GRAVITY_COMPENSATION_ENABLE
-#if LEG_CONTROL_TEST_MODE
-#if LEG_CONTROL_TEST_ENABLE_GRAVITY_COMPENSATION
-        if (leg_pid_enabled) {
-            gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
-                                            pClassicData->States_Data.theta_R);
-        }
-#endif
-#else
         if (leg_pid_enabled && StandUp_Flag) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
                                             pClassicData->States_Data.theta_R);
         }
-#endif
 #endif
 
         LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
@@ -434,7 +415,7 @@ void CaculateTask(void *pvParameters) {
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
-                /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
+                /* 调试打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
                  LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
