@@ -22,8 +22,8 @@
 #define LEG_LENGTH_PID_KI                  600.0f
 #define LEG_LENGTH_PID_KD                   0.0f
 #define LEG_LENGTH_PID_DEADBAND_M           0.0001f
-#define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N    50.0f
-#define LEG_LENGTH_PID_OUTPUT_LIMIT_N      50.0f
+#define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N    80.0f
+#define LEG_LENGTH_PID_OUTPUT_LIMIT_N      80.0f
 
 /* 腿长旋钮映射、气弹簧补偿、roll 差分和腿长 PID 的统一入口。
  * 起身状态机仍由 CalculateTask 维护；本模块只使用其本轮判定结果。 */
