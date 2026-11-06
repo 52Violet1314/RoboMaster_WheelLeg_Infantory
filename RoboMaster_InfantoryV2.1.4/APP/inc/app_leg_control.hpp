@@ -17,7 +17,7 @@
 #define LEG_LENGTH_PID_KI                  30.0f
 #define LEG_LENGTH_PID_KD                   0.0f
 #define LEG_LENGTH_PID_DEADBAND_M           0.001f
-#define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N    20.0f
+#define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N    50.0f
 #define LEG_LENGTH_PID_OUTPUT_LIMIT_N      50.0f
 
 /* 腿长旋钮映射、气弹簧补偿、roll 差分和腿长 PID 的统一入口。
