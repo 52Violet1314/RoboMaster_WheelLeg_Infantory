@@ -18,10 +18,10 @@
  * 仅供 LegControl_Update() 使用：PID 算法本体不保存任何腿的专用限幅。
  * I_OUTPUT_LIMIT 是积分“输出项”的限幅（N），不是 Err_Int 内部的 m·s。
  * 当前台架只用右腿；正式版左右腿使用同一组参数。 */
-#define LEG_LENGTH_PID_KP                 300.0f
-#define LEG_LENGTH_PID_KI                  30.0f
+#define LEG_LENGTH_PID_KP                 700.0f
+#define LEG_LENGTH_PID_KI                  600.0f
 #define LEG_LENGTH_PID_KD                   0.0f
-#define LEG_LENGTH_PID_DEADBAND_M           0.001f
+#define LEG_LENGTH_PID_DEADBAND_M           0.0001f
 #define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N    50.0f
 #define LEG_LENGTH_PID_OUTPUT_LIMIT_N      50.0f
 
