@@ -70,9 +70,10 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
-/* 仅供电机反馈超时/驱动故障恢复尝试使用。
- * 只向当前八台受反馈状态机监管、且已完成初始化的电机发送一次使能帧。 */
-static void DM_Motor_EnableAllMonitored(void) {
+/* 仅供电机反馈超时/驱动故障恢复使用。
+ * 先向当前受反馈状态机监管、且已初始化的电机下发零命令，再重发使能帧。
+ * 正式版覆盖八台受监管电机；四髋台架仅覆盖已接的 P1~P4。 */
+static void DM_Motor_SafeZeroAndEnableAllMonitored(void) {
     static DM_Motor_t *const motors[] = {
         &DM_8009P1, &DM_8009P2, &DM_8009P3, &DM_8009P4,
         &DM_3519L, &DM_3519R, &DM_3507, &DM_4310,
@@ -84,6 +85,15 @@ static void DM_Motor_EnableAllMonitored(void) {
 #endif
     for (uint32_t i = 0; i < monitored_count; ++i) {
         /* 3507/4310 在 RemoteTask 初始化；未初始化时 ID 为 0，不能发 ID 0。 */
+        if (motors[i]->ID != 0U) {
+            if (motors[i]->MODE == DM_MOTOR_MODE_MIT) {
+                DM_Motor_MIT_Control(motors[i], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+            } else if (motors[i]->MODE == DM_MOTOR_MODE_SPEED) {
+                DM_Motor_Speed_Control(motors[i], 0.0f);
+            }
+        }
+    }
+    for (uint32_t i = 0; i < monitored_count; ++i) {
         if (motors[i]->ID != 0U) {
             DM_Motor_Enable(motors[i]);
         }
@@ -205,7 +215,7 @@ void CaculateTask(void *pvParameters) {
             (remote_data_timeout_flag != 0U)) {
             /* 同一段电机故障只尝试恢复一次，不能在 1 ms 控制周期反复刷使能帧。 */
             if (motor_feedback_fault && !motor_fault_reenable_sent) {
-                DM_Motor_EnableAllMonitored();
+                DM_Motor_SafeZeroAndEnableAllMonitored();
                 motor_fault_reenable_sent = true;
             }
             pClassicData->Contronller_Data.Fw_L = 0.0f;
