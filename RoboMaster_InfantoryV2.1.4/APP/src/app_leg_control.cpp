@@ -12,7 +12,7 @@ static float last_leg_target = 0.0f;
 
 void LegControl_Init(void) {
     Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
-    Float_PID_Init(&leg_length_pid_r, 250.0f, 25.0f, 0.0f);//200 1.2 0.4
+    Float_PID_Init(&leg_length_pid_r, 300.0f, 30.0f, 0.0f);//200 1.2 0.4
     // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
 }
 
