@@ -129,14 +129,15 @@ static uint8_t dm_motor_feedback_valid(const FDCAN_RxHeaderTypeDef *header,
     return 0;
   }
 
+  /*
+   * state 的编码含义由电机固件版本决定。达妙官方例程和旧控制链路都只是
+   * 保存该字段，并没有把 state > 1 擅自判成故障。此前这里拒绝该帧会停止
+   * 刷新四髋超时计时，造成“有反馈快照但始终 timeout”的架构回归。
+   * 未建立型号/固件版本对应的故障码表前，state 只作为诊断数据保留；合法
+   * 的 8 字节反馈必须继续更新位置、速度和接收时间戳。
+   */
   status = (uint8_t)(data[0] >> 4);
-  if ((status != 0U) && (status != 1U)) {
-    dm_motor_update_driver_fault(expected_motor_id, status);
-    dm_motor_record_fault(expected_feedback_id, expected_motor_id, status,
-                          DM_MOTOR_FAULT_DRIVER_STATUS);
-    return 0;
-  }
-
+  (void)status;
   dm_motor_update_driver_fault(expected_motor_id, 0U);
 
   return 1;
