@@ -4,8 +4,9 @@
 % 380 mm 的 +2 N 相比 370 mm 的 -35 N 跳变 37 N，被作为端点异常趋势点；
 % 不强制穿过，避免向固件引入突变曲率。
 %
-% 有效区间严格为 140~380 mm；固件对 L0 < 140 mm 或 L0 > 380 mm 返回 0 N。
-% 零补偿不是主动阻力命令，而是撤掉弹簧补偿，使机构本身与 PID 阻止继续越界。
+% 低端有效边界为 140 mm：L0 < 140 mm 时固件返回 0 N。
+% 高端从 380 mm 起保持 380 mm 的拟合值，避免补偿突然归零；持续的负补偿
+% 仍提供收腿方向的回拉趋势。两端策略不改变 140~380 mm 内的拟合值。
 
 clear;
 clc;
@@ -28,10 +29,10 @@ z = (length_mm - length_center_mm) / length_half_span_mm;
 poly_coeff = polyfit(z, force_measured_n, fit_degree);
 force_fit_n = polyval(poly_coeff, z);
 
-length_plot_mm = (130:1:390).';
+length_plot_mm = (130:1:410).';
 z_plot = (min(max(length_plot_mm, 140), 380) - length_center_mm) / length_half_span_mm;
 force_plot_n = polyval(poly_coeff, z_plot);
-force_plot_n(length_plot_mm < 140 | length_plot_mm > 380) = 0;
+force_plot_n(length_plot_mm < 140) = 0;
 
 result_table = table(length_mm, force_measured_n, force_fit_n, ...
     'VariableNames', {'Length_mm', 'Measured_N', 'Fitted_N'});
@@ -47,7 +48,7 @@ for k = 1:n
         fprintf('\n');
     end
 end
-fprintf('区间外：L0 < 0.140 m 或 L0 > 0.380 m，输出 0 N。\n');
+fprintf('低端：L0 < 0.140 m 输出 0 N；高端：L0 > 0.380 m 保持 380 mm 的拟合值 %.3f N。\n', force_fit_n(end));
 fprintf('\n固件函数系数（z=(L0_mm-260)/120，按降幂）：\n');
 fprintf('%.9gf ', poly_coeff);
 fprintf('\n');
@@ -65,4 +66,4 @@ title('Gas spring compensation: smooth trend fit');
 legend('Location', 'best');
 xline(140, '--r', '140 mm active boundary');
 xline(380, '--r', '380 mm active boundary');
-xlim([130, 390]);
+xlim([130, 410]);

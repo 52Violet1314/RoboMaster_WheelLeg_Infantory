@@ -18,9 +18,11 @@ const LegForceCompensationParam_t
 
 float LegForceCompensation_GetFittedF0(float leg_length_m) {
     if (!isfinite(leg_length_m)) return 0.0f;
-    /* 140/380 mm 两端仍使用拟合值；仅真正越界（如 130/385 mm）才撤销补偿。 */
-    if (leg_length_m < LEG_FORCE_COMP_MIN_LENGTH_M ||
-        leg_length_m > LEG_FORCE_COMP_MAX_LENGTH_M) return 0.0f;
+    /* 低端越界仍撤销补偿；高端保持 380 mm 的收腿补偿，避免 380 mm 处
+     * 从约 -17.4 N 突然跳到 0 N。这样继续变长时仍有同方向的回拉趋势。 */
+    if (leg_length_m < LEG_FORCE_COMP_MIN_LENGTH_M) return 0.0f;
+    if (leg_length_m > LEG_FORCE_COMP_MAX_LENGTH_M)
+        leg_length_m = LEG_FORCE_COMP_MAX_LENGTH_M;
 
     /* MATLAB 三阶平滑趋势拟合。z ∈ [-1,1]，Horner 形式。 */
     const float z = (leg_length_m - 0.260f) / 0.120f;

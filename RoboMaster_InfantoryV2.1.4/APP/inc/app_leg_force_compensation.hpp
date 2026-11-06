@@ -17,7 +17,9 @@ typedef struct {
 extern const LegForceCompensationParam_t
         LegForceCompensationTable[LEG_FORCE_COMP_TABLE_COUNT];
 
-/* 连续平滑拟合函数。L0 位于 [140,380] mm 外时返回 0 N。 */
+/* 连续平滑拟合函数。
+ * L0 < 140 mm 时返回 0 N；L0 > 380 mm 时保持 380 mm 的拟合值，
+ * 避免最长腿长处补偿突然归零造成 F0 跳变。 */
 float LegForceCompensation_GetFittedF0(float leg_length_m);
 
 #endif
