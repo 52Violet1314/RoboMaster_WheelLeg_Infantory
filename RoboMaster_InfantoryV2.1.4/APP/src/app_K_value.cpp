@@ -2,6 +2,12 @@
 #include <math.h>
 #include "arm_math.h"
 
+static float LQR_ClampSymmetric(float value, float limit) {
+    if (value > limit) return limit;
+    if (value < -limit) return -limit;
+    return value;
+}
+
 /* Generated from wheelleg_lqr with runtime-only CoM override; MATLAB sources unchanged.
  * Q = diag([40, 77, 400, 2, 35000, 9, 35000, 9, 40000, 4]).
  * R = diag([10, 10, 1, 1]). Body CoM fore-aft offset = -21.936332 mm.
@@ -310,4 +316,11 @@ void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
     pClassicData->Contronller_Data.Fw_R = control[1];
     pClassicData->Contronller_Data.Tp_L = control[2];
     pClassicData->Contronller_Data.Tp_R = control[3];
+}
+
+void LQR_LimitWheelForces(Classic_Data_t *pClassicData) {
+    pClassicData->Contronller_Data.Fw_L = LQR_ClampSymmetric(
+            pClassicData->Contronller_Data.Fw_L, LQR_WHEEL_FORCE_LIMIT_N);
+    pClassicData->Contronller_Data.Fw_R = LQR_ClampSymmetric(
+            pClassicData->Contronller_Data.Fw_R, LQR_WHEEL_FORCE_LIMIT_N);
 }

@@ -4,6 +4,12 @@
 
 #define VMC_FEEDBACK_FILTER_A 0.2f
 
+static float VMC_ClampSymmetric(float value, float limit) {
+    if (value > limit) return limit;
+    if (value < -limit) return -limit;
+    return value;
+}
+
 static VMC_LegKinematics_t VMC_ForwardLeg(float phi1, float phi4) {
     constexpr float l1 = 0.210f;
     constexpr float l2 = 0.250f;
@@ -97,4 +103,22 @@ void VMC_MapForceToJointTorques(Classic_Data_t *data,
     }
     data->Contronller_Data.Tp_L = TpL;
     data->Contronller_Data.Tp_R = TpR;
+}
+
+void VMC_LimitVirtualPitchTorque(Classic_Data_t *data) {
+    data->Contronller_Data.Tp_L = VMC_ClampSymmetric(
+            data->Contronller_Data.Tp_L, VMC_VIRTUAL_TP_LIMIT_NM);
+    data->Contronller_Data.Tp_R = VMC_ClampSymmetric(
+            data->Contronller_Data.Tp_R, VMC_VIRTUAL_TP_LIMIT_NM);
+}
+
+void VMC_LimitJointTorques(Classic_Data_t *data) {
+    data->Contronller_Data.T1_L = VMC_ClampSymmetric(
+            data->Contronller_Data.T1_L, VMC_JOINT_TORQUE_LIMIT_NM);
+    data->Contronller_Data.T2_L = VMC_ClampSymmetric(
+            data->Contronller_Data.T2_L, VMC_JOINT_TORQUE_LIMIT_NM);
+    data->Contronller_Data.T1_R = VMC_ClampSymmetric(
+            data->Contronller_Data.T1_R, VMC_JOINT_TORQUE_LIMIT_NM);
+    data->Contronller_Data.T2_R = VMC_ClampSymmetric(
+            data->Contronller_Data.T2_R, VMC_JOINT_TORQUE_LIMIT_NM);
 }

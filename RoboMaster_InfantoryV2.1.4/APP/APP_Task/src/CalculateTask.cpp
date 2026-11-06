@@ -30,7 +30,6 @@
 #include "Ground_clearance_detection.h"
 #include "app_K_value.hpp"
 #include "app_vmc.hpp"
-#include "app_control_limit.hpp"
 #include "app_leg_control.hpp"
 
 // 定义参考值（根据实际需求调整）
@@ -95,8 +94,6 @@ void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
     /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
     bool lqr_pos_ref_recorded = false;
-    static float Max_F0 = 50.0f;
-    static float Max_Tp = 1.8f;
     VMC_Kinematics_t vmc_kinematics;
     // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
     // 任一侧超出阈值连续 1 s 才切换为未起身。
@@ -381,6 +378,8 @@ void CaculateTask(void *pvParameters) {
                                     theta_L_ref, d_theta_L_ref,
                                     theta_R_ref, d_theta_R_ref);
         }
+        /* LQR 自己负责不经 VMC 的轮端虚拟力 Fw 限幅。 */
+        LQR_LimitWheelForces(pClassicData);
 
         /* 测试版不叠加腿重力补偿；正式版总使能且已起身后叠加。
          * 任一模式下，总使能关闭时 ControlTask 均向全部电机发送零力矩。 */
@@ -398,40 +397,8 @@ void CaculateTask(void *pvParameters) {
         LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
                           remote_snapshot.sbus_data.Channel[5]);
        
-        // ====== 输入限幅：VMC 之前，F0/Tp 必须在此限幅（Fw 不经过 VMC） ======
-        /* 台架气弹簧预压测试：总使能前总 F0 为 ±10 N，使能后为 ±50 N。
-         * 保留原起身前/后 F0、Tp 限幅逻辑，测试结束时恢复。 */
-        // if(StandUp_Flag == true)
-        // {
-        // Max_F0 = 30.0f;
-        // Max_Tp = 2.0f;
-        // }
-        // else
-        // {
-        // Max_F0 = 60.0f;
-        // Max_Tp = 4.0f;
-        // };
-        Max_F0 = leg_pid_enabled ? 50.0f : 0.0f;
-        Max_Tp = 2.0f;
-
-        // F0 总限幅：总使能前 ±10 N；总使能后 ±50 N。
-        if (pClassicData->Contronller_Data.F0_L > Max_F0)
-            pClassicData->Contronller_Data.F0_L = Max_F0;
-        if (pClassicData->Contronller_Data.F0_L < -Max_F0)
-            pClassicData->Contronller_Data.F0_L = -Max_F0;
-        if (pClassicData->Contronller_Data.F0_R > Max_F0)
-            pClassicData->Contronller_Data.F0_R = Max_F0;
-        if (pClassicData->Contronller_Data.F0_R < -Max_F0)
-            pClassicData->Contronller_Data.F0_R = -Max_F0;
-
-        if (pClassicData->Contronller_Data.Tp_L > Max_Tp)
-            pClassicData->Contronller_Data.Tp_L = Max_Tp;
-        if (pClassicData->Contronller_Data.Tp_L < -Max_Tp)
-            pClassicData->Contronller_Data.Tp_L = -Max_Tp;
-        if (pClassicData->Contronller_Data.Tp_R > Max_Tp)
-            pClassicData->Contronller_Data.Tp_R = Max_Tp;
-        if (pClassicData->Contronller_Data.Tp_R < -Max_Tp)
-            pClassicData->Contronller_Data.Tp_R = -Max_Tp;
+        /* F0 已在 LegControl 内限幅；Tp 是 VMC 的虚拟输入，在 VMC 模块限幅。 */
+        VMC_LimitVirtualPitchTorque(pClassicData);
         // ====== VMC 力矩分配 ======
         VMC_MapForceToJointTorques(
                 pClassicData, &vmc_kinematics,
@@ -440,8 +407,8 @@ void CaculateTask(void *pvParameters) {
                 pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
                 pClassicData->Contronller_Data.Tp_R + gravity_tp_r);
 
-        // ====== 输出限幅：VMC 之后，T1/T2 限幅 ======
-        Controler_Limit(pClassicData);
+        /* VMC 后只限髋关节实际扭矩；轮力 Fw 不属于 VMC。 */
+        VMC_LimitJointTorques(pClassicData);
 
         {
             /* 原控制周期末尾调试选择：默认不输出。 */

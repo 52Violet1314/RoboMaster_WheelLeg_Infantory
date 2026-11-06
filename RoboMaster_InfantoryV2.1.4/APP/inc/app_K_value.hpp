@@ -15,6 +15,9 @@ typedef struct
 #define LQR_K_SCHEDULE_MIN_LENGTH_M  0.150f
 #define LQR_K_SCHEDULE_STEP_M        0.005f
 
+/* LQR 的两路轮端虚拟力输出保护，单位 N。轮端输出不经过 VMC。 */
+#define LQR_WHEEL_FORCE_LIMIT_N       6.0f
+
 extern const LQR_K_Schedule_t LQR_K_Schedule[LQR_K_SCHEDULE_COUNT];
 
 /* 越界腿长钳到表端；表内按平均实际腿长对相邻 K 线性插值。 */
@@ -26,6 +29,9 @@ void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                              float theta_ref, float d_theta_ref,
                              float theta_l_ref, float d_theta_l_ref,
                              float theta_r_ref, float d_theta_r_ref);
+
+/* 仅限制 LQR 的 Fw_L/Fw_R；Tp 由 VMC 模块作为虚拟腿力矩统一限幅。 */
+void LQR_LimitWheelForces(Classic_Data_t *pClassicData);
 
 
 #endif

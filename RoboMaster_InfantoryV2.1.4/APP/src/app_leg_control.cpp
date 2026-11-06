@@ -12,8 +12,8 @@ static float last_leg_target = 0.0f;
 
 void LegControl_Init(void) {
     Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
-    Float_PID_Init(&leg_length_pid_r, 300.0f, 30.0f, 0.0f);//200 1.2 0.4
-    // 台架腿长 PID 测试：Float_PID_Init(&leg_length_pid_r, 1200.0f, 1.5f, 2.0f);
+    Float_PID_Init(&leg_length_pid_r, LEG_LENGTH_PID_KP,
+                   LEG_LENGTH_PID_KI, LEG_LENGTH_PID_KD);
 }
 
 void LegControl_Update(Classic_Data_t *pClassicData, float dt,
@@ -111,7 +111,7 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     const float leg_err_r = leg_target_r - pClassicData->Leg_Data.L0_R;
     /* 仅用于腿长 PID 的 ±1 mm 误差死区。保留原始误差给调试和目标切换判断；
      * 死区内不产生新的 P/I/D 修正，但不清已有积分维持力。 */
-    constexpr float leg_pid_deadband_m = 0.001f;
+    constexpr float leg_pid_deadband_m = LEG_LENGTH_PID_DEADBAND_M;
     float leg_pid_current_r = pClassicData->Leg_Data.L0_R;
 #if !LEG_CONTROL_TEST_MODE
     float leg_pid_current_l = pClassicData->Leg_Data.L0_L;
@@ -136,12 +136,12 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     }
     /* 总使能前禁止积分；限幅直接使用积分输出单位 N。
      * 测试版仅右腿参与。 */
-    constexpr float leg_pid_iout_limit_n = 20.0f;
+    constexpr float leg_pid_iout_limit_n = LEG_LENGTH_PID_I_OUTPUT_LIMIT_N;
     const float leg_r_iout_limit_n = leg_pid_enabled ? leg_pid_iout_limit_n : 0.0f;
-    const float leg_r_out_limit = leg_pid_enabled ? 50.0f : 0.0f;
+    const float leg_r_out_limit = leg_pid_enabled ? LEG_LENGTH_PID_OUTPUT_LIMIT_N : 0.0f;
 #if !LEG_CONTROL_TEST_MODE
     const float leg_l_iout_limit_n = leg_pid_enabled ? leg_pid_iout_limit_n : 0.0f;
-    const float leg_l_out_limit = leg_pid_enabled ? 50.0f : 0.0f;
+    const float leg_l_out_limit = leg_pid_enabled ? LEG_LENGTH_PID_OUTPUT_LIMIT_N : 0.0f;
 #endif
     /* PID_Max_Float 由 Ki 是否为正决定是否累加积分；失能时临时置零，调用后恢复参数，避免未使能期间产生任何积分项。 */
     const float leg_l_ki = leg_length_pid_l.Ki;
@@ -191,5 +191,19 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
         leg_length_pid_r.Err_Int = 0.0f;
         pClassicData->Contronller_Data.F0_L = 0.0f;
         pClassicData->Contronller_Data.F0_R = 0.0f;
+    }
+
+    /* 腿长算法的最终虚拟腿向力保护。放在本文件，保证 PID 的各模式、
+     * 补偿叠加和 F0 限幅是一个可审查的整体；进入 VMC 的 F0 永远不超限。 */
+    const float f0_limit_n = leg_pid_enabled ? LEG_LENGTH_PID_OUTPUT_LIMIT_N : 0.0f;
+    if (pClassicData->Contronller_Data.F0_L > f0_limit_n) {
+        pClassicData->Contronller_Data.F0_L = f0_limit_n;
+    } else if (pClassicData->Contronller_Data.F0_L < -f0_limit_n) {
+        pClassicData->Contronller_Data.F0_L = -f0_limit_n;
+    }
+    if (pClassicData->Contronller_Data.F0_R > f0_limit_n) {
+        pClassicData->Contronller_Data.F0_R = f0_limit_n;
+    } else if (pClassicData->Contronller_Data.F0_R < -f0_limit_n) {
+        pClassicData->Contronller_Data.F0_R = -f0_limit_n;
     }
 }
