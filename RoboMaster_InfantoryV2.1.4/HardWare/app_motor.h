@@ -5,9 +5,10 @@
 #include "fdcan.h"
 #include <stdint.h>
 
-#define P_MAX_RAD 3.14f
-#define V_MAX_RAD_S 20.944f
-#define T_MAX_NM 7.0f
+/* DM-4310：名称必须带型号，避免与其他达妙电机共用含糊的通用宏。 */
+#define P_MAX_RAD_4310 3.14f
+#define V_MAX_RAD_S_4310 20.944f
+#define T_MAX_NM_4310 7.0f
 #define P_MAX_8009 3.14f
 #define V_MAX_RAD_S_8009 16.755f
 #define T_MAX_NM_8009 40.0f
@@ -15,8 +16,9 @@
 #define V_MAX_RAD_S_3519 45.553f
 #define T_MAX_NM_3519 7.8f
 #define P_MAX_RAD_3507 12.566f
-#define V_MAX_RAD_S_3507 50.0f
-#define T_MAX_NM_3507 5.0f
+/* DM-3507：200 rpm 空载上限、7 Nm 峰值扭矩。 */
+#define V_MAX_RAD_S_3507 20.944f
+#define T_MAX_NM_3507 7.0f
 
 #define DM_MOTOR_MODE_MIT 0x51
 #define DM_MOTOR_MODE_POS_SPEED 0x52

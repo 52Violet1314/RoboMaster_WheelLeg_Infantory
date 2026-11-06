@@ -61,6 +61,13 @@ void IMU_Data_Print(Classic_Data_t *pClassicData);
 
 void State_Data_Print(Classic_Data_t *pClassicData);
 
+/* 台架诊断：放在安全早退之前，只打印状态，不参与放行或输出决策。 */
+static void ControlHealth_Data_Print(bool imu_snapshot_updated,
+                                     bool remote_snapshot_updated,
+                                     bool motor_snapshot_updated,
+                                     bool motor_feedback_fault,
+                                     bool hip_driver_fault);
+
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
@@ -134,18 +141,24 @@ void CaculateTask(void *pvParameters) {
         IMU_ControlSnapshot_t received_imu;
         Remote_ControlSnapshot_t received_remote;
         Motor_ControlSnapshot_t received_motor;
+        bool imu_snapshot_updated = false;
+        bool remote_snapshot_updated = false;
+        bool motor_snapshot_updated = false;
 
         if ((IMU_ControlQueueHandle != NULL) &&
             (xQueueReceive(IMU_ControlQueueHandle, &received_imu, 0) == pdPASS)) {
             imu_snapshot = received_imu;
+            imu_snapshot_updated = true;
         }
         if ((Remote_ControlQueueHandle != NULL) &&
             (xQueueReceive(Remote_ControlQueueHandle, &received_remote, 0) == pdPASS)) {
             remote_snapshot = received_remote;
+            remote_snapshot_updated = true;
         }
         if ((Motor_ControlQueueHandle != NULL) &&
             (xQueueReceive(Motor_ControlQueueHandle, &received_motor, 0) == pdPASS)) {
             motor_snapshot = received_motor;
+            motor_snapshot_updated = true;
         }
 
         /* Classic_Data 从这里起由 Calculate 持有并使用本周期输入快照。 */
@@ -187,6 +200,9 @@ void CaculateTask(void *pvParameters) {
                 (dm_motor_feedback_timeout_flag != 0U) ||
                 (motor_snapshot.driver_fault_flag != 0U);
 #endif
+        ControlHealth_Data_Print(imu_snapshot_updated, remote_snapshot_updated,
+                                 motor_snapshot_updated, motor_feedback_fault,
+                                 hip_driver_fault);
         if (motor_feedback_fault ||
             (imu_data_timeout_flag != 0U) ||
             (remote_data_timeout_flag != 0U)) {
@@ -229,9 +245,9 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Motor_Data.R1_Motor_VEL = motor_snapshot.data[3].velocity_rad_s;
         pClassicData->Motor_Data.R2_Motor_VEL = motor_snapshot.data[2].velocity_rad_s;
         pClassicData->Motor_Data.Left_Wheel_Motor_VEL =
-                -(motor_snapshot.data[4].velocity_rad_s / 15.8f * 19.2f + 0.048f);
+                -(motor_snapshot.data[4].velocity_rad_s / 15.8f * 19.2f);
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
-                +(motor_snapshot.data[5].velocity_rad_s / 15.8f * 19.2f + 0.048f);
+                +(motor_snapshot.data[5].velocity_rad_s / 15.8f * 19.2f);
 
         /* 本轮四个髋电机反馈已经就绪。先完成正运动学并写入 Leg_Data，
          * 后面的 Kalman、起身判断、LQR、PID 与补偿都只使用本轮同一套腿状态。 */
@@ -435,8 +451,8 @@ void CaculateTask(void *pvParameters) {
                 /* 台架打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);          // 腿长、腿长速度、腿角、腿角速度
-                 LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
-                // IMU_Data_Print(pClassicData);
+                // LegLengthPID_Data_Print(pClassicData); // 旋钮目标腿长、实际腿长、误差、F0
+                 IMU_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
                 // WheelKalman_Print(&Wheel_Kalman_R, 'R'); // 右侧：原始位置、原始速度、滤波位置、滤波速度
@@ -551,6 +567,27 @@ static void VMC_MapForceToJointTorques(Classic_Data_t *data,
  * @return float 转换后的弧度值
  */
 float angle_to_rad(float degrees) { return degrees * (PI / 180.0f); }
+
+static void ControlHealth_Data_Print(bool imu_snapshot_updated,
+                                     bool remote_snapshot_updated,
+                                     bool motor_snapshot_updated,
+                                     bool motor_feedback_fault,
+                                     bool hip_driver_fault) {
+    static TickType_t last_print_tick = 0;
+    const TickType_t now = xTaskGetTickCount();
+    if ((now - last_print_tick) < pdMS_TO_TICKS(200)) return;
+    last_print_tick = now;
+    uart_print("HEALTH,imu_to=%u,remote_to=%u,hip_to=%u,motor_fault=%u,hip_fault=%u,"
+               "imu_q=%u,remote_q=%u,motor_q=%u\r\n",
+               (unsigned)imu_data_timeout_flag,
+               (unsigned)remote_data_timeout_flag,
+               (unsigned)dm_motor_feedback_timeout_flag,
+               (unsigned)motor_feedback_fault,
+               (unsigned)hip_driver_fault,
+               (unsigned)imu_snapshot_updated,
+               (unsigned)remote_snapshot_updated,
+               (unsigned)motor_snapshot_updated);
+}
 
 void LEG_Data_Print(Classic_Data_t *pClassicData) {
     /* FireWater 纯 CSV，依次为：
