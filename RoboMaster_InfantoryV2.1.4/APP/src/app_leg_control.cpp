@@ -20,13 +20,15 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
                        bool stand_up, bool leg_pid_enabled,
                        int16_t leg_knob_channel) {
     /* 气弹簧预压补偿：正式版按本轮左右实际 L0 分别计算。
-     * 台架重新标定时必须完全关掉，右腿 F0 才是 PID 为保持该腿长所需的
-     * 原始补偿力，可直接记录回补偿表。 */
+     * 台架模式可单独开右腿补偿，左腿始终为零，便于和 PID/重力补偿一起验证。 */
     float spring_preload_f0_l = 0.0f;
     float spring_preload_f0_r = 0.0f;
 #if !LEG_CONTROL_TEST_MODE
     spring_preload_f0_l =
             LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
+    spring_preload_f0_r =
+            LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
+#elif LEG_CONTROL_TEST_ENABLE_SPRING_COMPENSATION
     spring_preload_f0_r =
             LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
 #endif

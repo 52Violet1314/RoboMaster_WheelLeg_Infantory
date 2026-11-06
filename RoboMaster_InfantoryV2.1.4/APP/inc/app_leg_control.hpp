@@ -9,6 +9,11 @@
  * 起身前/后 F0 预输出；正式版恢复状态机、roll、预输出，并在总使能且已起身后开腿重力补偿。 */
 #define LEG_CONTROL_TEST_MODE 1
 
+/* 台架测试补偿开关。仅在 LEG_CONTROL_TEST_MODE=1 时生效，且只作用于右腿；
+ * 左腿始终保持纯零输出，防止未参与测试的一侧误动作。 */
+#define LEG_CONTROL_TEST_ENABLE_SPRING_COMPENSATION   1
+#define LEG_CONTROL_TEST_ENABLE_GRAVITY_COMPENSATION  1
+
 /* 腿长控制标定参数，单位统一为 m、N、s。
  * 仅供 LegControl_Update() 使用：PID 算法本体不保存任何腿的专用限幅。
  * I_OUTPUT_LIMIT 是积分“输出项”的限幅（N），不是 Err_Int 内部的 m·s。

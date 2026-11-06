@@ -381,17 +381,26 @@ void CaculateTask(void *pvParameters) {
         /* LQR 自己负责不经 VMC 的轮端虚拟力 Fw 限幅。 */
         LQR_LimitWheelForces(pClassicData);
 
-        /* 测试版不叠加腿重力补偿；正式版总使能且已起身后叠加。
+        /* 正式版总使能且已起身后叠加双腿重力补偿；台架可单独开右腿重力补偿。
          * 任一模式下，总使能关闭时 ControlTask 均向全部电机发送零力矩。 */
         float gravity_tp_l = 0.0f;
         float gravity_tp_r = 0.0f;
-#if LEG_GRAVITY_COMPENSATION_ENABLE && !LEG_CONTROL_TEST_MODE
+#if LEG_GRAVITY_COMPENSATION_ENABLE
+#if LEG_CONTROL_TEST_MODE
+#if LEG_CONTROL_TEST_ENABLE_GRAVITY_COMPENSATION
+        if (leg_pid_enabled) {
+            gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
+                                            pClassicData->States_Data.theta_R);
+        }
+#endif
+#else
         if (leg_pid_enabled && StandUp_Flag) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
                                             pClassicData->States_Data.theta_R);
         }
+#endif
 #endif
 
         LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
