@@ -5,25 +5,27 @@
 #include "fdcan.h"
 #include <stdint.h>
 
-/* MIT 映射范围必须与电调 PMAX/VMAX/TMAX 寄存器一致；
- * 铭牌额定/峰值能力不是 MIT 字段量程，不能直接替代。 */
-/* 当前值须由已配置电调的寄存器读回值确认。 */
-#define P_MAX_RAD_4310 12.5f
-#define V_MAX_RAD_S_4310 30.0f
-#define T_MAX_NM_4310 10.0f
-#define P_MAX_8009 3.14f
+#define DM_MOTOR_MODE_MIT 0x51
+#define DM_MOTOR_MODE_POS_SPEED 0x52
+#define DM_MOTOR_MODE_SPEED 0x53
+
+#define P_MAX_RAD_8009 3.14f
 #define V_MAX_RAD_S_8009 16.755f
 #define T_MAX_NM_8009 40.0f
+
 #define P_MAX_RAD_3519 12.5f
 #define V_MAX_RAD_S_3519 45.553f
 #define T_MAX_NM_3519 7.8f
+
 #define P_MAX_RAD_3507 12.566f
 #define V_MAX_RAD_S_3507 20.944f
 #define T_MAX_NM_3507 7.0f
 
-#define DM_MOTOR_MODE_MIT 0x51
-#define DM_MOTOR_MODE_POS_SPEED 0x52
-#define DM_MOTOR_MODE_SPEED 0x53
+#define P_MAX_RAD_4310 12.5f
+#define V_MAX_RAD_S_4310 30.0f
+#define T_MAX_NM_4310 10.0f
+#define OUTPUT_V_MAX_RAD_S_4310 20.944f
+#define OUTPUT_T_MAX_NM_4310 7.0f
 
 typedef struct {
   uint8_t err;
@@ -34,7 +36,6 @@ typedef struct {
   float temp_COIL_C;
 } DM_Motor_Data_t;
 
-/* 协议层只关心型号；实例数量、CAN ID 和挂载的 FDCAN 均属于驱动层。 */
 typedef enum {
   DM_MOTOR_MODEL_8009 = 0,
   DM_MOTOR_MODEL_3519,
