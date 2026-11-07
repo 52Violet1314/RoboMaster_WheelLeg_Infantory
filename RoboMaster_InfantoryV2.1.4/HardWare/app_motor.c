@@ -16,9 +16,9 @@ static float uint16_to_float(uint16_t x, float x_min, float x_max, uint8_t bits)
 static int16_t float_to_int12(float x, float x_min, float x_max);
 static float int12_to_float(int16_t x, float x_min, float x_max);
 
-/* MIT 力矩字段的量程必须与实际电机型号一致：
- * 四个关节 J8009 的峰值为 40 Nm；两只轮毂 S3519 的峰值为 7.8 Nm。
- * 不能把控制限幅后的 20.5 Nm 继续按 ±18 Nm 编码，否则 12 位字段溢出。 */
+/* 每个电机型号的 MIT 输出端速度/扭矩映射量程。
+ * 同一表供反馈解码、MIT 打包和速度模式限幅共用，防止模式切换后单位变化。
+ * MIT 仅在电调 VMAX/TMAX 已配为同一映射量程时才能保证字节含义一致。 */
 typedef struct {
   float speed_rad_s;
   float torque_nm;
@@ -26,12 +26,14 @@ typedef struct {
 
 /* 除位置字段外，MIT 的速度/力矩字段必须按实际电机型号缩放。
  * 所有数值均为输出端物理单位，和反馈解码使用同一规格。 */
-static DM_MIT_Limit_t dm_motor_mit_limits(const DM_Motor_t *motor) {
+static DM_MIT_Limit_t dm_motor_command_limits(const DM_Motor_t *motor) {
   if ((motor == &DM_8009P1) || (motor == &DM_8009P2) ||
       (motor == &DM_8009P3) || (motor == &DM_8009P4)) {
     return (DM_MIT_Limit_t){V_MAX_RAD_S_8009, T_MAX_NM_8009};
   }
-  if ((motor == &DM_3519L) || (motor == &DM_3519R)) {
+  if ((motor == &DM_3519L) || (motor == &DM_3519R) ||
+      (motor == &DM_3519_Shoot_L) || (motor == &DM_3519_Shoot_R) ||
+      (motor == &DM_3519_Gimbal_Pitch)) {
     return (DM_MIT_Limit_t){V_MAX_RAD_S_3519, T_MAX_NM_3519};
   }
   if (motor == &DM_3507) {
@@ -40,7 +42,8 @@ static DM_MIT_Limit_t dm_motor_mit_limits(const DM_Motor_t *motor) {
   if (motor == &DM_4310) {
     return (DM_MIT_Limit_t){V_MAX_RAD_S_4310, T_MAX_NM_4310};
   }
-  return (DM_MIT_Limit_t){45.0f, 18.0f};
+  /* 所有工程内电机对象均已在上方列出；无效指针必须走零输出保护，不能猜型号。 */
+  return (DM_MIT_Limit_t){0.0f, 0.0f};
 }
 
 static int float_to_uint(float x, float x_min, float x_max, int bits) {
@@ -74,7 +77,12 @@ void DM_Motor_Enable(DM_Motor_t *motor) {
 void DM_Motor_MIT_Control(DM_Motor_t *motor, float Kp_des, float Kd_des,
                           float Pos_Des, float Spd_Des, float Tor_Des) {
   uint8_t motor_send_data[8];
-  const DM_MIT_Limit_t limits = dm_motor_mit_limits(motor);
+  DM_MIT_Limit_t limits = dm_motor_command_limits(motor);
+  if ((limits.speed_rad_s <= 0.0f) || (limits.torque_nm <= 0.0f)) {
+    /* 无效对象：构造零增益、零位置、零速度、零力矩帧，且避免除零编码。 */
+    Kp_des = Kd_des = Pos_Des = Spd_Des = Tor_Des = 0.0f;
+    limits = (DM_MIT_Limit_t){1.0f, 1.0f};
+  }
   if (Spd_Des > limits.speed_rad_s) Spd_Des = limits.speed_rad_s;
   if (Spd_Des < -limits.speed_rad_s) Spd_Des = -limits.speed_rad_s;
   if (Tor_Des > limits.torque_nm) Tor_Des = limits.torque_nm;
@@ -98,6 +106,9 @@ void DM_Motor_MIT_Control(DM_Motor_t *motor, float Kp_des, float Kd_des,
 }
 
 void DM_Motor_Speed_Control(DM_Motor_t *motor, float Spd_Des) {
+  const DM_MIT_Limit_t limits = dm_motor_command_limits(motor);
+  if (Spd_Des > limits.speed_rad_s) Spd_Des = limits.speed_rad_s;
+  if (Spd_Des < -limits.speed_rad_s) Spd_Des = -limits.speed_rad_s;
   uint8_t *vbuf = (uint8_t *)&Spd_Des;
   uint8_t motor_send_data[4] = {vbuf[0], vbuf[1], vbuf[2], vbuf[3]};
   fdcanx_send_data(motor->hcan, motor->ID | 0x200, motor_send_data, 4);
@@ -105,6 +116,9 @@ void DM_Motor_Speed_Control(DM_Motor_t *motor, float Spd_Des) {
 
 void DM_Motor_Pos_Speed_Control(DM_Motor_t *motor, float Pos_Des,
                                 float Spd_Des) {
+  const DM_MIT_Limit_t limits = dm_motor_command_limits(motor);
+  if (Spd_Des > limits.speed_rad_s) Spd_Des = limits.speed_rad_s;
+  if (Spd_Des < -limits.speed_rad_s) Spd_Des = -limits.speed_rad_s;
   uint8_t *pbuf = (uint8_t *)&Pos_Des;
   uint8_t *vbuf = (uint8_t *)&Spd_Des;
   uint8_t motor_send_data[8] = {pbuf[0], pbuf[1], pbuf[2], pbuf[3],

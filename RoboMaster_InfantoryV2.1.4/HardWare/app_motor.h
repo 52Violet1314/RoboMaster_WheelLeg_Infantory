@@ -5,7 +5,9 @@
 #include "fdcan.h"
 #include <stdint.h>
 
-/* DM-4310：名称必须带型号，避免与其他达妙电机共用含糊的通用宏。 */
+/* MIT 映射范围必须与电调 PMAX/VMAX/TMAX 寄存器一致；
+ * 铭牌额定/峰值能力不是 MIT 字段量程，不能直接替代。 */
+/* 当前值须由已配置电调的寄存器读回值确认。 */
 #define P_MAX_RAD_4310 3.14f
 #define V_MAX_RAD_S_4310 20.944f
 #define T_MAX_NM_4310 7.0f
@@ -16,7 +18,6 @@
 #define V_MAX_RAD_S_3519 45.553f
 #define T_MAX_NM_3519 7.8f
 #define P_MAX_RAD_3507 12.566f
-/* DM-3507：200 rpm 空载上限、7 Nm 峰值扭矩。 */
 #define V_MAX_RAD_S_3507 20.944f
 #define T_MAX_NM_3507 7.0f
 
