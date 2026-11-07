@@ -21,6 +21,12 @@ extern const LegForceCompensationParam_t
  * L0 <= 130 mm 时返回 0 N；130~140 mm 平滑接入 140 mm 的实测 -28 N，
  * 既避免 140 mm 的 F0 突变，又在最短可用腿长提供收短阻力。
  * L0 > 380 mm 时保持 380 mm 的拟合值，避免最长腿长处补偿突然归零。 */
+#ifdef __cplusplus
+extern "C" {
+#endif
 float LegForceCompensation_GetFittedF0(float leg_length_m);
+#ifdef __cplusplus
+}
+#endif
 
 #endif

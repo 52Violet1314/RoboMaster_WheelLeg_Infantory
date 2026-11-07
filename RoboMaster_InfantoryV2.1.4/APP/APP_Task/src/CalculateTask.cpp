@@ -334,14 +334,6 @@ void CaculateTask(void *pvParameters) {
         /* 起身状态完全由原状态机判定；腿长 PID 是否输出由 Channel[9] 总使能控制。 */
         StandUp_Flag = (stand_state == StandState_Up);
 
-        // WheelKalman_Print(&Wheel_Kalman_L, 'L');
-        // WheelKalman_Print(&Wheel_Kalman_R, 'R');
-        //离地检测：识别腿支持力
-        float Fn_Left = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_L,pClassicData->Contronller_Data.Tp_L, pClassicData->Leg_Data.L0_L,pClassicData->Leg_Data.d_L0_L,pClassicData->Leg_Data.dd_L0_L,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_L,pClassicData->States_Data.d_theta_L,pClassicData->States_Data.dd_theta_L);
-        float Fn_Right = Ground_Clearance_Detection(pClassicData->Contronller_Data.F0_R,pClassicData->Contronller_Data.Tp_R, pClassicData->Leg_Data.L0_R,pClassicData->Leg_Data.d_L0_R,pClassicData->Leg_Data.dd_L0_R,pClassicData->IMU_Data.accel_v,pClassicData->States_Data.theta_R,pClassicData->States_Data.d_theta_R,pClassicData->States_Data.dd_theta_R);
-        (void)Fn_Left;
-        (void)Fn_Right;
-
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
         pClassicData->Contronller_Data.Fw_L = 0.0f;
@@ -409,6 +401,34 @@ void CaculateTask(void *pvParameters) {
 
         /* VMC 后只限髋关节实际扭矩；轮力 Fw 不属于 VMC。 */
         VMC_LimitJointTorques(pClassicData);
+
+        /* 离地检测使用本轮最终 F0 与真正送入 VMC 的 Tp。
+         * GroundDetection_Update 内部只剔除弹簧内部抵消项，并完成滤波、
+         * 迟滞及连续拍确认；不再用上一轮命令或重复叠加重力补偿。 */
+        const float fn_left = GroundDetection_Update(
+                GD_SIDE_LEFT,
+                pClassicData->Contronller_Data.F0_L,
+                pClassicData->Contronller_Data.Tp_L,
+                pClassicData->Leg_Data.L0_L,
+                pClassicData->Leg_Data.d_L0_L,
+                pClassicData->Leg_Data.dd_L0_L,
+                pClassicData->IMU_Data.accel_v,
+                pClassicData->States_Data.theta_L,
+                pClassicData->States_Data.d_theta_L,
+                pClassicData->States_Data.dd_theta_L);
+        const float fn_right = GroundDetection_Update(
+                GD_SIDE_RIGHT,
+                pClassicData->Contronller_Data.F0_R,
+                pClassicData->Contronller_Data.Tp_R,
+                pClassicData->Leg_Data.L0_R,
+                pClassicData->Leg_Data.d_L0_R,
+                pClassicData->Leg_Data.dd_L0_R,
+                pClassicData->IMU_Data.accel_v,
+                pClassicData->States_Data.theta_R,
+                pClassicData->States_Data.d_theta_R,
+                pClassicData->States_Data.dd_theta_R);
+        (void)fn_left;
+        (void)fn_right;
 
         {
             /* 原控制周期末尾调试选择：默认不输出。 */
