@@ -8,6 +8,8 @@
 /* 腿长力闭环：L0 由四连杆正运动学计算得到，PID 输出为腿向力修正量。 */
 static Float_PID_Typedef leg_length_pid_l;
 static Float_PID_Typedef leg_length_pid_r;
+static Float_PID_Typedef leg_swing_pid_l;
+static Float_PID_Typedef leg_swing_pid_r;
 static float last_leg_target = 0.0f;
 
 void LegControl_Init(void) {
@@ -15,11 +17,15 @@ void LegControl_Init(void) {
                    LEG_LENGTH_PID_KI, LEG_LENGTH_PID_KD);
     Float_PID_Init(&leg_length_pid_r, LEG_LENGTH_PID_KP,
                    LEG_LENGTH_PID_KI, LEG_LENGTH_PID_KD);
+    Float_PID_Init(&leg_swing_pid_l, LEG_SWING_PID_KP, LEG_SWING_PID_KI, LEG_SWING_PID_KD);
+    Float_PID_Init(&leg_swing_pid_r, LEG_SWING_PID_KP, LEG_SWING_PID_KI, LEG_SWING_PID_KD);
 }
 
 void LegControl_Update(Classic_Data_t *pClassicData, float dt,
                        bool stand_up, bool leg_pid_enabled,
-                       int16_t leg_knob_channel) {
+                       int16_t leg_knob_channel, bool override_leg_target,
+                       float override_leg_target_m, bool swing_pid_enable,
+                       float swing_target_rad) {
     /* 气弹簧预压补偿全程按本轮左右实际 L0 分别计算，不依赖起身状态。 */
     const float spring_preload_f0_l =
             LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
@@ -74,6 +80,7 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
             leg_knob_target_m = leg_knob_stand_max_m;
         }
     }
+    if (override_leg_target) leg_knob_target_m = override_leg_target_m;
     pClassicData->Target_Data.Target_LegLong = leg_knob_target_m;
 
     /* 仅已起身时计算左右反向的 roll F0 补偿。 */
@@ -148,6 +155,16 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r
             + stand_offset_r
             - roll_comp;
+    if (swing_pid_enable && leg_pid_enabled) {
+        const float tp_l = PID_Max_Float_Dt(&leg_swing_pid_l, swing_target_rad,
+                pClassicData->States_Data.theta_L, LEG_SWING_PID_OUTPUT_LIMIT_NM,
+                LEG_SWING_PID_OUTPUT_LIMIT_NM, dt);
+        const float tp_r = PID_Max_Float_Dt(&leg_swing_pid_r, swing_target_rad,
+                pClassicData->States_Data.theta_R, LEG_SWING_PID_OUTPUT_LIMIT_NM,
+                LEG_SWING_PID_OUTPUT_LIMIT_NM, dt);
+        pClassicData->Contronller_Data.Tp_L += LEG_SWING_PID_OUTPUT_SIGN * tp_l;
+        pClassicData->Contronller_Data.Tp_R += LEG_SWING_PID_OUTPUT_SIGN * tp_r;
+    } else { leg_swing_pid_l.Err_Int = 0.0f; leg_swing_pid_r.Err_Int = 0.0f; }
 
     if (!leg_pid_enabled) {
         /* 总使能关闭时不保留任何腿向力输出。

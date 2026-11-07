@@ -31,6 +31,7 @@
 #include "app_K_value.hpp"
 #include "app_vmc.hpp"
 #include "app_leg_control.hpp"
+#include "app_step_climb_demo.hpp"
 
 // 定义参考值（根据实际需求调整）
 float theta_ref = 0.0f; // 期望整体角度
@@ -112,6 +113,7 @@ void CaculateTask(void *pvParameters) {
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     LegControl_Init();
+    StepClimb_Init();
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P2, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -331,7 +333,19 @@ void CaculateTask(void *pvParameters) {
             stand_not_up_time = 1.0f;
             }
         }
-        /* 起身状态完全由原状态机判定；腿长 PID 是否输出由 Channel[9] 总使能控制。 */
+        const bool total_enable = (remote_snapshot.sbus_data.Channel[9] >= 100);
+        const bool lqr_switch_enabled = (remote_snapshot.sbus_data.Channel[7] > 100);
+        const bool step_switch_enabled =
+                (remote_snapshot.sbus_data.Channel[6] > STEP_CLIMB_SWITCH_THRESHOLD);
+        StepClimbCommand_t step_command = StepClimb_Update(
+                cal_dt, step_switch_enabled, total_enable, lqr_switch_enabled,
+                stand_state == StandState_Up, pClassicData->Leg_Data.L0_L,
+                pClassicData->Leg_Data.L0_R, pClassicData->States_Data.theta_L,
+                pClassicData->States_Data.theta_R);
+        if (step_command.force_not_up) {
+            stand_state = StandState_NotUp;
+            stand_not_up_time = 0.0f;
+        }
         StandUp_Flag = (stand_state == StandState_Up);
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
@@ -345,8 +359,8 @@ void CaculateTask(void *pvParameters) {
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
-        const bool lqr_enabled = (remote_snapshot.sbus_data.Channel[7] > 100);
-        const bool leg_pid_enabled = (remote_snapshot.sbus_data.Channel[9] >= 100);
+        const bool lqr_enabled = lqr_switch_enabled && step_command.allow_lqr;
+        const bool leg_pid_enabled = total_enable;
         /* LQR 起身后以当前位姿作为位置/yaw 工作点。 */
         const bool pos_ref_ready = leg_pid_enabled && lqr_enabled && StandUp_Flag;
         if (pos_ref_ready && !lqr_pos_ref_recorded) {
@@ -378,7 +392,7 @@ void CaculateTask(void *pvParameters) {
         float gravity_tp_l = 0.0f;
         float gravity_tp_r = 0.0f;
 #if LEG_GRAVITY_COMPENSATION_ENABLE
-        if (leg_pid_enabled && StandUp_Flag) {
+        if (leg_pid_enabled && (StandUp_Flag || step_command.allow_gravity_before_stand)) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
@@ -387,7 +401,11 @@ void CaculateTask(void *pvParameters) {
 #endif
 
         LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
-                          remote_snapshot.sbus_data.Channel[5]);
+                          remote_snapshot.sbus_data.Channel[5],
+                          step_command.override_leg_length,
+                          step_command.leg_length_target_m,
+                          step_command.swing_pid_enable,
+                          step_command.swing_target_rad);
        
         /* F0 已在 LegControl 内限幅；Tp 是 VMC 的虚拟输入，在 VMC 模块限幅。 */
         VMC_LimitVirtualPitchTorque(pClassicData);

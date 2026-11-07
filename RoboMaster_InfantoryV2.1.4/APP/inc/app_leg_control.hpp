@@ -14,12 +14,19 @@
 #define LEG_LENGTH_PID_DEADBAND_M           0.0001f
 #define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N    80.0f
 #define LEG_LENGTH_PID_OUTPUT_LIMIT_N      80.0f
+#define LEG_SWING_PID_KP                    4.0f
+#define LEG_SWING_PID_KI                    0.0f
+#define LEG_SWING_PID_KD                    0.0f
+#define LEG_SWING_PID_OUTPUT_LIMIT_NM       1.5f
+#define LEG_SWING_PID_OUTPUT_SIGN           1.0f
 
 /* 腿长旋钮映射、气弹簧补偿、roll 差分和腿长 PID 的统一入口。
  * 起身状态机仍由 CalculateTask 维护；本模块只使用其本轮判定结果。 */
 void LegControl_Init(void);
 void LegControl_Update(Classic_Data_t *pClassicData, float dt,
                        bool stand_up, bool leg_pid_enabled,
-                       int16_t leg_knob_channel);
+                       int16_t leg_knob_channel, bool override_leg_target,
+                       float override_leg_target_m, bool swing_pid_enable,
+                       float swing_target_rad);
 
 #endif
