@@ -32,18 +32,19 @@
 #define DM_MODE_SPEED          0x200U
 
 /* ============================================================
- * DM-S3519-1EC 运行输出上限
+ * Pitch: DM-J4310-2EC V1.1（10:1）
  *
- * 三台电机均为 DM-S3519-1EC。下列数值用于本机发送指令前的硬限幅：
- * - 峰值扭矩 1.0 Nm：MIT 扭矩给定绝不越过该值；
- * - 命令最大速度 30 rad/s：这是本电机驱动当前 VMAX 参数及官方例程
- *   所使用的可编码速度边界，低于机械空载转速，故作为实际发送上限。
- *
- * 注意：协议映射范围 PMAX/VMAX/TMAX 为 12.5/30/10，TMAX=10 仅用于
- * 12 位 CAN 字段的数值编码，不能改成 7.8，否则驱动器解码比例错误。
+ * 该电机的 MIT 映射参数与机械额定值不是同一概念。调试助手中的默认
+ * PMAX/VMAX/TMAX 是 12.5 rad / 30 rad/s / 10 N·m，CAN 的 16/12/12 位
+ * 字段必须按这组范围编码和解码；否则电调对同一个原始值的物理解释会错。
+ * 机械输出则按本机手册保护：空载最高 200 rpm (=20.943951 rad/s)，峰值
+ * 扭矩 7 N·m。运行指令在发送前采用后两项限幅，映射范围不随之缩小。
  * ============================================================ */
-#define DM_S3519_PEAK_TORQUE_NM          (1.0f)
-#define DM_S3519_MAX_COMMAND_SPEED_RAD_S (30.0f)
+#define DM_J4310_PROTOCOL_PMAX_RAD             (12.5f)
+#define DM_J4310_PROTOCOL_VMAX_RAD_S           (30.0f)
+#define DM_J4310_PROTOCOL_TMAX_NM              (10.0f)
+#define DM_J4310_MAX_COMMAND_SPEED_RAD_S       (20.943951f)
+#define DM_J4310_PEAK_TORQUE_NM                 (7.0f)
 
 /* CanTask 中相邻恢复帧的发送间隔；恢复状态机不阻塞、不调用 osDelay。 */
 #define CAN_MOTOR_INITIAL_FRAME_INTERVAL_MS (3U)
@@ -136,6 +137,9 @@ typedef struct {
   float pmax_rad;
   float vmax_rad_s;
   float tmax_nm;
+  /* Runtime limits are deliberately separate from MIT encoding ranges. */
+  float command_vmax_rad_s;
+  float command_tmax_nm;
   float kp_min;
   float kp_max;
   float kd_min;

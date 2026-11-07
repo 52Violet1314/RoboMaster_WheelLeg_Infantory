@@ -31,7 +31,7 @@ typedef struct {
 #define PITCH_MAX_RATE_RAD_S      (2.5f)
 
 /* 各 PID 的“总输出”和“I 项”独立调节。Nm 类上限还会被 Can_Motor 的
- * DM_S3519 峰值扭矩硬限制再次夹紧；因此这里调小立即生效，调大不会越过电机保护。
+ * DM-J4310 峰值扭矩硬限制再次夹紧；因此这里调小立即生效，调大不会越过电机保护。
  * 键鼠与视觉同走位置双环，故共用 POSITION_* 两组参数。 */
 #define PITCH_MANUAL_OUTPUT_LIMIT_NM         (1.0f)
 #define PITCH_MANUAL_INTEGRAL_LIMIT_NM       (0.4f)

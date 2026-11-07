@@ -343,15 +343,24 @@ void Can_Motor_Init(void)
   s_motor_right.hcan = &hfdcan1;
   s_motor_pitch.hcan = &hfdcan1;
 
-  /* 三台均为 DM-S3519。此处是 CAN 协议编码范围，运行安全限幅在各发送
-   * 函数内使用 DM_S3519_PEAK_TORQUE_NM / MAX_COMMAND_SPEED 宏执行。 */
+  /* 摩擦轮保持原有 DM-S3519 映射与运行上限。 */
   s_motor_left.config = (DM_Motor_PhysicalConfig_t){
       DM_S3519_PROTOCOL_PMAX_RAD,
       DM_S3519_PROTOCOL_VMAX_RAD_S,
       DM_S3519_PROTOCOL_TMAX_NM,
+      DM_S3519_PROTOCOL_VMAX_RAD_S,
+      DM_S3519_PROTOCOL_TMAX_NM,
       0.0f, 500.0f, 0.0f, 5.0f};
   s_motor_right.config = s_motor_left.config;
-  s_motor_pitch.config = s_motor_left.config;
+  /* Pitch 是 DM-J4310-2EC V1.1。MIT 回传与下发都必须使用电调当前的
+   * 默认 PMAX/VMAX/TMAX=12.5/30/10；发送时再以手册机械极限保护。 */
+  s_motor_pitch.config = (DM_Motor_PhysicalConfig_t){
+      DM_J4310_PROTOCOL_PMAX_RAD,
+      DM_J4310_PROTOCOL_VMAX_RAD_S,
+      DM_J4310_PROTOCOL_TMAX_NM,
+      DM_J4310_MAX_COMMAND_SPEED_RAD_S,
+      DM_J4310_PEAK_TORQUE_NM,
+      0.0f, 500.0f, 0.0f, 5.0f};
 
   s_fdcan1_bus_off_pending = 0U;
   memset(&s_isr_rx_snapshot, 0, sizeof(s_isr_rx_snapshot));
@@ -417,7 +426,7 @@ uint8_t DM_Motor_Speed_Control(DM_Motor_t *motor, float velocity_rad_s)
 {
   if (motor == NULL || velocity_rad_s != velocity_rad_s) return 1U;
   velocity_rad_s = clamp_symmetric(velocity_rad_s,
-                                   DM_S3519_MAX_COMMAND_SPEED_RAD_S);
+                                   motor->config.command_vmax_rad_s);
   return dm_send(motor->hcan, control_id(motor, DM_MODE_SPEED),
                  (uint8_t *)&velocity_rad_s, 4U);
 }
@@ -451,8 +460,8 @@ uint8_t DM_Motor_MIT_Control(DM_Motor_t *motor, float kp, float kd,
       kd < motor->config.kd_min || kd > motor->config.kd_max)
     return 1U;
   velocity_rad_s = clamp_symmetric(velocity_rad_s,
-                                   DM_S3519_MAX_COMMAND_SPEED_RAD_S);
-  torque_nm = clamp_symmetric(torque_nm, DM_S3519_PEAK_TORQUE_NM);
+                                   motor->config.command_vmax_rad_s);
+  torque_nm = clamp_symmetric(torque_nm, motor->config.command_tmax_nm);
   if (
       float_to_uint(position_rad, -motor->config.pmax_rad, motor->config.pmax_rad, 16U, &p) ||
       float_to_uint(velocity_rad_s, -motor->config.vmax_rad_s, motor->config.vmax_rad_s, 12U, &v) ||
@@ -730,8 +739,8 @@ uint8_t Can_Motor_PitchMIT(float kp, float kd, float position_rad,
 
 float Can_Motor_PitchTorqueLimit(void)
 {
-  /* 返回运行安全扭矩而非协议 TMAX；PID 因而不会产生超过电机峰值的输出。 */
-  return DM_S3519_PEAK_TORQUE_NM;
+  /* 返回机械峰值而非协议 TMAX；PID 不会产生超过 J4310 峰值的输出。 */
+  return s_motor_pitch.config.command_tmax_nm;
 }
 
 uint8_t Can_Motor_FrictionSpeed(float left_rad_s, float right_rad_s)

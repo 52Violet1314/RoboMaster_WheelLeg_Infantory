@@ -12,18 +12,10 @@
 #include <cstdint>
 
 float Gimbal_Yaw_Vel = 0.0f;
-float Gimbal_Pitch_Vel = 0.0f;
 
 void app_Remote_Task(void *pvParameters) {
-    DM_Motor_Init(&DM_3507, 0x057, DM_MOTOR_MODE_SPEED, &hfdcan2);
-    DM_Motor_Init(&DM_4310, 0x058, DM_MOTOR_MODE_SPEED, &hfdcan2);
-    vTaskDelay(pdMS_TO_TICKS(1));
-    DM_Motor_Init(&DM_3519_Gimbal_Pitch, 0x011, DM_MOTOR_MODE_SPEED, &hfdcan3);
-    vTaskDelay(pdMS_TO_TICKS(1));
-    DM_Motor_Init(&DM_3519_Shoot_L, 0x012, DM_MOTOR_MODE_SPEED, &hfdcan3);
-    vTaskDelay(pdMS_TO_TICKS(1));
-    DM_Motor_Init(&DM_3519_Shoot_R, 0x013, DM_MOTOR_MODE_SPEED, &hfdcan3);
-    uint8_t Ammo_Push_Flag = 0;
+    DM_Motor_Init(&DM_3507, DM_MOTOR_MODEL_3507, 0x057, DM_MOTOR_MODE_SPEED, &hfdcan2);
+    DM_Motor_Init(&DM_4310, DM_MOTOR_MODEL_J4310, 0x058, DM_MOTOR_MODE_SPEED, &hfdcan2);
     TickType_t xLastWakeTime = xTaskGetTickCount();
     Remote_ControlSnapshot_t remote_snapshot = {};
     (void)pvParameters;
@@ -53,14 +45,6 @@ void app_Remote_Task(void *pvParameters) {
                     ? SBUS_Data.Channel[1] : 0;
         const float target_yaw_vel = chassis_yaw_channel / 783.0f * 4.0f;
         const float target_x_vel = chassis_x_channel / 783.0f * 4.0f - target_yaw_vel * 0.240f;
-        if(SBUS_Data.Channel[2] > 10 || SBUS_Data.Channel[2] < -10)
-        {
-            Gimbal_Pitch_Vel = SBUS_Data.Channel[2] / 783.0f * 4.0f;
-        }
-        else
-        {
-            Gimbal_Pitch_Vel = 0.0f;
-        }
         if(SBUS_Data.Channel[3] > 10 || SBUS_Data.Channel[3] < -10)
         {
             Gimbal_Yaw_Vel = SBUS_Data.Channel[3] / 783.0f * -4.71f;
@@ -71,25 +55,12 @@ void app_Remote_Task(void *pvParameters) {
         }
         if(SBUS_Data.Channel[4] > 100)
         {
-            DM_Motor_Speed_Control(&DM_3519_Shoot_L, -18.84f);
-            DM_Motor_Speed_Control(&DM_3519_Shoot_R, 18.84f);
-            if(Ammo_Push_Flag < 10)
-            {
-                Ammo_Push_Flag ++;
-            }
-            else if(Ammo_Push_Flag >= 10)
-            {
-                DM_Motor_Speed_Control(&DM_3507, 3.14f);
-            }
+            DM_Motor_Speed_Control(&DM_3507, 3.14f);
         }
         else
         {
-            DM_Motor_Speed_Control(&DM_3519_Shoot_L, 0.0f);
-            DM_Motor_Speed_Control(&DM_3519_Shoot_R, 0.0f);
             DM_Motor_Speed_Control(&DM_3507, 0.0f); 
-             Ammo_Push_Flag = 0;
         }
-        DM_Motor_Speed_Control(&DM_3519_Gimbal_Pitch, Gimbal_Pitch_Vel);
         DM_Motor_Speed_Control(&DM_4310, Gimbal_Yaw_Vel);
         if (remote_updated && (Remote_ControlQueueHandle != NULL)) {
             remote_snapshot.sbus_data = SBUS_Data;

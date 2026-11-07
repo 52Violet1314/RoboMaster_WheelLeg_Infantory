@@ -115,12 +115,12 @@ void CaculateTask(void *pvParameters) {
     LegControl_Init();
     StepClimb_Init();
     // --- DM 电机初始化（从 Data Task 移入） ---
-    DM_Motor_Init(&DM_8009P1, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_8009P2, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_8009P3, 0x053, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_8009P4, 0x054, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_3519L, 0x055, DM_MOTOR_MODE_MIT, &hfdcan2);
-    DM_Motor_Init(&DM_3519R, 0x056, DM_MOTOR_MODE_MIT, &hfdcan2);
+    DM_Motor_Init(&DM_8009P1, DM_MOTOR_MODEL_8009, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_8009P2, DM_MOTOR_MODEL_8009, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_8009P3, DM_MOTOR_MODEL_8009, 0x053, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_8009P4, DM_MOTOR_MODEL_8009, 0x054, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_3519L, DM_MOTOR_MODEL_3519, 0x055, DM_MOTOR_MODE_MIT, &hfdcan2);
+    DM_Motor_Init(&DM_3519R, DM_MOTOR_MODEL_3519, 0x056, DM_MOTOR_MODE_MIT, &hfdcan2);
     DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0);
     DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
     DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0);

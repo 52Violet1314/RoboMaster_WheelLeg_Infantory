@@ -445,25 +445,25 @@ void fdcan1_rx_callback(void) {
     switch (rec_id) {
       case 0x091: //  8009电机1ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x091, 0x01)) {
-          DM_Motor_8009_Data_Get(&DM_8009P1, buf);
+          DM_Motor_FeedbackDecode(&DM_8009P1, buf);
           dm_motor_feedback_mark_received(0);
         }
         break;
       case 0x092: //  8009电机2ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x092, 0x02)) {
-          DM_Motor_8009_Data_Get(&DM_8009P2, buf);
+          DM_Motor_FeedbackDecode(&DM_8009P2, buf);
           dm_motor_feedback_mark_received(1);
         }
         break;
       case 0x093: //  8009电机3ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x093, 0x03)) {
-          DM_Motor_8009_Data_Get(&DM_8009P3, buf);
+          DM_Motor_FeedbackDecode(&DM_8009P3, buf);
           dm_motor_feedback_mark_received(2);
         }
         break;
       case 0x094: //  8009电机4ID
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x094, 0x04)) {
-          DM_Motor_8009_Data_Get(&DM_8009P4, buf);
+          DM_Motor_FeedbackDecode(&DM_8009P4, buf);
           dm_motor_feedback_mark_received(3);
         }
         break;
@@ -484,13 +484,13 @@ void fdcan2_rx_callback(void) {
     switch (pRxHeader.Identifier) {
       case 0x095:
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x095, 0x05)) {
-          DM_Motor_3519_Data_Get(&DM_3519L, buf);
+          DM_Motor_FeedbackDecode(&DM_3519L, buf);
           dm_motor_feedback_mark_received(4);
         }
         break;
       case 0x096:
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x096, 0x06)) {
-          DM_Motor_3519_Data_Get(&DM_3519R, buf);
+          DM_Motor_FeedbackDecode(&DM_3519R, buf);
           dm_motor_feedback_mark_received(5);
         }
         break;
@@ -510,13 +510,13 @@ void fdcan2_rx_fifo1_callback(void) {
     switch (pRxHeader.Identifier) {
       case 0x097: // 拨弹 DM_3507
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x097, 0x07)) {
-          DM_Motor_3507_Data_Get(&DM_3507, buf);
+          DM_Motor_FeedbackDecode(&DM_3507, buf);
           dm_motor_feedback_mark_received(6);
         }
         break;
       case 0x098: // yaw DM_4310
         if (dm_motor_feedback_valid(&pRxHeader, buf, 0x098, 0x08)) {
-          DM_Motor_4310_Data_Get(&DM_4310, buf);
+          DM_Motor_FeedbackDecode(&DM_4310, buf);
           dm_motor_feedback_mark_received(7);
         }
         break;

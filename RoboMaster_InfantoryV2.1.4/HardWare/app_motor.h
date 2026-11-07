@@ -8,9 +8,9 @@
 /* MIT 映射范围必须与电调 PMAX/VMAX/TMAX 寄存器一致；
  * 铭牌额定/峰值能力不是 MIT 字段量程，不能直接替代。 */
 /* 当前值须由已配置电调的寄存器读回值确认。 */
-#define P_MAX_RAD_4310 3.14f
-#define V_MAX_RAD_S_4310 20.944f
-#define T_MAX_NM_4310 7.0f
+#define P_MAX_RAD_4310 12.5f
+#define V_MAX_RAD_S_4310 30.0f
+#define T_MAX_NM_4310 10.0f
 #define P_MAX_8009 3.14f
 #define V_MAX_RAD_S_8009 16.755f
 #define T_MAX_NM_8009 40.0f
@@ -34,10 +34,19 @@ typedef struct {
   float temp_COIL_C;
 } DM_Motor_Data_t;
 
+/* 协议层只关心型号；实例数量、CAN ID 和挂载的 FDCAN 均属于驱动层。 */
+typedef enum {
+  DM_MOTOR_MODEL_8009 = 0,
+  DM_MOTOR_MODEL_3519,
+  DM_MOTOR_MODEL_3507,
+  DM_MOTOR_MODEL_J4310
+} DM_Motor_Model_t;
+
 typedef struct {
   uint16_t ID;
   uint8_t MODE;
   uint8_t Enable_Flag;
+  DM_Motor_Model_t model;
   FDCAN_HandleTypeDef *hcan;
   DM_Motor_Data_t data;
 } DM_Motor_t;
@@ -50,15 +59,13 @@ extern DM_Motor_t DM_3519L;
 extern DM_Motor_t DM_3519R;
 extern DM_Motor_t DM_3507;
 extern DM_Motor_t DM_4310;
-extern DM_Motor_t DM_3519_Shoot_L;
-extern DM_Motor_t DM_3519_Shoot_R;
-extern DM_Motor_t DM_3519_Gimbal_Pitch;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void DM_Motor_Init(DM_Motor_t *motor, uint16_t id, uint8_t mode,
+void DM_Motor_Init(DM_Motor_t *motor, DM_Motor_Model_t model,
+                   uint16_t id, uint8_t mode,
                    FDCAN_HandleTypeDef *hcan);
 void DM_Motor_Enable(DM_Motor_t *motor);
 void DM_Motor_MIT_Control(DM_Motor_t *motor, float Kp_des, float Kd_des,
@@ -66,10 +73,7 @@ void DM_Motor_MIT_Control(DM_Motor_t *motor, float Kp_des, float Kd_des,
 void DM_Motor_Pos_Speed_Control(DM_Motor_t *motor, float Pos_Des,
                                 float Spd_Des);
 void DM_Motor_Speed_Control(DM_Motor_t *motor, float Spd_Des);
-void DM_Motor_8009_Data_Get(DM_Motor_t *motor, uint8_t *data);
-void DM_Motor_3519_Data_Get(DM_Motor_t *motor, uint8_t *data);
-void DM_Motor_3507_Data_Get(DM_Motor_t *motor, uint8_t *data);
-void DM_Motor_4310_Data_Get(DM_Motor_t *motor, uint8_t *data);
+void DM_Motor_FeedbackDecode(DM_Motor_t *motor, const uint8_t data[8]);
 
 #ifdef __cplusplus
 }
