@@ -22,10 +22,8 @@
 #define T_MAX_NM_3507 7.0f
 
 #define P_MAX_RAD_4310 12.5f
-#define V_MAX_RAD_S_4310 30.0f
-#define T_MAX_NM_4310 10.0f
-#define OUTPUT_V_MAX_RAD_S_4310 20.944f
-#define OUTPUT_T_MAX_NM_4310 7.0f
+#define V_MAX_RAD_S_4310 20.943951f
+#define T_MAX_NM_4310 7.0f
 
 typedef struct {
   uint8_t err;

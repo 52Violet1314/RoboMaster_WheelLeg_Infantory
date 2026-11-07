@@ -28,7 +28,7 @@ static const DM_Motor_Profile_t s_motor_profiles[] = {
   {P_MAX_RAD_3507, V_MAX_RAD_S_3507, T_MAX_NM_3507,
    V_MAX_RAD_S_3507, T_MAX_NM_3507},
   {P_MAX_RAD_4310, V_MAX_RAD_S_4310, T_MAX_NM_4310,
-   OUTPUT_V_MAX_RAD_S_4310, OUTPUT_T_MAX_NM_4310},
+   V_MAX_RAD_S_4310, T_MAX_NM_4310},
 };
 
 static const DM_Motor_Profile_t *dm_motor_profile(const DM_Motor_t *motor) {
