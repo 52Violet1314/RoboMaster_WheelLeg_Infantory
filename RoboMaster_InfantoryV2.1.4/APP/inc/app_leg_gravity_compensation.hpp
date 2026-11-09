@@ -11,7 +11,7 @@
 #define LEG_GRAVITY_TP_LIMIT_NM          2.20f
 /* 安装方向修正。1 为表 x后/y下 转 VMC x前/y下 后的理论补偿方向。 */
 #define LEG_GRAVITY_TP_SIGN              1.0f
-#define LEG_GRAVITY_COMPENSATION_ENABLE  1
+#define LEG_GRAVITY_COMPENSATION_ENABLE  0
 
 typedef struct {
     float leg_length_m;

@@ -119,10 +119,12 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
      * 死区内不产生新的 P/I/D 修正，但不清已有积分维持力。 */
     constexpr float leg_pid_deadband_m = LEG_LENGTH_PID_DEADBAND_M;
     float leg_pid_current_r = pClassicData->Leg_Data.L0_R;
+#if !LEG_CONTROL_TEST_MODE
     float leg_pid_current_l = pClassicData->Leg_Data.L0_L;
     if (fabsf(leg_err_l) <= leg_pid_deadband_m) {
         leg_pid_current_l = leg_target_l;
     }
+#endif
     if (fabsf(leg_err_r) <= leg_pid_deadband_m) {
         leg_pid_current_r = leg_target_r;
     }
@@ -138,8 +140,10 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     constexpr float leg_pid_iout_limit_n = LEG_LENGTH_PID_I_OUTPUT_LIMIT_N;
     const float leg_r_iout_limit_n = leg_pid_enabled ? leg_pid_iout_limit_n : 0.0f;
     const float leg_r_out_limit = leg_pid_enabled ? LEG_LENGTH_PID_OUTPUT_LIMIT_N : 0.0f;
+#if !LEG_CONTROL_TEST_MODE
     const float leg_l_iout_limit_n = leg_pid_enabled ? leg_pid_iout_limit_n : 0.0f;
     const float leg_l_out_limit = leg_pid_enabled ? LEG_LENGTH_PID_OUTPUT_LIMIT_N : 0.0f;
+#endif
     /* PID_Max_Float 由 Ki 是否为正决定是否累加积分；失能时临时置零，调用后恢复参数，避免未使能期间产生任何积分项。 */
     const float leg_l_ki = leg_length_pid_l.Ki;
     const float leg_r_ki = leg_length_pid_r.Ki;

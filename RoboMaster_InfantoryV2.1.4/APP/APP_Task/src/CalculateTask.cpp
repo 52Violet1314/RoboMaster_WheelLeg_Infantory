@@ -440,6 +440,10 @@ void CaculateTask(void *pvParameters) {
 
         /* VMC 后只限髋关节实际扭矩；轮力 Fw 不属于 VMC。 */
         VMC_LimitJointTorques(pClassicData);
+#if LEG_CONTROL_TEST_MODE
+        pClassicData->Contronller_Data.T1_L = 0.0f;
+        pClassicData->Contronller_Data.T2_L = 0.0f;
+#endif
 
         /* 离地检测使用本轮最终 F0 与真正送入 VMC 的 Tp。
          * GroundDetection_Update 内部只剔除弹簧内部抵消项，并完成滤波、
@@ -476,8 +480,8 @@ void CaculateTask(void *pvParameters) {
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
                 /* 调试打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
-                LEG_Data_Print(pClassicData);             // 腿长、腿长速度、腿角、腿角速度
-                LegLengthPID_Data_Print(pClassicData);    // 旋钮目标腿长、实际腿长、误差、F0
+                // LEG_Data_Print(pClassicData);
+                LegLengthPID_Data_Print(pClassicData);
                 // IMU_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
@@ -716,31 +720,25 @@ void IMU_Data_Print(Classic_Data_t *pClassicData) {
 }
 
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV，单位依次为 m,m,m,m,m,N,N：
-     * VrB 映射目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
+    /* FireWater 纯 CSV：目标L0、左L0、右L0、左F0、右F0；单位 m,m,m,N,N。 */
     const float target = pClassicData->Target_Data.Target_LegLong;
-    const float values[7] = {
+    const float values[5] = {
         target,
         pClassicData->Leg_Data.L0_L,
         pClassicData->Leg_Data.L0_R,
-        target - pClassicData->Leg_Data.L0_L,
-        target - pClassicData->Leg_Data.L0_R,
         pClassicData->Contronller_Data.F0_L,
         pClassicData->Contronller_Data.F0_R,
     };
-    int milli[7];
-    for (uint32_t index = 0; index < 7U; ++index)
+    int milli[5];
+    for (uint32_t index = 0; index < 5U; ++index)
         milli[index] = (int)lroundf(values[index] * 1000.0f);
 
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-               "%c%d.%03d,%c%d.%03d\r\n",
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
                milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
                milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
                milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
                milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
-               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
-                milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
-                milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000);
 }
 
 void State_Data_Print(Classic_Data_t *pClassicData) {

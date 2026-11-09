@@ -5,7 +5,7 @@
 #include <cstdint>
 
 #define LEG_CONTROL_TEST_MODE                       1
-#define LEG_CONTROL_TEST_ENABLE_SPRING_COMPENSATION 1
+#define LEG_CONTROL_TEST_ENABLE_SPRING_COMPENSATION 0
 
 /* 腿长控制标定参数，单位统一为 m、N、s。
  * 仅供 LegControl_Update() 使用：PID 算法本体不保存任何腿的专用限幅。
