@@ -12,18 +12,26 @@
 #define P_MAX_RAD_8009 3.14f
 #define V_MAX_RAD_S_8009 16.755f
 #define T_MAX_NM_8009 40.0f
+#define OUTPUT_V_MAX_RAD_S_8009 10.471976f
+#define OUTPUT_T_MAX_NM_8009 20.0f
 
 #define P_MAX_RAD_3519 12.5f
 #define V_MAX_RAD_S_3519 45.553f
 #define T_MAX_NM_3519 7.8f
+#define OUTPUT_V_MAX_RAD_S_3519 41.364305f
+#define OUTPUT_T_MAX_NM_3519 3.5f
 
-#define P_MAX_RAD_3507 12.566f
+#define P_MAX_RAD_3507 12.5f
 #define V_MAX_RAD_S_3507 20.944f
 #define T_MAX_NM_3507 7.0f
+#define OUTPUT_V_MAX_RAD_S_3507 12.566371f
+#define OUTPUT_T_MAX_NM_3507 3.0f
 
 #define P_MAX_RAD_4310 12.5f
 #define V_MAX_RAD_S_4310 20.943951f
 #define T_MAX_NM_4310 7.0f
+#define OUTPUT_V_MAX_RAD_S_4310 12.566371f
+#define OUTPUT_T_MAX_NM_4310 3.0f
 
 typedef struct {
   uint8_t err;

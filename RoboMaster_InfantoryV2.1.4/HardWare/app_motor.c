@@ -22,13 +22,13 @@ typedef struct {
 
 static const DM_Motor_Profile_t s_motor_profiles[] = {
   {P_MAX_RAD_8009, V_MAX_RAD_S_8009, T_MAX_NM_8009,
-   V_MAX_RAD_S_8009, T_MAX_NM_8009},
+   OUTPUT_V_MAX_RAD_S_8009, OUTPUT_T_MAX_NM_8009},
   {P_MAX_RAD_3519, V_MAX_RAD_S_3519, T_MAX_NM_3519,
-   V_MAX_RAD_S_3519, T_MAX_NM_3519},
+   OUTPUT_V_MAX_RAD_S_3519, OUTPUT_T_MAX_NM_3519},
   {P_MAX_RAD_3507, V_MAX_RAD_S_3507, T_MAX_NM_3507,
-   V_MAX_RAD_S_3507, T_MAX_NM_3507},
+   OUTPUT_V_MAX_RAD_S_3507, OUTPUT_T_MAX_NM_3507},
   {P_MAX_RAD_4310, V_MAX_RAD_S_4310, T_MAX_NM_4310,
-   V_MAX_RAD_S_4310, T_MAX_NM_4310},
+   OUTPUT_V_MAX_RAD_S_4310, OUTPUT_T_MAX_NM_4310},
 };
 
 static const DM_Motor_Profile_t *dm_motor_profile(const DM_Motor_t *motor) {
