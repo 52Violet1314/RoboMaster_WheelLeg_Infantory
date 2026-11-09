@@ -13,8 +13,12 @@ static Float_PID_Typedef leg_swing_pid_r;
 static float last_leg_target = 0.0f;
 
 void LegControl_Init(void) {
+#if LEG_CONTROL_TEST_MODE
+    Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
+#else
     Float_PID_Init(&leg_length_pid_l, LEG_LENGTH_PID_KP,
                    LEG_LENGTH_PID_KI, LEG_LENGTH_PID_KD);
+#endif
     Float_PID_Init(&leg_length_pid_r, LEG_LENGTH_PID_KP,
                    LEG_LENGTH_PID_KI, LEG_LENGTH_PID_KD);
     Float_PID_Init(&leg_swing_pid_l, LEG_SWING_PID_KP, LEG_SWING_PID_KI, LEG_SWING_PID_KD);
@@ -26,11 +30,19 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
                        int16_t leg_knob_channel, bool override_leg_target,
                        float override_leg_target_m, bool swing_pid_enable,
                        float swing_target_rad) {
-    /* 气弹簧预压补偿全程按本轮左右实际 L0 分别计算，不依赖起身状态。 */
-    const float spring_preload_f0_l =
-            LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
-    const float spring_preload_f0_r =
+    float spring_preload_f0_l = 0.0f;
+    float spring_preload_f0_r = 0.0f;
+#if LEG_CONTROL_TEST_MODE
+#if LEG_CONTROL_TEST_ENABLE_SPRING_COMPENSATION
+    spring_preload_f0_r =
             LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
+#endif
+#else
+    spring_preload_f0_l =
+            LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_L);
+    spring_preload_f0_r =
+            LegForceCompensation_GetFittedF0(pClassicData->Leg_Data.L0_R);
+#endif
 
     /* 腿长旋钮控制：VrB=云台 CH6=底盘 Channel[5]。
      * SBUS 解包后的 Channel[5] 是 raw-1024；此处恢复原始 0~2047 值。
@@ -72,7 +84,7 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     float leg_knob_target_m = leg_knob_full_target_m;
     /* 起身前可用 140~380 mm；起身后将多余两端裁为 150/350 mm 死区。
      * 二者均基于同一条旋钮标尺，不会因起身切换重映射中段目标。 */
-    if (stand_up) {
+    if (stand_up && !LEG_CONTROL_TEST_MODE) {
         /* 起身可用行程之外的旋钮位置直接视为端点死区。 */
         if (leg_knob_target_m < leg_knob_stand_min_m) {
             leg_knob_target_m = leg_knob_stand_min_m;
@@ -85,7 +97,7 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
 
     /* 仅已起身时计算左右反向的 roll F0 补偿。 */
     float roll_comp = 0.0f;
-    if (stand_up) {
+    if (stand_up && !LEG_CONTROL_TEST_MODE) {
         constexpr float roll_kp = 40.0f;
         constexpr float roll_kd = 2.5f;
         constexpr float roll_f0_limit = 8.0f;
@@ -138,24 +150,30 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
         leg_length_pid_r.Ki = 0.0f;
     }
     float leg_l_out = 0.0f;
+#if LEG_CONTROL_TEST_MODE
+    leg_length_pid_l.Err_Int = 0.0f;
+    leg_length_pid_l.Last_Error = 0.0f;
+    leg_length_pid_l.Last_Dout = 0.0f;
+#else
     leg_l_out = PID_Max_Float_Dt(&leg_length_pid_l, leg_target_l,
                                  leg_pid_current_l,
                                  leg_l_iout_limit_n, leg_l_out_limit, dt);
+#endif
     float leg_r_out = PID_Max_Float_Dt(&leg_length_pid_r, leg_target_r,
                                        leg_pid_current_r,
                                        leg_r_iout_limit_n, leg_r_out_limit, dt);
     leg_length_pid_l.Ki = leg_l_ki;
     leg_length_pid_r.Ki = leg_r_ki;
     /* 仅已起身时保留原有 +10 N F0 预输出；未起身不再叠加写死的预输出。 */
-    const float stand_offset_l = stand_up ? 10.0f : 0.0f;
-    const float stand_offset_r = stand_up ? 10.0f : 0.0f;
+    const float stand_offset_l = (stand_up && !LEG_CONTROL_TEST_MODE) ? 10.0f : 0.0f;
+    const float stand_offset_r = (stand_up && !LEG_CONTROL_TEST_MODE) ? 10.0f : 0.0f;
     pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
             + stand_offset_l
             + roll_comp;
     pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r
             + stand_offset_r
             - roll_comp;
-    if (swing_pid_enable && leg_pid_enabled) {
+    if (!LEG_CONTROL_TEST_MODE && swing_pid_enable && leg_pid_enabled) {
         const float tp_l = PID_Max_Float_Dt(&leg_swing_pid_l, swing_target_rad,
                 pClassicData->States_Data.theta_L, LEG_SWING_PID_OUTPUT_LIMIT_NM,
                 LEG_SWING_PID_OUTPUT_LIMIT_NM, dt);

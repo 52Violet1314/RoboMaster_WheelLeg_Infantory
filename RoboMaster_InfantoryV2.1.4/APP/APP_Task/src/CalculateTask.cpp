@@ -346,7 +346,11 @@ void CaculateTask(void *pvParameters) {
             stand_state = StandState_NotUp;
             stand_not_up_time = 0.0f;
         }
+#if LEG_CONTROL_TEST_MODE
+        StandUp_Flag = true;
+#else
         StandUp_Flag = (stand_state == StandState_Up);
+#endif
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
@@ -359,7 +363,8 @@ void CaculateTask(void *pvParameters) {
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
-        const bool lqr_enabled = lqr_switch_enabled && step_command.allow_lqr;
+        const bool lqr_enabled = !LEG_CONTROL_TEST_MODE &&
+                lqr_switch_enabled && step_command.allow_lqr;
         const bool leg_pid_enabled = total_enable;
         /* LQR 起身后以当前位姿作为位置/yaw 工作点。 */
         const bool pos_ref_ready = leg_pid_enabled && lqr_enabled && StandUp_Flag;
@@ -392,6 +397,12 @@ void CaculateTask(void *pvParameters) {
         float gravity_tp_l = 0.0f;
         float gravity_tp_r = 0.0f;
 #if LEG_GRAVITY_COMPENSATION_ENABLE
+#if LEG_CONTROL_TEST_MODE
+        if (leg_pid_enabled) {
+            gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
+                                            pClassicData->States_Data.theta_R);
+        }
+#else
         if (leg_pid_enabled && (StandUp_Flag || step_command.allow_gravity_before_stand)) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
@@ -399,13 +410,23 @@ void CaculateTask(void *pvParameters) {
                                             pClassicData->States_Data.theta_R);
         }
 #endif
+#endif
 
+#if LEG_CONTROL_TEST_MODE
+        const bool override_leg_target = false;
+        const float override_leg_target_m = 0.0f;
+        const bool swing_pid_enable = false;
+        const float swing_target_rad = 0.0f;
+#else
+        const bool override_leg_target = step_command.override_leg_length;
+        const float override_leg_target_m = step_command.leg_length_target_m;
+        const bool swing_pid_enable = step_command.swing_pid_enable;
+        const float swing_target_rad = step_command.swing_target_rad;
+#endif
         LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
                           remote_snapshot.sbus_data.Channel[5],
-                          step_command.override_leg_length,
-                          step_command.leg_length_target_m,
-                          step_command.swing_pid_enable,
-                          step_command.swing_target_rad);
+                          override_leg_target, override_leg_target_m,
+                          swing_pid_enable, swing_target_rad);
        
         /* F0 已在 LegControl 内限幅；Tp 是 VMC 的虚拟输入，在 VMC 模块限幅。 */
         VMC_LimitVirtualPitchTorque(pClassicData);
