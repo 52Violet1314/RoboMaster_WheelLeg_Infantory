@@ -2,7 +2,7 @@
 #define __APP_LEG_GRAVITY_COMPENSATION_HPP__
 
 /* 腿重力补偿常量：质心表以髋关节为原点，X 向后、Y 向下。 */
-#define LEG_GRAVITY_MASS_KG              1.000f
+#define LEG_GRAVITY_MASS_KG              1.770f
 #define LEG_GRAVITY_ACCELERATION_M_S2    9.81f
 #define LEG_GRAVITY_TABLE_COUNT          41U
 #define LEG_GRAVITY_MIN_LENGTH_M         0.150f
@@ -11,7 +11,7 @@
 #define LEG_GRAVITY_TP_LIMIT_NM          2.20f
 /* 安装方向修正。1 为表 x后/y下 转 VMC x前/y下 后的理论补偿方向。 */
 #define LEG_GRAVITY_TP_SIGN              1.0f
-#define LEG_GRAVITY_COMPENSATION_ENABLE  0
+#define LEG_GRAVITY_COMPENSATION_ENABLE  1
 
 typedef struct {
     float leg_length_m;
