@@ -4,7 +4,7 @@
 #include "app_Data_Task.hpp"
 #include <cstdint>
 
-#define LEG_CONTROL_TEST_MODE                       0
+#define LEG_CONTROL_TEST_MODE                       1
 #define LEG_CONTROL_TEST_ENABLE_SPRING_COMPENSATION 1
 
 /* 腿长控制标定参数，单位统一为 m、N、s。
