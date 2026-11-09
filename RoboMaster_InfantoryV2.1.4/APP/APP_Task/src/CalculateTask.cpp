@@ -31,7 +31,6 @@
 #include "app_K_value.hpp"
 #include "app_vmc.hpp"
 #include "app_leg_control.hpp"
-#include "app_step_climb_demo.hpp"
 
 // 定义参考值（根据实际需求调整）
 float theta_ref = 0.0f; // 期望整体角度
@@ -113,7 +112,6 @@ void CaculateTask(void *pvParameters) {
     float stand_not_up_time = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     LegControl_Init();
-    StepClimb_Init();
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, DM_MOTOR_MODEL_8009, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P2, DM_MOTOR_MODEL_8009, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -335,17 +333,6 @@ void CaculateTask(void *pvParameters) {
         }
         const bool total_enable = (remote_snapshot.sbus_data.Channel[9] >= 100);
         const bool lqr_switch_enabled = (remote_snapshot.sbus_data.Channel[7] > 100);
-        const bool step_switch_enabled =
-                (remote_snapshot.sbus_data.Channel[6] > STEP_CLIMB_SWITCH_THRESHOLD);
-        StepClimbCommand_t step_command = StepClimb_Update(
-                cal_dt, step_switch_enabled, total_enable, lqr_switch_enabled,
-                stand_state == StandState_Up, pClassicData->Leg_Data.L0_L,
-                pClassicData->Leg_Data.L0_R, pClassicData->States_Data.theta_L,
-                pClassicData->States_Data.theta_R);
-        if (step_command.force_not_up) {
-            stand_state = StandState_NotUp;
-            stand_not_up_time = 0.0f;
-        }
 #if LEG_CONTROL_TEST_MODE
         StandUp_Flag = true;
 #else
@@ -363,8 +350,7 @@ void CaculateTask(void *pvParameters) {
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
-        const bool lqr_enabled = !LEG_CONTROL_TEST_MODE &&
-                lqr_switch_enabled && step_command.allow_lqr;
+        const bool lqr_enabled = !LEG_CONTROL_TEST_MODE && lqr_switch_enabled;
         const bool leg_pid_enabled = total_enable;
         /* LQR 起身后以当前位姿作为位置/yaw 工作点。 */
         const bool pos_ref_ready = leg_pid_enabled && lqr_enabled && StandUp_Flag;
@@ -403,7 +389,7 @@ void CaculateTask(void *pvParameters) {
                                             pClassicData->States_Data.theta_R);
         }
 #else
-        if (leg_pid_enabled && (StandUp_Flag || step_command.allow_gravity_before_stand)) {
+        if (leg_pid_enabled && StandUp_Flag) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
@@ -418,10 +404,10 @@ void CaculateTask(void *pvParameters) {
         const bool swing_pid_enable = false;
         const float swing_target_rad = 0.0f;
 #else
-        const bool override_leg_target = step_command.override_leg_length;
-        const float override_leg_target_m = step_command.leg_length_target_m;
-        const bool swing_pid_enable = step_command.swing_pid_enable;
-        const float swing_target_rad = step_command.swing_target_rad;
+        const bool override_leg_target = false;
+        const float override_leg_target_m = 0.0f;
+        const bool swing_pid_enable = false;
+        const float swing_target_rad = 0.0f;
 #endif
         LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
                           remote_snapshot.sbus_data.Channel[5],
