@@ -19,6 +19,12 @@ force_measured_n = [ ...
    -37; -37; -37; -37; -37; -36; -36; -36; -35; -35; ...
    -35; -35; -35; -35;   2];
 
+% 长腿端微调：280 mm 前不变，280~380 mm 平滑增加最多 3 N 的负向补偿。
+% 使用三次 smoothstep，起止处斜率为零，不在 280 mm 产生折角。
+long_tail_t = min(max((length_mm - 280) / 100, 0), 1);
+long_tail_trim_n = -3 * (3 * long_tail_t.^2 - 2 * long_tail_t.^3);
+force_fit_target_n = force_measured_n + long_tail_trim_n;
+
 % 测试固件使用受 140 mm 实测值约束的连续多项式。
 % 若需微调，先改上方实测数组再运行。
 fit_degree = 4;
@@ -38,15 +44,25 @@ end
 constraint_row = z(1) .^ (fit_degree:-1:0);
 kkt_matrix = [2 * A' * diag(weights .^ 2) * A, constraint_row'; ...
               constraint_row,                              0];
-kkt_rhs = [2 * A' * diag(weights .^ 2) * force_measured_n; -28];
+kkt_rhs = [2 * A' * diag(weights .^ 2) * force_fit_target_n; -28];
 kkt_solution = kkt_matrix \ kkt_rhs;
 poly_coeff = kkt_solution(1:end-1).';
 force_fit_n = polyval(poly_coeff, z);
+
+% 第二段只修长腿端：300 mm 前保持当前拟合不变，300~380 mm 再逐渐
+% 增加最多 2.5 N 的负向补偿。五次 smootherstep 在两端一、二阶导数均为零。
+long_tail_extra_t = min(max((length_mm - 300) / 80, 0), 1);
+long_tail_extra_n = -2.5 * (6 * long_tail_extra_t.^5 - ...
+    15 * long_tail_extra_t.^4 + 10 * long_tail_extra_t.^3);
+force_final_n = force_fit_n + long_tail_extra_n;
 
 length_plot_mm = (130:1:410).';
 clamped_plot_mm = min(max(length_plot_mm, 140), 380);
 z_plot = (clamped_plot_mm - length_center_mm) / length_half_span_mm;
 force_plot_n = polyval(poly_coeff, z_plot);
+long_tail_extra_t_plot = min(max((length_plot_mm - 300) / 80, 0), 1);
+force_plot_n = force_plot_n - 2.5 * (6 * long_tail_extra_t_plot.^5 - ...
+    15 * long_tail_extra_t_plot.^4 + 10 * long_tail_extra_t_plot.^3);
 low_transition = length_plot_mm > 130 & length_plot_mm < 140;
 t = (length_plot_mm(low_transition) - 130) / 10;
 slope_at_140_n_per_m = polyval(polyder(poly_coeff), z(1)) / (length_half_span_mm / 1000);
@@ -54,13 +70,13 @@ force_plot_n(low_transition) = -28 * (-2 * t.^3 + 3 * t.^2) + ...
     (0.010 * slope_at_140_n_per_m) .* (t.^3 - t.^2);
 force_plot_n(length_plot_mm <= 130) = 0;
 
-result_table = table(length_mm, force_measured_n, force_fit_n, ...
-    'VariableNames', {'Length_mm', 'Measured_N', 'Fitted_N'});
+result_table = table(length_mm, force_measured_n, force_fit_target_n, force_final_n, ...
+    'VariableNames', {'Length_mm', 'Measured_N', 'FitTarget_N', 'Fitted_N'});
 disp(result_table);
 
 fprintf('\n可复制到 C++ 的拟合表：\n');
 for k = 1:n
-    fprintf('{%.3ff, %.2ff}', length_mm(k) / 1000, force_fit_n(k));
+    fprintf('{%.3ff, %.2ff}', length_mm(k) / 1000, force_final_n(k));
     if k < n
         fprintf(', ');
     end
@@ -68,7 +84,7 @@ for k = 1:n
         fprintf('\n');
     end
 end
-fprintf('低端：L0 <= 0.130 m 输出 0 N；130~140 mm 平滑过渡到实测 -28 N；高端：L0 > 0.380 m 保持 %.3f N。\n', force_fit_n(end));
+fprintf('低端：L0 <= 0.130 m 输出 0 N；130~140 mm 平滑过渡到实测 -28 N；高端：L0 > 0.380 m 保持 %.3f N。\n', force_final_n(end));
 fprintf('\n固件函数系数（z=(L0_mm-260)/120，按降幂）：\n');
 fprintf('%.9gf ', poly_coeff);
 fprintf('\n');
