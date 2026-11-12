@@ -2,8 +2,9 @@
 
 The balance model intentionally uses a rigid virtual leg plus a prismatic
 length axis.  This module maps that virtual wheel position back to the source
-USD linkage angles, so the original meshes can articulate without putting the
-closed-chain constraint forces back into the controller dynamics.
+USD linkage angles. Main link meshes also supply convex environment contacts;
+their contact forces act on the reduced leg bodies, without a separate dynamic
+closed-chain constraint system.
 """
 from __future__ import annotations
 
@@ -36,11 +37,12 @@ SLIDE_AXIS_XZ = REST_WHEEL_XZ / np.linalg.norm(REST_WHEEL_XZ)
 
 # [front1, front2, front3, front4, rear1, rear2, spring1, spring_slide]
 # The source export's passive-joint stops only cover roughly 120..325 mm.
-# The normal virtual-leg envelope is 90..350 mm, so the visual-only solver
-# allows the small additional travel.  The reduced model also permits
-# experimental 450 mm virtual-leg commands; the source six-bar has no closed
-# solution there, so LinkageVisuals deliberately clamps the mesh at this
-# 350 mm endpoint while dynamics continue to the commanded length.
+# The virtual-leg envelope is 90..350 mm (the GUI's top preset), so the
+# visual-only solver allows the additional travel, but the six-bar itself runs
+# into its own stop at ~361 mm: past that the wheel target cannot be reached and
+# the loop residual grows with the overshoot.  The 350 mm preset is therefore
+# inside the table and displayed exactly; longer virtual-leg commands clamp the
+# *mesh* only, while dynamics, collision and control use the commanded length.
 LOWER = np.array([-2.5, -1.3, -0.1, -2.0, -2.5, -0.30, -0.5, -0.015])
 UPPER = np.array([+2.5, +0.3, +1.0, +0.3, +2.5, +1.20, +0.1, +0.065])
 
@@ -199,7 +201,7 @@ def _matrix_quat(matrix):
 
 
 class LinkageVisuals:
-    """Animate source-link meshes while leaving reduced dynamics untouched."""
+    """Pose source-link meshes, including enabled per-link environment contacts."""
 
     LINKS = ("front1", "front2", "front3", "front4", "rear1", "rear2",
              "rear2_guide", "spring1", "spring2")

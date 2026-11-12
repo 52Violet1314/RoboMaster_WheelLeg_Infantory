@@ -174,9 +174,12 @@ for n in base_links + sum(leg_links.values(), []) + list(wheel_links.values()):
 
 # ------------------------------------------------------------------ write MJCF
 BASE_Z = float(WHEEL_R - LEG_VEC["left"][2])
+# Height of the competition-field deck above the ground plane (see
+# tools/convert_arena_stl.py / tools/arena_collision.py and sim_lqr.FIELD_HEIGHT).
+FIELD_Z = 0.0
 lines = []
 lines.append('<mujoco model="wheelbipe_lqr">')
-lines.append(f'  <compiler angle="radian" meshdir="{MESH_DIR}" autolimits="true"/>')
+lines.append(f'  <compiler angle="radian" meshdir="{MESH_DIR}" texturedir="{MESH_DIR}" autolimits="true"/>')
 lines.append('  <option timestep="0.001" solver="Newton" iterations="80"'
              ' cone="elliptic" jacobian="dense" integrator="implicitfast"/>')
 lines.append('  <default>')
@@ -186,10 +189,13 @@ lines.append('  </default>')
 lines.append('  <worldbody>')
 lines.append('    <geom name="floor" type="plane" size="8 8 0.1"'
              ' friction="1.5 0.002 0.0001" condim="3" conaffinity="3"'
-             ' material="floor_mat"/>')
-lines.append('    <geom name="step" type="box" size="1 0.5 0.1" pos="1.8 0 0.1"'
-             ' friction="1.5 0.002 0.0001" condim="3" conaffinity="3"'
-             ' material="step_mat"/>')
+             ' rgba="0 0 0 0" group="3"/>')
+# Audited RMUL 2027 STEP tessellation with official top texture and CAD colours.
+# Visual meshes have no collision; the generated boxes provide concave contact.
+for name in ('paper', 'white', 'red', 'blue', 'green', 'dark', 'light'):
+    lines.append(f'    <geom name="arena_{name}" type="mesh" mesh="arena_{name}"'
+                 f' material="arena_{name}_mat" contype="0" conaffinity="0"/>')
+lines.append('    <include file="arena_collision.xml"/>')
 lines.append('    <light pos="0 0 4" dir="0 0 -1" castshadow="false"/>')
 
 # ---- body
@@ -211,18 +217,19 @@ lines.append('      <geom name="base_collision" type="box"'
              ' condim="3" rgba="0.2 0.8 0.25 0.10" group="3"/>')
 for n in base_links:
     pos, quat = visual_pose_in_frame(n, "base_link")
-    lines.append(f'      <geom type="mesh" mesh="{n}_mesh" contype="0"'
+    collision_type = 2 if any(part in n for part in ("front", "rear", "bottom")) else 0
+    lines.append(f'      <geom type="mesh" mesh="{n}_mesh" contype="{collision_type}"'
                  f' conaffinity="0" pos="{fmt(pos)}" quat="{fmt(quat)}"'
                  f' rgba="{geom_rgba(n)}"/>')
 
 for side, sy in (("left", 1), ("right", -1)):
     h = hip[side]
     lines.append(f'      <body name="{side}_leg" pos="{fmt(h)}">')
-    # hip limits: the USD declares the hip joints as unlimited, but a real
-    # wheel-legged robot cannot splay its legs arbitrarily.  +/- 35 deg keeps
-    # the leg inside the geometry the LQR was linearised about.
+    # Continuous hip rotation is required for the overhead self-right sweep.
+    # Normal balance remains bounded by its controller; recovery limits speed.
     lines.append(f'        <joint name="{side}_hip_joint" type="hinge"'
-                 ' axis="0 1 0" range="-0.61 0.61" armature="0.002" damping="0.05"/>')
+                 ' axis="0 1 0" limited="false" armature="0.002"'
+                 ' damping="0.05" frictionloss="0.5"/>')
     lg = leg_lump[side]
     lines.append(f'        <inertial pos="{fmt(lg["com"])}" mass="{lg["mass"]:.6g}"'
                  f' diaginertia="{fmt(lg["diag"])}"'
@@ -231,9 +238,10 @@ for side, sy in (("left", 1), ("right", -1)):
         if n not in mesh_names:
             continue
         pos, quat = visual_pose_in_frame(n, f"{side}_rear1_link")
+        collision_type = 2 if any(part in n for part in ("front", "rear", "bottom")) else 0
         lines.append(f'        <geom type="mesh" mesh="{n}_mesh"'
                      f' pos="{fmt(pos)}" quat="{fmt(quat)}"'
-                     f' contype="0" conaffinity="0" rgba="{geom_rgba(n)}"/>')
+                     f' contype="{collision_type}" conaffinity="0" rgba="{geom_rgba(n)}"/>')
     # leg length axis.  The wheel sits ~48 mm outboard of the hip, so the raw
     # hip->wheel direction is tilted ~21 deg sideways.  Sliding along it would
     # give every leg force a lateral component, i.e. a constant disturbance that
@@ -290,10 +298,18 @@ lines.append('    <texture name="floor_grid" type="2d" builtin="checker"'
              ' rgb1="0.22 0.25 0.30" rgb2="0.30 0.34 0.40" width="512" height="512"/>')
 lines.append('    <material name="floor_mat" texture="floor_grid" texrepeat="8 8"'
              ' texuniform="true" reflectance="0.08"/>')
-lines.append('    <material name="step_mat" rgba="0.40 0.43 0.49 1"'
-             ' specular="0.12" shininess="0.18" reflectance="0.04"/>')
+lines.append('    <texture name="arena_top_tex" type="2d" file="arena_official_top.png"/>')
+lines.append('    <material name="arena_paper_mat" texture="arena_top_tex" rgba="1 1 1 1"/>')
+for name, rgb in {
+    'white': '1 1 1', 'red': '1 0 0', 'blue': '0 0.00784314 1',
+    'green': '0 1 0', 'dark': '0.2 0.2 0.2',
+    'light': '0.8784 0.949 1',
+}.items():
+    lines.append(f'    <material name="arena_{name}_mat" rgba="{rgb} 1"/>')
 for n in mesh_names:
     lines.append(f'    <mesh name="{n}_mesh" file="{n}.stl"/>')
+for name in ('paper', 'white', 'red', 'blue', 'green', 'dark', 'light'):
+    lines.append(f'    <mesh name="arena_{name}" file="arena_{name}.obj" inertia="shell"/>')
 lines.append('  </asset>')
 
 lines.append('  <actuator>')

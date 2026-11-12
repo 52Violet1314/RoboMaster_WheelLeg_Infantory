@@ -48,6 +48,21 @@ typedef enum
     StandState_NotUp,
 } StandState_t;
 
+/* 自救（倒地翻正）状态机。仅在总使能打开、且起身状态机判定未起身时启动；
+ * 启动后由本状态机接管 F0/Tp 输出，正常站立与行驶路径不受影响。 */
+enum class RescuePhase { Idle, Body, Lift, Sweep, Stand, Fault };
+
+static float RescueStep(float value, float target, float rate, float dt) {
+    const float step = rate * dt;
+    if (target > value + step) return value + step;
+    if (target < value - step) return value - step;
+    return target;
+}
+
+static float RescueClamp(float value, float limit) {
+    return fmaxf(-limit, fminf(limit, value));
+}
+
 #define a 0.2f // 一阶低通滤波
 
 float angle_to_rad(float degrees);
@@ -110,6 +125,13 @@ void CaculateTask(void *pvParameters) {
     /* 上电先等待腿角给出一次已起身判定，避免起身过程提前记录位置零点。 */
     StandState_t stand_state = StandState_NotUp;
     float stand_not_up_time = 0.0f;
+    /* 自救状态机的持久状态：相位、相位计时、按腿的 phi 目标与平滑输出。 */
+    RescuePhase rescue_phase = RescuePhase::Idle;
+    bool rescue_hold_short = false;
+    float rescue_phase_time = 0.0f;
+    float rescue_phi_l = 0.0f, rescue_phi_r = 0.0f;
+    float rescue_f_l = 0.0f, rescue_f_r = 0.0f;
+    float rescue_tp_l = 0.0f, rescue_tp_r = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     LegControl_Init();
     // --- DM 电机初始化（从 Data Task 移入） ---
@@ -339,6 +361,55 @@ void CaculateTask(void *pvParameters) {
         StandUp_Flag = (stand_state == StandState_Up);
 #endif
 
+        // ====== 自救状态机：判定与相位推进 ======
+        /* 只有在总使能打开时才让状态机启动；失能立即回到 Idle 并清状态，
+         * 避免重新使能时复现上一次的残留命令。 */
+        const bool rescue_armed = (remote_snapshot.sbus_data.Channel[9] >= 100);
+        const float rescue_pitch = pClassicData->IMU_Data.pitch;
+        const float rescue_theta_l = pClassicData->States_Data.theta_L;
+        const float rescue_theta_r = pClassicData->States_Data.theta_R;
+        const bool rescue_valid = isfinite(rescue_pitch) && isfinite(rescue_theta_l) &&
+                                  isfinite(rescue_theta_r) &&
+                                  isfinite(pClassicData->IMU_Data.delta_pitch) &&
+                                  isfinite(pClassicData->Leg_Data.phi_0_L) &&
+                                  isfinite(pClassicData->Leg_Data.phi_0_R) &&
+                                  isfinite(pClassicData->Leg_Data.L0_L) &&
+                                  isfinite(pClassicData->Leg_Data.L0_R);
+        if (!rescue_armed) {
+            rescue_phase = RescuePhase::Idle;
+            rescue_hold_short = false;
+            rescue_phase_time = 0.0f;
+            rescue_f_l = rescue_f_r = rescue_tp_l = rescue_tp_r = 0.0f;
+        } else if (!rescue_valid) {
+            rescue_phase = RescuePhase::Fault;
+        } else if (rescue_phase == RescuePhase::Idle &&
+                   (fabsf(rescue_pitch) > 1.5707963f || stand_state == StandState_NotUp)) {
+            /* 车身已经翻倒先压地放平，否则直接把腿折回下方。 */
+            rescue_hold_short = false;
+            rescue_phase = fabsf(rescue_pitch) > 1.5707963f ? RescuePhase::Body
+                                                            : RescuePhase::Lift;
+            rescue_phase_time = 0.0f;
+            rescue_phi_l = pClassicData->Leg_Data.phi_0_L;
+            rescue_phi_r = pClassicData->Leg_Data.phi_0_R;
+            rescue_f_l = rescue_f_r = rescue_tp_l = rescue_tp_r = 0.0f;
+        }
+
+        if (rescue_phase != RescuePhase::Idle && rescue_phase != RescuePhase::Fault) {
+            rescue_phase_time += cal_dt;
+            if (fabsf(rescue_pitch) > 1.5707963f && rescue_phase != RescuePhase::Body) {
+                /* 中途又被翻倒：立即回到压地相位重新开始。 */
+                rescue_phase = RescuePhase::Body;
+                rescue_phase_time = 0.0f;
+            }
+            if (rescue_phase_time > 5.0f) rescue_phase = RescuePhase::Fault;
+        }
+
+        /* 自救期间交出站立标志：LQR 位置零点、重力补偿、roll 差分和
+         * 腿长旋钮的起身限幅都不参与，避免与接管输出互相拉扯。 */
+        if (rescue_phase != RescuePhase::Idle) {
+            StandUp_Flag = false;
+        }
+
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
         pClassicData->Contronller_Data.Fw_L = 0.0f;
@@ -363,8 +434,8 @@ void CaculateTask(void *pvParameters) {
             lqr_pos_ref_recorded = false;
         }
 
-        /* LQR 仅由 Channel[7] 控制，并用左右实际腿长均值查表。 */
-        if (lqr_enabled) {
+        /* LQR 仅由 Channel[7] 控制，并用左右实际腿长均值查表；自救期间停算。 */
+        if (lqr_enabled && rescue_phase == RescuePhase::Idle) {
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
             const float scheduled_leg_length = average_leg_length;
@@ -377,6 +448,11 @@ void CaculateTask(void *pvParameters) {
         }
         /* LQR 自己负责不经 VMC 的轮端虚拟力 Fw 限幅。 */
         LQR_LimitWheelForces(pClassicData);
+        /* 自救接管期间不使用轮端虚拟力。 */
+        if (rescue_phase != RescuePhase::Idle) {
+            pClassicData->Contronller_Data.Fw_L = 0.0f;
+            pClassicData->Contronller_Data.Fw_R = 0.0f;
+        }
 
         /* 总使能且已起身后叠加双腿重力补偿；起身前不叠加。
          * 总使能关闭时 ControlTask 向全部电机发送零力矩。 */
@@ -409,11 +485,90 @@ void CaculateTask(void *pvParameters) {
         const bool swing_pid_enable = false;
         const float swing_target_rad = 0.0f;
 #endif
+        /* 自救 Stand 相位把腿长钉在 150 mm；自救成功后的保持期同样忽略旋钮，
+         * 避免刚站稳就被拉回旧档位。 */
+        const bool rescue_leg_target =
+                (rescue_phase == RescuePhase::Stand) ||
+                (rescue_phase == RescuePhase::Idle && rescue_hold_short);
         LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
                           remote_snapshot.sbus_data.Channel[5],
-                          override_leg_target, override_leg_target_m,
+                          override_leg_target || rescue_leg_target,
+                          rescue_leg_target ? 0.150f : override_leg_target_m,
                           swing_pid_enable, swing_target_rad);
        
+        // ====== 自救状态机：接管执行器 ======
+        /* 相位目标力先算出来，再按限速平滑写入，避免相位切换冲击；Fault 直接清零。 */
+        if (rescue_phase != RescuePhase::Idle) {
+            float f_l = 0.0f, f_r = 0.0f, tp_l = 0.0f, tp_r = 0.0f;
+            if (rescue_phase == RescuePhase::Body) {
+                /* 双腿撑地把车身压回水平；Tp 是腿端力矩，车身反作用与其相反。 */
+                f_l = f_r = 10.0f;
+                tp_l = tp_r = RescueClamp(1.2f * rescue_pitch + 0.15f *
+                                             pClassicData->IMU_Data.delta_pitch, 1.5f);
+                if (fabsf(rescue_pitch) < 1.30f &&
+                    fabsf(pClassicData->IMU_Data.delta_pitch) < 0.7f) {
+                    rescue_phase = RescuePhase::Lift;
+                    rescue_phase_time = 0.0f;
+                }
+            } else if (rescue_phase == RescuePhase::Lift ||
+                       rescue_phase == RescuePhase::Sweep) {
+                /* theta = pi/2 - phi - pitch：两侧各自闭环，先抬前伸的腿。 */
+                const float target_l = rescue_phase == RescuePhase::Lift ?
+                        fminf(rescue_theta_l, 0.0f) : -0.30f;
+                const float target_r = rescue_phase == RescuePhase::Lift ?
+                        fminf(rescue_theta_r, 0.0f) : -0.30f;
+                rescue_phi_l = RescueStep(rescue_phi_l,
+                                          1.5707963f - rescue_pitch - target_l, 0.35f, cal_dt);
+                rescue_phi_r = RescueStep(rescue_phi_r,
+                                          1.5707963f - rescue_pitch - target_r, 0.35f, cal_dt);
+                tp_l = RescueClamp(4.0f * (rescue_phi_l - pClassicData->Leg_Data.phi_0_L)
+                                   - 0.25f * pClassicData->Leg_Data.delta_phi_0_L, 1.5f);
+                tp_r = RescueClamp(4.0f * (rescue_phi_r - pClassicData->Leg_Data.phi_0_R)
+                                   - 0.25f * pClassicData->Leg_Data.delta_phi_0_R, 1.5f);
+                f_l = f_r = 8.0f;
+                if (rescue_phase == RescuePhase::Lift &&
+                    rescue_theta_l < 0.12f && rescue_theta_r < 0.12f) {
+                    rescue_phase = RescuePhase::Sweep;
+                    rescue_phase_time = 0.0f;
+                } else if (rescue_phase == RescuePhase::Sweep &&
+                           rescue_theta_l < -0.20f && rescue_theta_r < -0.20f) {
+                    rescue_phase = RescuePhase::Stand;
+                    rescue_phase_time = 0.0f;
+                }
+            } else if (rescue_phase == RescuePhase::Stand) {
+                /* 腿长已由 LegControl_Update 闭环到 150 mm，这里只平滑接管其输出。 */
+                f_l = pClassicData->Contronller_Data.F0_L;
+                f_r = pClassicData->Contronller_Data.F0_R;
+                rescue_phi_l = RescueStep(rescue_phi_l, 1.5707963f - rescue_pitch,
+                                          0.35f, cal_dt);
+                rescue_phi_r = RescueStep(rescue_phi_r, 1.5707963f - rescue_pitch,
+                                          0.35f, cal_dt);
+                tp_l = RescueClamp(4.0f * (rescue_phi_l - pClassicData->Leg_Data.phi_0_L), 1.5f);
+                tp_r = RescueClamp(4.0f * (rescue_phi_r - pClassicData->Leg_Data.phi_0_R), 1.5f);
+                if (fabsf(rescue_pitch) < 0.35f &&
+                    fabsf(rescue_theta_l) < 0.30f && fabsf(rescue_theta_r) < 0.30f &&
+                    fabsf(pClassicData->Leg_Data.L0_L - 0.150f) < 0.025f &&
+                    fabsf(pClassicData->Leg_Data.L0_R - 0.150f) < 0.025f) {
+                    rescue_phase = RescuePhase::Idle;
+                    rescue_hold_short = true;
+                    stand_state = StandState_Up;
+                    stand_not_up_time = 0.0f;
+                }
+            }
+            if (rescue_phase == RescuePhase::Fault) {
+                rescue_f_l = rescue_f_r = rescue_tp_l = rescue_tp_r = 0.0f;
+            } else {
+                rescue_f_l = RescueStep(rescue_f_l, f_l, 80.0f, cal_dt);
+                rescue_f_r = RescueStep(rescue_f_r, f_r, 80.0f, cal_dt);
+                rescue_tp_l = RescueStep(rescue_tp_l, tp_l, 8.0f, cal_dt);
+                rescue_tp_r = RescueStep(rescue_tp_r, tp_r, 8.0f, cal_dt);
+            }
+            pClassicData->Contronller_Data.F0_L = rescue_f_l;
+            pClassicData->Contronller_Data.F0_R = rescue_f_r;
+            pClassicData->Contronller_Data.Tp_L = rescue_tp_l;
+            pClassicData->Contronller_Data.Tp_R = rescue_tp_r;
+        }
+
         /* F0 已在 LegControl 内限幅；Tp 是 VMC 的虚拟输入，在 VMC 模块限幅。 */
         VMC_LimitVirtualPitchTorque(pClassicData);
         // ====== VMC 力矩分配 ======
@@ -430,6 +585,31 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Contronller_Data.T1_L = 0.0f;
         pClassicData->Contronller_Data.T2_L = 0.0f;
 #endif
+
+        /* 折叠连杆会让 VMC 雅可比奇异。绝不允许非有限值进入 MIT 模式，
+         * 尤其是自救撑地阶段；出现即清零并转入 Fault。 */
+        if (!isfinite(pClassicData->Contronller_Data.T1_L) ||
+            !isfinite(pClassicData->Contronller_Data.T2_L) ||
+            !isfinite(pClassicData->Contronller_Data.T1_R) ||
+            !isfinite(pClassicData->Contronller_Data.T2_R)) {
+            pClassicData->Contronller_Data.T1_L = 0.0f;
+            pClassicData->Contronller_Data.T2_L = 0.0f;
+            pClassicData->Contronller_Data.T1_R = 0.0f;
+            pClassicData->Contronller_Data.T2_R = 0.0f;
+            pClassicData->Contronller_Data.Fw_L = 0.0f;
+            pClassicData->Contronller_Data.Fw_R = 0.0f;
+            rescue_phase = RescuePhase::Fault;
+        }
+        if (rescue_phase != RescuePhase::Idle) {
+            pClassicData->Contronller_Data.T1_L =
+                    RescueClamp(pClassicData->Contronller_Data.T1_L, 8.0f);
+            pClassicData->Contronller_Data.T2_L =
+                    RescueClamp(pClassicData->Contronller_Data.T2_L, 8.0f);
+            pClassicData->Contronller_Data.T1_R =
+                    RescueClamp(pClassicData->Contronller_Data.T1_R, 8.0f);
+            pClassicData->Contronller_Data.T2_R =
+                    RescueClamp(pClassicData->Contronller_Data.T2_R, 8.0f);
+        }
 
         /* 离地检测使用本轮最终 F0 与真正送入 VMC 的 Tp。
          * GroundDetection_Update 内部只剔除弹簧内部抵消项，并完成滤波、

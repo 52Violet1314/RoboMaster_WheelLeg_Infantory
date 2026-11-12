@@ -1,0 +1,66 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HPM6754 · 5 步 MPC 离线讲解</title><style>body{margin:0;background:#101827;color:#e4edf6;font:17px/1.8 system-ui,"Microsoft YaHei",sans-serif}main{max-width:1000px;margin:auto;padding:40px 24px}h1{font-size:36px}section{background:#1b293c;padding:24px;border-radius:16px;margin:24px 0}button,input{font:inherit;padding:8px}button{cursor:pointer;background:#64dfbd;border:0;border-radius:8px}.steps{display:flex;gap:10px;flex-wrap:wrap}.step{padding:18px;background:#304561;border-radius:9px}.active{background:#176b58}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}small{color:#aac1d5}@media print{body{background:white;color:black}section{background:#eee}button{display:none}}</style><main><small>工程方案 · 2026-10-29 · 完全离线</small><h1>HPM6754 上，让 MPC 看未来 5 步</h1><p>沿用轮腿模型的 10 个状态、4 个输入，每周期优化 20 个力矩变量，只执行第一组。</p><section><h2>动手理解滚动预测</h2><label>采样周期 <input id="ts" type="range" min="1" max="10" value="2"> <span id="period"></span></label><p id="horizon"></p><div class="steps" id="steps"></div><p id="explain"></p><button id="next">执行第一步，向前滚动</button><p><small>这是时间轴示意，不是实车动力学仿真。五步预测不等于五次求解迭代。</small></p></section><section><h2>从状态到电机</h2><p>时间戳状态 → 预测模型 → 有约束优化 → 校验第一组 → 力矩映射 → 电机 → 下次测量</p><p>关键取舍：短时域配合终端 LQR 代价；先做固定腿长与箱约束；实时性以板上最大耗时验收。</p></section><section><h2>完整实施文档</h2><pre># HPM6754 轮腿机器人：5 步 MPC 实施方案
+
+日期：2026-10-29。本文是设计方案，尚未移植或上板验证；数值预算为建议验收目标，不是实测结果。
+
+## 1. 推荐路线
+先实现固定腿长、双轮接地、直立附近的线性 MPC，预测步数 N=5，控制步数也是 5。保留现有 LQR 作为对照及有效工作域内的回退控制器。腿长、支撑力、横滚和接触状态仍由原有控制链处理。不要第一版就做全身非线性 MPC。
+
+仓库 ARCHITECTURE.md 描述当前底盘是 STM32H723、FreeRTOS，估计与控制通过事件链衔接；HPM6754 是迁移目标，而非仓库现有硬件。MuJoCo_WheeledLeg/numeric_lqr.py 给出模型接口：
+x=[s, ds, yaw, dyaw, theta_L, dtheta_L, theta_R, dtheta_R, pitch, dpitch]，nx=10。
+u=[TwL,TwR,TbL,TbR]，nu=4，分别为左右轮和左右髋等效力矩。
+必须核对实车的坐标正负、单位、髋力矩与 VMC 的映射，以及力矩是否叠加其他控制量；不能直接把仿真输入当电机指令。
+
+## 2. 预测 5 步到底意味着什么
+每次读取状态，预测未来 5 个采样点，优化 5 组力矩，只执行第一组；下一周期重新测量、重新优化。不是连续执行五组后再测量，也不是求解器只迭代五次。
+预测时长=5&#215;Ts：Ts=1/2/5ms 时分别是 5/10/25ms。短时域对慢速位置变化预见有限，应使用终端代价，并在相同条件下比较更长时域。初始试验可从 Ts=2ms 开始；若电机链路、估计延迟和稳定性不支持，调整周期，不能只按 CPU 算力选周期。
+
+## 3. 模型与参考
+在固定腿长、接地平衡点附近得到连续 Ac、Bc，采用零阶保持离散化：Ad=exp(Ac Ts)，Bd=积分 exp(Ac τ)Bc dτ，积分范围 0..Ts。离线用双精度计算，在线默认 float32；不把仿真积分步长直接当控制周期。
+模型应围绕平衡状态 xe、ue 使用偏差变量 δx=x-xe、δu=u-ue。非零参考需构造可实现的状态/输入轨迹，或显式保留仿射残差；原始全状态参考不能任意跳变。yaw 误差应连续化；速度模式的位置参考随速度积分并限制漂移。
+实车辨识或仿真线性化必须验证接触条件、腿长和负载。腿长变化后可选多个模型分档，但每档需单独验证；插值后不可默认仍稳定。
+
+## 4. 凝聚成 20 变量 QP
+对偏差模型 x+=Ax+Bu，堆叠 X=[x1;...;x5]、U=[u0;...;u4]：
+X=Φx0+ΓU。Φ 为 50&#215;10，Γ 为 50&#215;20；Γ 的第(i,j)块为 A^(i-1-j)B（j&lt;i），否则为零。
+取 Qbar=diag(Q,Q,Q,Q,P)、Rbar=diag(R,R,R,R,R)。
+J=(X-Xref)&#39;Qbar(X-Xref)+(U-Uref)&#39;Rbar(U-Uref)。
+标准形式 min 0.5 U&#39;HU+g&#39;U：H=2(Γ&#39;QbarΓ+Rbar)，g=2Γ&#39;Qbar(Φx0-Xref)-2Rbar Uref。
+P 可先取相同离散模型、Q、R 对应 DARE 的稳定解。R 正定，Q 半正定。终端 LQR 代价能改善短时域效果，但不单独保证约束 MPC 的递归可行性或全局稳定。
+若加入力矩变化惩罚，用差分矩阵 D 和 d=[u_prev;0;0;0;0] 增加 (DU-d)&#39;Sbar(DU-d)，同步更新 H 和 g。u_prev 必须是上周期实际施加的力矩，包含限幅和其他分配结果。
+
+## 5. 约束与求解器
+第一版只加每通道力矩上下界：由驱动、电机温度、电流和供电能力换算为实际可用力矩，再减去其他控制器已占用部分。含重力前馈时，偏差输入边界需减去 ue。
+对箱约束可使用投影梯度：U_next=clip(U-α(HU+g),Umin,Umax)。离线计算 L=λmax(H)，可取 α=1/L；状态与输入按典型尺度归一化，变换模型、权重与边界，避免病态。20&#215;20 的 H 只有 400 个 float，即约 1.6KB；全部模型、缓冲区和任务栈需另外核算。
+用上次解左移一组并复制末组作 warm start。设置迭代数上限和时间截止，检查有限值、约束误差和投影梯度残差 ||U-Π(U-(HU+g)/L)||∞。迭代上限不等于收敛保证；阈值应按归一化尺度确定。
+输入变化率硬约束、姿态/接触约束不能靠上述逐元素 clip 同时解决，应换成支持一般线性约束的 QP 求解器，并单独验证耗时和不可行处理。姿态约束可用松弛变量，但物理执行器限制仍应硬约束。箱约束本身不能保证不摔倒。
+
+## 6. MCU 调度与故障处理
+第一阶段单核运行关键闭环，另一核用于日志等非关键工作。使用硬件定时触发固定周期，读取带时间戳的一致状态快照；遥控参考保留最新值，不能每周期等待新的遥控包。估计→求解→校验→输出必须有完整截止时间。
+离线生成 A、B、Φ、Γ、H 和常数；在线只组装 g、更新边界并迭代。固定大小静态数组，无动态分配、无阻塞打印。关键代码和数据按芯片 SDK 与链接脚本映射到适合的片内存储区，测量缓存冷/热及总线干扰。原项目的 ARM CMSIS-DSP 不能直接作为 RISC-V 二进制库复用。
+双核共享时要处理缓存一致性、内存屏障、序列号和缓冲区所有权，先不拆开同一闭环。用周期计数器或 GPIO 测完整控制链的最大耗时和抖动，而不只测矩阵运算。
+以 Ts=2ms 为例，可先把求解截止设为 0.4ms、完整链路截止设为 2ms 的工程目标；这些值必须实测修订。超时、NaN、状态过旧或残差不合格时，禁止下发未校验解。状态有效且在 LQR 已验证工作域内可切回有界 LQR；失联、离地、倾倒等由独立安全状态机处理，不能一律切回 LQR。记录故障计数并抑制反复切换。
+
+## 7. 周期伪代码
+读取状态、时间戳、模式、上一周期实际输出
+若状态无效或处于异常接触模式：交给安全状态机
+选定已验证模型，生成一致的参考轨迹
+更新 g 与力矩边界；移位 warm start
+在迭代上限和时间截止前求解
+检查有限值、残差、边界和整链路截止
+通过则映射并发送首组力矩，否则执行既定回退
+记录实际施加力矩、耗时、残差与控制器模式
+
+## 8. 分阶段验收
+A：离线生成模型和 QP，与双精度参考解比较；无约束且终端 P 正确时，验证首步与无限时域 LQR 一致（相同模型和代价、无额外变化率惩罚）。
+B：MuJoCo 中用相同初值、参考和约束对比 LQR/MPC，覆盖推扰、速度阶跃、饱和、噪声、延迟、腿长变化与接触丢失；比较角度峰值、速度误差、饱和时间、能耗和失败次数。
+C：板上回放，覆盖中断/通信/日志压力，统计最大耗时、残差与截止丢失；测试数值异常、超时、传感器过旧等故障注入。
+D：受控实车逐级放开；MPC 先影子运行，仅记录建议力矩，然后在保护条件下闭环。未验证的腿长和接触模式禁用 MPC。
+待补齐：实际电机/减速比/力矩限制、腿长工作区、估计延迟、HPM 开发板及 SDK 版本、控制周期。没有这些参数不能给出可信的最终 Q/R、实时性能或可直接上车矩阵。
+
+## 9. 资料与使用说明
+芯片参数以先楫官方资料和实际料号为准：HPM6700/6400 系列资料列出 HPM6754 的 816MHz 双核、2MB SRAM、4MB Flash；这只是算力与存储背景，不能推导闭环执行时间。
+官方资料：https://www.hpmicro.com/Public/Uploads/uploadfile/files/20240620/HPM67006400FSV15.pdf
+官方产品页：https://doc.hpmicro.com/en/product-center/microcontroller/hpm6700
+本地依据：ARCHITECTURE.md；MuJoCo_WheeledLeg/numeric_lqr.py。
+同目录 HTML 完全内嵌，无外部脚本、字体、网络请求；交互只解释滚动时域，不是机器人动力学仿真。可直接双击并打印为 PDF。
+</pre></section></main><script>let k=0;function draw(){let t=Number(document.querySelector('#ts').value);document.querySelector('#period').textContent=t+' ms';document.querySelector('#horizon').textContent='预测时长 = 5 × '+t+' = '+(5*t)+' ms';document.querySelector('#steps').innerHTML=Array.from({length:5},(_,i)=>'<div class="step '+(i===0?'active':'')+'">u['+(k+i)+']<br>→ x['+(k+i+1)+']</div>').join('');document.querySelector('#explain').textContent='当前 k='+k+'：优化上述五组，只下发绿色一组。下一次用新测量重新计算其余动作。'}document.querySelector('#ts').oninput=draw;document.querySelector('#next').onclick=()=>{k++;draw()};draw();</script></html>

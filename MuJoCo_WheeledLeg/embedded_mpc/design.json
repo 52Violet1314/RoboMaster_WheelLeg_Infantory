@@ -1,0 +1,39 @@
+{
+  "sample_time_s": 0.001,
+  "prediction_steps": 3,
+  "control_moves": 1,
+  "hold_input_over_prediction": true,
+  "models": 39,
+  "regions_per_model": 81,
+  "coefficient_bytes": 49233,
+  "max_local_spectral_radius": 0.9997844033626311,
+  "constraints": "input box only; no state or terminal set constraints",
+  "body": {
+    "R_w": 0.06,
+    "R_l": 0.222,
+    "l_c": 0.0024,
+    "m_w": 0.512,
+    "m_l": 1.056,
+    "m_b": 16.862,
+    "I_z": 0.189,
+    "I_b": 0.3129
+  },
+  "Q_diagonal": [
+    20.0,
+    1.0,
+    4000.0,
+    1.0,
+    35000.0,
+    10.0,
+    35000.0,
+    10.0,
+    40000.0,
+    1.0
+  ],
+  "R_diagonal": [
+    10.0,
+    10.0,
+    1.0,
+    1.0
+  ]
+}

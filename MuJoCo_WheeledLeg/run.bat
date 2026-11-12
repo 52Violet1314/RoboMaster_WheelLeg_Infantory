@@ -1,20 +1,20 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title wheelbipeV14_2 - VMC+LQR MuJoCo Sim
+title wheelbipeV14_2 - VMC+MPC MuJoCo Sim
 
 :menu
 cls
 echo ============================================================
-echo   wheelbipeV14_2  Wheel-legged robot  VMC + LQR  (MuJoCo)
+echo   wheelbipeV14_2  Wheel-legged robot  VMC + MPC  (MuJoCo)
 echo ============================================================
 echo.
-echo   [1]  Keyboard drive        (8/5 move / 9/3 leg / 4/6 turn)
+echo   [1]  Keyboard drive        (8/5 move / 1/2/3 leg / 4/6 turn)
 echo   [2]  Keyboard drive        (slow-motion 0.5x)
 echo   [3]  Record demo video     (demo.mp4)
 echo   [4]  View full 37-link model
 echo   [5]  View exported URDF
-echo   [6]  Run full verification (stand / push / leg / K)
+echo   [6]  Run MPC verification  (QP / C / stand / push / drive)
 echo   [7]  Stand for 60 seconds  (print state)
 echo.
 echo   [0]  Exit
@@ -36,7 +36,7 @@ goto menu
 :drive
 cls
 echo  Starting keyboard drive...
-echo  (hold 8/5 speed  hold 4/6 turn  9/3 leg  Space stop  X e-stop  Z reset)
+echo  (hold 8/5 speed  hold 4/6 turn  1/2/3 leg  Space jump  X e-stop  Z reset)
 echo.
 python view_gui.py
 goto menu
@@ -73,7 +73,7 @@ goto menu
 cls
 echo  Running full verification...
 echo.
-python verify.py
+python -B -m unittest test_mpc -v
 echo.
 pause
 goto menu
@@ -82,7 +82,7 @@ goto menu
 cls
 echo  Standing for 60 seconds...
 echo.
-python sim_lqr.py --seconds 60
+python sim_mpc.py --seconds 60
 echo.
 pause
 goto menu

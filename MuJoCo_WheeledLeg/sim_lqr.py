@@ -1,6 +1,6 @@
 """
 MuJoCo simulation of the wheel-legged robot with the traditional
-VMC + matrix-LQR controller (no reinforcement learning involved).
+VMC + offline explicit MPC / matrix-LQR controller (no reinforcement learning).
 
 Model
 -----
@@ -18,10 +18,11 @@ The loop reproduces the on-target implementation
      length L0, the leg angle theta and their rates, plus the normal force.
   2. Leg-length PID:      F0 = ff + PID(L_ref - L0)  -> virtual leg force.
      Roll differential compensation is added on top of F0.
-  3. Matrix LQR:          u = -K x with
+  3. Balance controller: offline explicit MPC, or matrix LQR u = -K x, with
         x = [s, ds, yaw, dyaw, thL, dthL, thR, dthR, pitch, dpitch]
         u = [TwL, TwR, TbL, TbR]
-     K comes from `lqr_k.py`, the Python port of
+     MPC uses `mpc_tables.npz`, generated offline by `generate_mpc.py`.
+     LQR K comes from `lqr_k.py`, the Python port of
      `Simmulation/get_K_jiao_LQR.m`.
   4. Virtual-model torque mapping: F0 along the leg axis, Tb about the hip.
 """
@@ -41,10 +42,15 @@ MODEL_PATH = Path(__file__).resolve().with_name("wheelbipe_lqr.xml")
 G = 9.81
 WHEEL_R = 0.06
 LEG_NOMINAL = 0.1339
+# RMUL 2027 STEP geometry uses z=0 for the playing surface.
+FIELD_HEIGHT = 0.0
+# Spawn supplied with the audited field package, clear of fixed obstacles.
+ARENA_START_X = 1.25
+ARENA_START_Y = 6.75
 # Command envelope of the reduced virtual-leg model.  The source six-bar
-# geometry closes only through 350 mm, while the reduced model permits
-# experimental virtual-leg commands through 450 mm.  The slide range is
-# asymmetric because
+# closes visually through ~359 mm, so the 350 mm top GUI preset is displayed
+# exactly; longer experimental commands (up to 450 mm) clamp the mesh only.
+# The slide range is asymmetric because
 # q=0 corresponds to the 133.9 mm nominal pose.
 LEG_MIN = 0.090
 LEG_MAX = 0.450
@@ -74,14 +80,19 @@ JUMP_TOTAL_FORCE_PER_LEG = 200.0
 
 # Hardware / virtual-model safety envelope.  These limits are applied both
 # to the virtual commands and again to the physical actuator commands below.
-VMC_TP_LIMIT = 20.0             # hip virtual torque [N m]
+VMC_TP_LIMIT = 10.0             # hip virtual torque [N m]
+REAR_POSE_TP_LIMIT = 2.0        # hip virtual torque while key 0 is held [N m]
 VMC_FN_LIMIT = 200.0            # leg axial force [N]
 JUMP_FN_LIMIT = 200.0           # leg axial force during thrust [N]
 WHEEL_TORQUE_LIMIT = 7.0        # hub motor torque [N m]
+# Max heading lead while 4/6 drives the LQR yaw setpoint.  The differential
+# wheel torque that steers the robot is proportional to this lead, so it caps
+# the steering authority; see the note on q_yaw below.
+YAW_TARGET_LEAD_LIMIT = 0.16    # [rad]
 
-# Held-0 is a direct open-loop torque mode: hips are unpowered and both hubs
-# receive this fixed forward torque until the key is released.
-REAR_POSE_WHEEL_TORQUE = 2.0     # N m per wheel
+# Holding key 0 keeps the normal controller but clamps the hip (virtual leg
+# swing) torque to REAR_POSE_TP_LIMIT, i.e. it makes the legs compliant.
+# (It used to switch to an open-loop +2 N m hub drive with unpowered hips.)
 
 # Analytic-LQR parameters calibrated from the generated USD-derived model.
 BODY = dict(R_w=WHEEL_R, R_l=TRACK_HALF, l_c=0.0024, m_w=0.512, m_l=1.056,
@@ -145,8 +156,14 @@ class WheelLegLQR:
                  signs=None, model_path=MODEL_PATH, dt=None,
                  leg_kp=3000.0, leg_ki=10.0, leg_kd=80.0, pos_ki=0.6,
                  speed_ramp=1.0, theta_mode="abs", ds_mode="joint",
-                 q_vel=1.0, q_yaw=400.0, q_yawrate=1.0):
+                 q_vel=1.0, q_yaw=4000.0, q_yawrate=1.0, controller="lqr"):
+        if controller not in ("lqr", "mpc"):
+            raise ValueError("controller must be 'lqr' or 'mpc'")
+        self.controller = controller
         self.m = mujoco.MjModel.from_xml_path(str(model_path))
+        # Articulated link collision meshes change their local transforms.
+        # Do not use the static per-body BVH built at model load for them.
+        self.m.opt.disableflags |= mujoco.mjtDisableBit.mjDSBL_MIDPHASE
         self.d = mujoco.MjData(self.m)
         self.dt = dt or self.m.opt.timestep
         self.signs = dict(DEFAULT_SIGNS)
@@ -154,12 +171,29 @@ class WheelLegLQR:
             self.signs.update(signs)
 
         self._leg_length = float(np.clip(leg_length, LEG_MIN, LEG_MAX))
-        # Q follows Simmulation/get_K_jiao_LQR.m; the velocity / yaw-rate
-        # entries can be raised to strengthen those loops on the MuJoCo model.
+        # Q follows Simmulation/get_K_jiao_LQR.m, with the yaw weight raised
+        # from 400 to 4000: the yaw error is a real LQR state (x[2]) but the
+        # 400 weight leaves only ~7.6 N*m/rad of differential wheel torque, far
+        # below what the tyres need to break loose sideways (measured: a 40 N*m
+        # yaw pulse or a 30 N*m sustained push left a permanent 98-116 deg
+        # heading error, and a 30 deg heading step settled 7.3 deg short).
+        # 4000 makes the heading hold actually converge (<=1.8 deg after a
+        # 30 deg step, disturbances fully rejected) at the same wheel effort as
+        # before, because YAW_TARGET_LEAD_LIMIT bounds the turning lead.
         self.Q = np.diag([20.0, q_vel, q_yaw, q_yawrate,
                           35000.0, 10.0, 35000.0, 10.0, 40000.0, 1.0])
-        self.K, self.A, self.B, self.params = lqr_k.compute_K(
-            self._leg_length, BODY, Q=self.Q)
+        self.mpc = None
+        if controller == "mpc":
+            from explicit_mpc import ExplicitMPC
+            self.mpc = ExplicitMPC(self.dt)
+            if not np.array_equal(self.Q, self.mpc.Q):
+                raise ValueError("MPC weights differ from offline design; regenerate tables")
+            self.mpc.select_length(self._leg_length)
+            self.K = self.mpc.gain
+            self.A = self.B = self.params = None
+        else:
+            self.K, self.A, self.B, self.params = lqr_k.compute_K(
+                self._leg_length, BODY, Q=self.Q)
         self._gain_leg_length = self._leg_length
         self.target_speed = target_speed
         self.target_yaw = target_yaw
@@ -195,7 +229,6 @@ class WheelLegLQR:
         self.anti_crash_enable = True
         # Held-0 is direct torque mode: no LQR, no hip torque, fixed hubs.
         self.rear_pose_active = False
-        self.rear_pose_phase = "idle"
         self.last_rear_tp = {"left": 0.0, "right": 0.0}
         self.wheel_ff = True          # cancel the wheel reaction on the hips
         # The balancing LQR is intentionally gentle around zero speed and can
@@ -219,14 +252,14 @@ class WheelLegLQR:
         self.speed_cmd = target_speed
         self.turn_rate = 0.0          # yaw rate command [rad/s]
         self.estop = False            # emergency stop: all torques zeroed
+        self.rescue_phase = "idle"
         self.theta_mode = theta_mode
         self.ds_mode = ds_mode
 
         self._ids()
         self.linkage_visual = linkage_kinematics.LinkageVisuals(self.m)
-        # 100 Hz visual updates are smoother than the 60 Hz GUI while avoiding
-        # 18 mesh-transform writes on every 1 kHz physics step.
-        self._linkage_visual_stride = max(1, round(0.010 / self.dt))
+        # Contact meshes must track the linkage on every physics step.
+        self._linkage_visual_stride = 1
         self._linkage_visual_countdown = 0
         self.reset()
         # exact static leg force (gravity + contact) so the leg does not jump
@@ -239,9 +272,13 @@ class WheelLegLQR:
 
     @leg_length.setter
     def leg_length(self, value):
-        """Set a safe leg-length command and gain-schedule the matrix LQR."""
+        """Set leg length and select an offline MPC model or recompute LQR."""
         target = float(np.clip(value, LEG_MIN, LEG_MAX))
         self._leg_length = target
+        if getattr(self, "mpc", None) is not None:
+            self._gain_leg_length = self.mpc.select_length(target)
+            self.K = self.mpc.gain
+            return
         # Key presses change the target by 5 mm.  Recompute at that granularity
         # rather than on every 1 kHz control step.
         gain_length = getattr(self, "_gain_leg_length", target)
@@ -271,7 +308,11 @@ class WheelLegLQR:
         self.b_base = bid("base_link")
         self.g_wheel = {"left": gid("left_wheel_geom"),
                         "right": gid("right_wheel_geom")}
-        self.g_ground = {gid("floor"), gid("step")}
+        # Everything static the wheels can rest on: the ground plane, the step
+        # and every generated arena collision box (deck, walls, platforms).
+        self.g_ground = {geom for geom in range(m.ngeom)
+                         if m.geom(geom).name in ("floor", "step")
+                         or m.geom(geom).name.startswith("arena")}
 
     def _static_leg_force(self):
         """
@@ -291,8 +332,12 @@ class WheelLegLQR:
     def reset(self, z=None, leg_vertical=True):
         d, m = self.d, self.m
         mujoco.mj_resetData(m, d)
+        # The RMUL 2027 playing surface spans X=[0, 12], Y=[0, 8] m at z=0.
+        d.qpos[0] = ARENA_START_X
+        d.qpos[1] = ARENA_START_Y
         d.qpos[3:7] = [1, 0, 0, 0]
-        d.qpos[2] = z if z is not None else (self.leg_length + WHEEL_R)
+        d.qpos[2] = (z if z is not None
+                     else (self.leg_length + WHEEL_R + FIELD_HEIGHT))
         if leg_vertical:
             # the USD rest pose has the virtual leg tilted ~3 deg forward; the
             # LQR linearisation uses theta = 0 (leg vertical), so pre-rotate the
@@ -314,7 +359,6 @@ class WheelLegLQR:
         self.yaw_pid.reset()
         self.anti_crash.reset()
         self.rear_pose_active = False
-        self.rear_pose_phase = "idle"
         self.last_rear_tp = {"left": 0.0, "right": 0.0}
         self.s = 0.0
         self.position_tracking = False
@@ -323,6 +367,7 @@ class WheelLegLQR:
         self.stop_brake_int = 0.0
         self.stop_brake_torque = 0.0
         self.jump_phase = "idle"
+        self.rescue_phase = "idle"
         self.jump_time = 0.0
         self.jump_takeoff_z = None
         self.jump_apex_z = float(d.qpos[2])
@@ -333,27 +378,150 @@ class WheelLegLQR:
         self.target_yaw = self._yaw0
 
     def set_rear_pose(self, active):
-        """Enable/disable held-0 direct wheel-torque mode."""
-        active = bool(active) and not self.jump_active and not self.estop
+        """Toggle the held-0 compliant-leg mode (hip torque clamped to 2 N m)."""
+        active = (bool(active) and not self.jump_active and not self.estop
+                  and self.rescue_phase == "idle")
         if active == self.rear_pose_active:
             return False
         self.rear_pose_active = active
+        # The clamp only ever lowers the hip torque, so no state reset is
+        # needed; keep the reported value honest.
         self.last_rear_tp = {"left": 0.0, "right": 0.0}
-        if active:
-            # Deliberately leave the existing leg-length command untouched.
-            # While held, LQR is bypassed, Tp=0, and only the hubs get +2 Nm.
-            self.rear_pose_phase = "wheel_drive"
-            self.position_tracking = False
-            self.position_hold = False
-            self.s = 0.0
-            self.s_int = 0.0
-            self.stop_brake_int = 0.0
-            self.stop_brake_torque = 0.0
-        else:
-            self.rear_pose_phase = "idle"
-            # Avoid a derivative impulse when normal LQR resumes after release.
-            self._prev = {}
         return True
+
+    def request_stand(self):
+        """Start physical self-righting; hand off to 150 mm balance last."""
+        self.estop = False
+        self.rear_pose_active = False
+        self.leg_length = 0.150
+        self.speed_cmd = self.target_speed = 0.0
+        self.turn_rate = 0.0
+        self.target_yaw = self.measure()["yaw"]
+        self.jump_phase = "idle"
+        self.jump_time = 0.0
+        self.pid_l.reset()
+        self.pid_r.reset()
+        self.yaw_pid.reset()
+        self.anti_crash.reset()
+        self.position_tracking = False
+        self.position_hold = False
+        self.s = self.s_int = 0.0
+        self.stop_brake_int = self.stop_brake_torque = 0.0
+        self._prev = {}
+        self.rescue_phase = "body" if abs(self.measure()["pitch_full"]) > np.pi/2 else "lift"
+        self.rescue_time = 0.0
+        self.rescue_total = 0.0
+        self.rescue_sign = 1.0 if self.measure()["pitch_full"] >= 0 else -1.0
+        self.rescue_q = {side: float(self.d.qpos[self.m.jnt_qposadr[j]])
+                         for side, j in self.j_hip.items()}
+        self.rescue_targets = dict(self.rescue_q)
+        self.rescue_front = {side: False for side in self.j_hip}
+        self.rescue_ctrl = np.zeros(self.m.nu)
+        self.rescue_length = max(0.150, float(np.mean([self.measure()["leg"][s][0]
+                                           for s in self.j_hip])))
+        if (abs(self.measure()["pitch_full"]) < 0.35 and
+                max(abs(self.measure()["leg"][s][1]) for s in self.j_hip) < 0.4):
+            self.rescue_phase = "balance"
+        self._rescue_enter(self.rescue_phase)
+
+    def _rescue_enter(self, phase):
+        self.rescue_phase = phase
+        self.rescue_time = 0.0
+        for side, j in self.j_hip.items():
+            q = float(self.d.qpos[self.m.jnt_qposadr[j]])
+            local = wrap_angle(q - HIP_VERTICAL)
+            if phase == "lift":
+                # Front is negative hip rotation on BOTH reduced-model joints.
+                # Use each side's own angle, and travel over the top (decreasing
+                # q), rather than dragging a forward leg through the floor.
+                self.rescue_front[side] = local < -0.15
+                self.rescue_targets[side] = q - np.pi - local if self.rescue_front[side] else q
+            elif phase == "sweep":
+                self.rescue_targets[side] = (q - ((local - np.pi/2) % (2*np.pi))
+                    if self.rescue_front[side] else q + wrap_angle(np.pi/2-local))
+
+    def _rescue_step(self):
+        self.speed_cmd = self.target_speed = self.turn_rate = 0.0
+        self.rescue_time += self.dt
+        self.rescue_total += self.dt
+        meas = self.measure()
+        p = meas["pitch_full"]
+        phase = self.rescue_phase
+        if self.rescue_total > 45.0 or not np.isfinite(self.d.qpos).all():
+            self.estop = True
+            self.rescue_phase = "fault"
+            return self.step()
+        if abs(p) > np.pi/2 + 0.08 and phase not in ("body", "body_settle"):
+            self.rescue_sign = 1.0 if p >= 0 else -1.0
+            self._rescue_enter("body")
+            phase = "body"
+        if phase == "body" and abs(p) < 1.2:
+            self._rescue_enter("body_settle")
+            phase = "body_settle"
+        if phase == "body_settle" and abs(p) < 0.35:
+            self._rescue_enter("lift")
+            phase = "lift"
+        if phase in ("lift", "sweep"):
+            reached = all(abs(self.d.qpos[self.m.jnt_qposadr[self.j_hip[s]]] -
+                              self.rescue_targets[s]) < 0.12 for s in self.j_hip)
+            if reached and self.rescue_time > 0.2:
+                self._rescue_enter("sweep" if phase == "lift" else "stand")
+                phase = self.rescue_phase
+        if phase == "stand" and abs(p) < 0.20 and abs(meas["roll"]) < 0.20 and max(
+                abs(meas["leg"][s][1]) for s in self.j_hip) < 0.20 and max(
+                abs(self.d.qvel[self.m.jnt_dofadr[j]]) for j in self.j_hip.values()) < 0.6:
+            self._rescue_enter("balance")
+            phase = "balance"
+        if phase == "balance":
+            # Handoff only near the LQR's upright operating point.
+            self.leg_length = 0.150
+            if (self.rescue_time > 0.8 and abs(p) < 0.25 and
+                    all(abs(meas["leg"][s][0] - 0.150) < 0.02 for s in self.j_hip)):
+                self.rescue_phase = "idle"
+            return None
+        desired_length = 0.30 if phase in ("body", "body_settle", "lift") else 0.150
+        self.rescue_length += float(np.clip(desired_length-self.rescue_length,
+                                          -0.06*self.dt, 0.06*self.dt))
+        ctrl = np.zeros(self.m.nu)
+        for side, j in self.j_hip.items():
+            q = float(self.d.qpos[self.m.jnt_qposadr[j]])
+            v = float(self.d.qvel[self.m.jnt_dofadr[j]])
+            if phase == "body":
+                target = self.rescue_q[side] + self.rescue_sign*0.6*self.dt
+            elif phase in ("body_settle", "stand"):
+                rear = (0.30 if phase == "body_settle" else 0.08)*self.rescue_sign
+                target = q + wrap_angle(HIP_VERTICAL-p+rear-q)
+            else:
+                target = self.rescue_targets[side]
+            self.rescue_q[side] += float(np.clip(target-self.rescue_q[side],
+                                                -0.6*self.dt, 0.6*self.dt))
+            torque = np.clip(30*(self.rescue_q[side]-q)-4*v, -20, 20)
+            if abs(v) > 1.5 and torque*v > 0:
+                torque = -np.sign(v)*min(20.0, 6*(abs(v)-1.5))
+            ctrl[self.a_hip[side]] = torque
+            js = self.j_slide[side]
+            slide = self.d.qpos[self.m.jnt_qposadr[js]]
+            vel = self.d.qvel[self.m.jnt_dofadr[js]]
+            ctrl[self.a_leg[side]] = np.clip(1800*(self.rescue_length-LEG_NOMINAL-slide)
+                                                    -60*vel+50, -100, 200)
+        self.rescue_ctrl += np.clip(ctrl-self.rescue_ctrl, -400*self.dt, 400*self.dt)
+        self.d.ctrl[:] = self.rescue_ctrl
+        self.d.qfrc_applied[:] = 0.0
+        self.last_gas_force = {"left": 0.0, "right": 0.0}
+        self._update_linkage_visual()
+        mujoco.mj_step(self.m, self.d)
+        return dict(t=self.d.time, x=float(self.d.qpos[0]), z=float(self.d.qpos[2]),
+                    pitch=p, roll=meas["roll"], vx=0.0, L0=meas["leg"]["left"][0],
+                    theta=meas["leg"]["left"][1], TwL=0.0, TwR=0.0,
+                    TbL=ctrl[self.a_hip["left"]], TbR=ctrl[self.a_hip["right"]],
+                    legF=ctrl[self.a_leg["left"]], vmcFL=ctrl[self.a_leg["left"]],
+                    vmcFR=ctrl[self.a_leg["right"]], vmcTbL=ctrl[self.a_hip["left"]],
+                    vmcTbR=ctrl[self.a_hip["right"]], legActFL=ctrl[self.a_leg["left"]],
+                    legActFR=ctrl[self.a_leg["right"]], jointTauL=ctrl[self.a_hip["left"]],
+                    jointTauR=ctrl[self.a_hip["right"]], hubTauL=0.0, hubTauR=0.0,
+                    gasFL=0.0, gasFR=0.0, stopBrake=0.0, rearPose=False,
+                    rearTpL=0.0, rearTpR=0.0, jumpPhase="idle", jumpHeight=0.0,
+                    rescuePhase=self.rescue_phase)
 
     @property
     def jump_active(self):
@@ -361,7 +529,7 @@ class WheelLegLQR:
 
     def request_jump(self, return_leg=None):
         """Start one crouch/thrust/flight/landing sequence."""
-        if self.jump_active or self.estop:
+        if self.jump_active or self.estop or self.rescue_phase != "idle":
             return False
         self.set_rear_pose(False)
         self.jump_phase = "crouch"
@@ -506,20 +674,37 @@ class WheelLegLQR:
         # (verified in tools/probe_frame.py), so rotate it into the world frame.
         omega_body = d.qvel[3:6].copy()
         omega = R @ omega_body
+        # The pitch/roll loops need rates about the robot's own heading axes.
+        # Rotating the world rate back by -yaw gives `Ry(pitch) Rx(roll) w_body`,
+        # whose Y component is exactly the rate of `pitch = asin(-R[2,0])`.
+        # World omega[1] is only `q*cos(yaw) - p*sin(yaw)`: it even inverts past
+        # 90 deg of heading, which turned the LQR pitch-rate column into
+        # positive feedback during a long turn.  At yaw = 0 both agree.
+        c, s = np.cos(yaw), np.sin(yaw)
+        yaw_free = np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
+        omega_heading = yaw_free @ omega
 
         leg = {}
+        # Measure the leg angle in the robot's own sagittal plane.  Each wheel
+        # sits 48 mm *outboard* of its hip, so the raw world-frame hip->wheel
+        # vector carries a lateral component that a body yaw turns into a
+        # fore-aft one: at 10 deg of yaw the untouched leg already reads
+        # -3.8 deg on the left and +3.8 deg on the right (measured).  Feeding
+        # that to the LQR makes its leg-angle columns chase a phantom splay that
+        # grows with the heading, so while 4/6 turns the legs jam ~4.7 deg apart
+        # and the yaw error freezes ~9 deg short of the target.  Undo the yaw.
         for side in ("left", "right"):
             hip = d.xpos[self.b_hip[side]]
             wheel = d.xpos[self.b_wheel[side]]
-            v = wheel - hip
+            v = yaw_free @ (wheel - hip)
             L0 = float(np.linalg.norm(v))
             theta = float(np.arctan2(v[0], -v[2]))   # >0 : wheel ahead of hip
             q_hip = float(d.qpos[self.m.jnt_qposadr[self.j_hip[side]]])
             leg[side] = (L0, theta, q_hip)
         w = {s: float(d.qvel[self.m.jnt_dofadr[self.j_wheel[s]]])
              for s in ("left", "right")}
-        return dict(R=R, yaw=yaw, pitch=pitch, roll=roll, omega=omega,
-                    leg=leg, wheel_vel=w)
+        return dict(R=R, yaw=yaw, pitch=pitch, pitch_full=float(np.arctan2(-R[2, 0], R[2, 2])), roll=roll, omega=omega,
+                    omega_heading=omega_heading, leg=leg, wheel_vel=w)
 
     def state_vector(self, meas):
         sg = self.signs
@@ -536,8 +721,8 @@ class WheelLegLQR:
         vx = WHEEL_R * 0.5 * (meas["wheel_vel"]["left"] + meas["wheel_vel"]["right"])
         dt = self.dt
         prev = self._prev
-        dthL = (thL - prev["thL"]) / dt if "thL" in prev else 0.0
-        dthR = (thR - prev["thR"]) / dt if "thR" in prev else 0.0
+        dthL = wrap_angle(thL - prev["thL"]) / dt if "thL" in prev else 0.0
+        dthR = wrap_angle(thR - prev["thR"]) / dt if "thR" in prev else 0.0
         prev["thL"], prev["thR"] = thL, thR
         if self.ds_mode == "absolute":
             vx += WHEEL_R * 0.5 * (dthL + dthR)
@@ -560,7 +745,7 @@ class WheelLegLQR:
             sg["th"] * (thR - theta_trim(self.leg_length)),
             sg["dth"] * dthR,
             sg["pitch"] * meas["pitch"],
-            sg["dpitch"] * meas["omega"][1],
+            sg["dpitch"] * meas["omega_heading"][1],
         ])
         return x, vx
 
@@ -568,32 +753,28 @@ class WheelLegLQR:
     def control(self, meas, x, turn=0.0):
         sg = self.signs
         rear_pose = self.rear_pose_active
-        if rear_pose:
-            # Held-0 is direct drive: do not evaluate K@x, clear position
-            # state, set Tp=0, and command both hubs at a fixed +2 N m.
-            self.s = 0.0
-            self.s_int = 0.0
-            self.stop_brake_int = 0.0
-            self.stop_brake_torque = 0.0
-            u = np.array([REAR_POSE_WHEEL_TORQUE,
-                          REAR_POSE_WHEEL_TORQUE, 0.0, 0.0])
+        # Holding 0 only lowers the hip torque ceiling; everything else (LQR,
+        # steering, VMC leg loop, braking) keeps running exactly as normal.
+        tp_limit = REAR_POSE_TP_LIMIT if rear_pose else VMC_TP_LIMIT
+        # Position integral removes the steady-state offset between actual and
+        # speed-command-integrated position.  x[0] is actual minus target, so
+        # its integral has the same control sign as LQR's term.
+        self.s_int = float(np.clip(self.s_int + x[0] * self.dt, -1.0, 1.0))
+        offset = np.array([self.pos_ki * self.s_int - turn,
+                           self.pos_ki * self.s_int + turn, 0.0, 0.0])
+        limits = np.array([WHEEL_TORQUE_LIMIT, WHEEL_TORQUE_LIMIT,
+                           tp_limit, tp_limit])
+        if self.mpc is not None:
+            u = self.mpc.evaluate(x, limits, offset)
         else:
-            # Position integral removes the steady-state offset between actual
-            # and speed-command-integrated position.  x[0] is actual minus
-            # target, so its integral has the same control sign as LQR's term.
-            self.s_int = float(np.clip(self.s_int + x[0] * self.dt, -1.0, 1.0))
-            u = -self.K @ x                   # [TwL, TwR, TbL, TbR]
+            # Keep the original LQR arithmetic order for reproducible contacts.
+            u = -self.K @ x
             u[0] += self.pos_ki * self.s_int
             u[1] += self.pos_ki * self.s_int
-            # steering: differential torque on top of the LQR (firmware
-            # Chassis::SynthesizeMotion does exactly this)
             u[0] -= turn
             u[1] += turn
-            u = np.clip(u,
-                        [-WHEEL_TORQUE_LIMIT, -WHEEL_TORQUE_LIMIT,
-                         -VMC_TP_LIMIT, -VMC_TP_LIMIT],
-                        [WHEEL_TORQUE_LIMIT, WHEEL_TORQUE_LIMIT,
-                         VMC_TP_LIMIT, VMC_TP_LIMIT])
+        # Keep the final virtual-input limits before VMC and auxiliary loops.
+        u = np.clip(u, -limits, limits)
         ctrl = np.zeros(self.m.nu)
         for i, side in enumerate(("left", "right")):
             ctrl[self.a_wheel[side]] = sg["Tw"] * u[i]
@@ -604,7 +785,7 @@ class WheelLegLQR:
         # release acts immediately while the short inner ramp removes the LQR
         # setpoint discontinuity.  Project world velocity onto body-forward so
         # this remains correct after steering.
-        if (not rear_pose and abs(self.speed_cmd) <= 1e-9
+        if (abs(self.speed_cmd) <= 1e-9
                 and (not self.jump_active
                      or self.jump_phase in ("landing", "recover"))):
             forward_v = float(np.dot(meas["R"][:, 0], self.d.qvel[:3]))
@@ -633,27 +814,28 @@ class WheelLegLQR:
         # through the hip axis; a *differential* wheel torque therefore splays
         # the two legs unless the hips cancel it.  Add the wheel torque to the
         # hip of the same side.
-        if not rear_pose and self.wheel_ff:
+        if self.wheel_ff:
             for side in ("left", "right"):
                 ctrl[self.a_hip[side]] += ctrl[self.a_wheel[side]]
 
         # leg-angle differential (firmware `anti_crash_`)
-        if not rear_pose and self.anti_crash_enable:
+        if self.anti_crash_enable:
             dtheta = meas["leg"]["left"][1] - meas["leg"]["right"][1]
             ac = float(np.clip(self.anti_crash(0.0, dtheta, self.dt), -6.0, 6.0))
-            ctrl[self.a_hip["left"]] += sg["Tb"] * ac
-            ctrl[self.a_hip["right"]] -= sg["Tb"] * ac
+            # theta increases when hip q decreases. For thetaL > thetaR,
+            # increase left q and decrease right q to close the difference.
+            ctrl[self.a_hip["left"]] -= sg["Tb"] * ac
+            ctrl[self.a_hip["right"]] += sg["Tb"] * ac
 
-        # Held-0 passive swing: hip Tp stays zero.  The pose transition and
-        # LQR/wheel paths above are all disabled in this mode.
+        # Report the hip torque this frame actually asks for (the hold-0 mode
+        # shows the clamped value here).
         for side in ("left", "right"):
-            self.last_rear_tp[side] = 0.0
-        if self.rear_pose_active:
-            for side in ("left", "right"):
-                ctrl[self.a_hip[side]] = 0.0
+            self.last_rear_tp[side] = float(np.clip(
+                ctrl[self.a_hip[side]], -tp_limit, tp_limit))
 
         # ---- VMC leg-length loop -----------------------------------------
-        roll_comp = float(np.clip(60.0 * meas["roll"] + 3.0 * meas["omega"][0],
+        roll_comp = float(np.clip(60.0 * meas["roll"]
+                                  + 3.0 * meas["omega_heading"][0],
                                   -30.0, 30.0))
         for side, sign in (("left", -1.0), ("right", +1.0)):
             L0 = meas["leg"][side][0]
@@ -700,14 +882,17 @@ class WheelLegLQR:
                 ctrl[self.a_wheel[side]], -WHEEL_TORQUE_LIMIT,
                 WHEEL_TORQUE_LIMIT))
             ctrl[self.a_hip[side]] = float(np.clip(
-                ctrl[self.a_hip[side]], -VMC_TP_LIMIT, VMC_TP_LIMIT))
+                ctrl[self.a_hip[side]], -tp_limit, tp_limit))
         return ctrl, u
 
     def step(self):
-        # emergency stop: drop every torque but keep integrating the physics
+        # Disabled motors: no actuator, simulated gas-spring, or external force.
+        # Keep integrating gravity and contacts so the robot can fall naturally.
         if self.estop:
             self.d.ctrl[:] = 0.0
-            self._apply_gas_springs()
+            self.d.qfrc_applied[:] = 0.0
+            self.d.xfrc_applied[:] = 0.0
+            self.last_gas_force = {"left": 0.0, "right": 0.0}
             self._update_linkage_visual()
             mujoco.mj_step(self.m, self.d)
             meas = self.measure()
@@ -723,9 +908,13 @@ class WheelLegLQR:
                         gasFL=self.last_gas_force["left"],
                         gasFR=self.last_gas_force["right"],
                         rearPose=self.rear_pose_active,
-                        rearPhase=self.rear_pose_phase,
                         rearTpL=0.0, rearTpR=0.0,
                         jumpPhase=self.jump_phase, jumpHeight=self.jump_height)
+
+        if self.rescue_phase not in ("idle", "fault"):
+            recovery = self._rescue_step()
+            if recovery is not None:
+                return recovery
 
         dt = self.dt
         # ramp the speed command (the analytic model has no friction, so a step
@@ -764,29 +953,28 @@ class WheelLegLQR:
         #     heading drift and the legs splay.
         #   * turn command    -> rate mode: the heading setpoint is dragged
         #     along so the LQR does not fight the steering PID.
-        if self.rear_pose_active:
-            # The held-0 pose has no wheel/yaw control path whatsoever.
-            steering, turn = False, 0.0
-        else:
-            steering = abs(self.turn_rate) > 1e-6
-            if steering:
-                self.target_yaw = wrap_angle(self.target_yaw + self.turn_rate * dt)
-            turn = 0.0
-            if self.yaw_pid_enable:
-                turn = float(np.clip(self.yaw_pid(self.turn_rate, meas["omega"][2], dt),
-                                     -self.turn_limit, self.turn_limit))
+        steering = abs(self.turn_rate) > 1e-6
+        if steering:
+            # Bound the heading lead.  The LQR yaw error *is* the steering
+            # authority (differential torque ~= K_yaw * lead), so an
+            # unlimited target makes the wheel differential saturate and
+            # pump the leg swing states.  With the stiff 4000 yaw weight the
+            # 0.16 rad cap gives the same ~3.8 N*m differential as the old
+            # 400 weight did at 0.5 rad, i.e. 4/6 keeps its turning
+            # authority while the heading hold gets 10x stiffer.
+            requested_yaw = wrap_angle(self.target_yaw + self.turn_rate * dt)
+            lead = wrap_angle(requested_yaw - meas["yaw"])
+            if abs(lead) > YAW_TARGET_LEAD_LIMIT:
+                requested_yaw = wrap_angle(
+                    meas["yaw"] + np.sign(lead) * YAW_TARGET_LEAD_LIMIT)
+            self.target_yaw = requested_yaw
+        turn = 0.0
+        if self.yaw_pid_enable:
+            turn = float(np.clip(self.yaw_pid(self.turn_rate, meas["omega"][2], dt),
+                                 -self.turn_limit, self.turn_limit))
 
-        if self.rear_pose_active:
-            # Key 0 explicitly means no LQR: leave the wheel position error
-            # at zero and do not build derivative/LQR states for this frame.
-            self.s = 0.0
-            self.s_int = 0.0
-            x = np.zeros(10)
-            vx = WHEEL_R * 0.5 * (meas["wheel_vel"]["left"]
-                                  + meas["wheel_vel"]["right"])
-        else:
-            x, vx = self.state_vector(meas)
-        if not self.rear_pose_active and steering and self.yaw_pid_enable:
+        x, vx = self.state_vector(meas)
+        if steering and self.yaw_pid_enable:
             x[2] = 0.0
         ctrl, u = self.control(meas, x, turn)
         self.d.ctrl[:] = ctrl
@@ -805,7 +993,6 @@ class WheelLegLQR:
                     gasFL=self.last_gas_force["left"],
                     gasFR=self.last_gas_force["right"],
                     rearPose=self.rear_pose_active,
-                    rearPhase=self.rear_pose_phase,
                     rearTpL=self.last_rear_tp["left"],
                     rearTpR=self.last_rear_tp["right"],
                     vmcTbL=u[2], vmcTbR=u[3],
@@ -849,12 +1036,13 @@ class WheelLegLQR:
         return rows
 
 
-def main():
+def main(default_controller="mpc"):
     ap = argparse.ArgumentParser()
     ap.add_argument("--seconds", type=float, default=5.0)
     ap.add_argument("--speed", type=float, default=0.0)
     ap.add_argument("--leg", type=float, default=LEG_NOMINAL)
     ap.add_argument("--view", action="store_true")
+    ap.add_argument("--controller", choices=("mpc", "lqr"), default=default_controller)
     ap.add_argument("--signs", type=str, default="",
                     help="override, e.g. th=-1,Tb=1")
     args = ap.parse_args()
@@ -864,8 +1052,9 @@ def main():
         k, v = kv.split("=")
         signs[k] = int(v)
 
-    sim = WheelLegLQR(leg_length=args.leg, target_speed=args.speed, signs=signs)
-    print(f"K condition: |K|max={np.abs(sim.K).max():.1f}   "
+    sim = WheelLegLQR(leg_length=args.leg, target_speed=args.speed, signs=signs,
+                      controller=args.controller)
+    print(f"{args.controller.upper()}: |K|max={np.abs(sim.K).max():.1f}   "
           f"mass={sim.mass:.2f} kg   F0_ff={sim.F0_ff:.1f} N")
     print(f"{'t':>6}{'x':>9}{'z':>9}{'pitch':>9}{'roll':>9}{'L0':>8}"
           f"{'theta':>9}{'TwL':>9}{'TbL':>9}{'F0':>9}")

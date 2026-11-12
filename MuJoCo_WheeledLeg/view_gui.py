@@ -1,5 +1,5 @@
 """
-Keyboard-driven MuJoCo GUI for the wheel-legged VMC + LQR simulation.
+Keyboard-driven MuJoCo GUI: VMC + explicit MPC (default) or LQR.
 
     python view_gui.py                 # start standing still
     python view_gui.py --speed 0.5     # start with a speed command
@@ -7,9 +7,11 @@ Keyboard-driven MuJoCo GUI for the wheel-legged VMC + LQR simulation.
 
 ------------------------------------------------------------------ controls
   hold 8 / 5     forward / backward trapezoid    (5.0 m/s^2, limit +/- 2.5 m/s)
-  hold 4 / 6     turn left / right trapezoid     (5.0 rad/s^2, limit +/- 0.5 rad/s)
-  1 / 2 / 3      leg length presets              (150 / 200 / 300 mm)
-  hold 0          rear-horizontal leg pose at 135 mm (disabled while holding 8)
+  hold 4 / 6     turn left / right trapezoid     (25.0 rad/s^2, limit +/- 2.5 rad/s)
+  1 / 2 / 3      leg length presets              (150 / 270 / 350 mm)
+  7              disable all commanded forces
+  9              self-right: body, lift, sweep, stand at 150 mm
+  hold 0         clamp hip torque to 2 N*m (compliant legs)
   Space          jump (keeps the current drive command)
   X              emergency stop (all torques 0)  -- press again to release
   Z / R          reset/reload the robot at the selected leg preset
@@ -37,11 +39,14 @@ import numpy as np
 
 import sim_lqr as S
 
-LEG_PRESETS = {"1": 0.150, "2": 0.200, "3": 0.300}
+LEG_PRESETS = {"1": 0.150, "2": 0.270, "3": 0.350}
 SPEED_ACCEL = 5.0
-TURN_ACCEL = 5.0
+# 5x turn sensitivity.  The LQR only tracks a commanded yaw rate while its
+# heading lead stays small, so the old 0.5 rad/s ceiling left the robot near
+# 28 deg/s; the 2.5 rad/s command reaches the tyre-limited ~57 deg/s.
+TURN_ACCEL = 25.0
 SPEED_MAX = 2.5
-TURN_MAX = 0.5
+TURN_MAX = 2.5
 DRIVE_KEYS = frozenset("8546")
 POSE_KEYS = frozenset("0")
 
@@ -58,7 +63,7 @@ CAM_ORDER = list(CAMERAS)
 class KeyEvents:
     """Small, bounded bridge from MuJoCo's UI thread to the sim thread."""
 
-    _DEBOUNCED = frozenset(" xzcvthfr123")
+    _DEBOUNCED = frozenset(" xzcvthfr12379")
 
     def __init__(self, capacity=64, debounce_seconds=0.20):
         self._events = queue.Queue(maxsize=capacity)
@@ -155,8 +160,12 @@ def integrate_drive(state, pressed, dt):
 
 
 def rear_pose_requested(pressed):
-    """Hold 0 for the rear pose, except when forward key 8 takes priority."""
-    return "0" in pressed and "8" not in pressed
+    """Hold 0 to clamp the hip torque to 2 N*m (compliant legs).
+
+    The old "rear-horizontal pose / open-loop hub drive" mode is gone, so the
+    key is now a plain modifier and no longer has to yield to the drive keys.
+    """
+    return "0" in pressed
 
 
 def apply_leg_command(sim, target):
@@ -216,6 +225,10 @@ def apply_key(state, keycode):
         return "jump"
     if key == "x":
         return "estop"
+    if key == "7":
+        return "disable"
+    if key == "9":
+        return "stand"
     if key in ("z", "r"):
         return "reset"
     if key == "c":
@@ -262,6 +275,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--speed", type=float, default=0.0)
     ap.add_argument("--leg", type=float, default=S.LEG_NOMINAL)
+    ap.add_argument("--controller", choices=("mpc", "lqr"), default="mpc",
+                    help="mpc = offline explicit MPC tables (default)")
     ap.add_argument("--realtime", type=float, default=1.0,
                     help="1.0 = real time, 0 = maximum responsive speed")
     ap.add_argument("--no-hud", action="store_true")
@@ -271,9 +286,9 @@ def main():
     if args.realtime < 0 or args.duration < 0:
         ap.error("--realtime and --duration must be >= 0")
 
-    sim = S.WheelLegLQR(leg_length=args.leg, target_speed=args.speed)
-    # pure-LQR heading tracking (no separate steering PID): more robust on the
-    # converted model, see README section 6
+    sim = S.WheelLegLQR(leg_length=args.leg, target_speed=args.speed,
+                        controller=args.controller)
+    # Heading error belongs to the balance state; use no separate steering PID.
     sim.yaw_pid_enable = False
     # The key integrator owns the visible 1 m/s^2 trapezoid.  This faster inner
     # ramp only softens the discontinuity when release makes cmd zero; from the
@@ -282,15 +297,18 @@ def main():
     sim.reset()
 
     print("=" * 70)
-    print("  wheelbipeV14_2   VMC + LQR   keyboard control")
+    print(f"  wheelbipeV14_2   VMC + {args.controller.upper()}   keyboard control")
     print("=" * 70)
     print(f"  mass {sim.mass:.2f} kg    leg {sim.leg_length*1000:.1f} mm"
           f"    wheel r {S.WHEEL_R*1000:.0f} mm    |K|max {np.abs(sim.K).max():.1f}")
     print()
-    print("  hold 8/5  speed ramp (5.0 m/s^2, limit +-2.5 m/s, release = 0)")
-    print("  hold 4/6  turn ramp  (5.0 rad/s^2, limit +-0.5 rad/s, release = 0)")
-    print("  1/2/3 leg 150/200/300 mm   hold 0 rear-horizontal @135 mm")
-    print("  Space jump (keeps speed)   X  e-stop")
+    print(f"  hold 8/5  speed ramp ({SPEED_ACCEL:.1f} m/s^2, limit +-{SPEED_MAX:.1f} m/s,"
+          " release = 0)")
+    print(f"  hold 4/6  turn ramp  ({TURN_ACCEL:.1f} rad/s^2, limit +-{TURN_MAX:.1f} rad/s,"
+          " release = 0)")
+    print("  1/2/3 leg 150/270/350 mm   hold 0 hip torque limit 2 Nm")
+    print("  Space jump (keeps speed)   7 disable all forces   9 stand at 150 mm")
+    print("  X e-stop (toggle)")
     print("  Z/R reset    C  camera    F  follow    V  contacts    T  HUD    H  print")
     print()
 
@@ -387,6 +405,23 @@ def main():
                     else:
                         sim.estop = True
                         print("  e-stop ENGAGED")
+                elif action == "disable":
+                    state["speed"] = 0.0
+                    state["turn"] = 0.0
+                    apply_commands()
+                    sim.set_rear_pose(False)
+                    sim.estop = True
+                    sim.d.ctrl[:] = 0.0
+                    sim.d.qfrc_applied[:] = 0.0
+                    sim.d.xfrc_applied[:] = 0.0
+                    print("  7 -> all commanded forces disabled")
+                elif action == "stand":
+                    state["speed"] = 0.0
+                    state["turn"] = 0.0
+                    state["leg"] = 0.150
+                    apply_commands()
+                    sim.request_stand()
+                    print("  9 -> self-right sequence, final legs 150 mm")
                 elif action == "reset":
                     apply_commands()
                     sim.leg_length = state["leg"]
@@ -418,6 +453,12 @@ def main():
                           f"  roll={np.degrees(meas['roll']):+6.2f} deg"
                           f"  L0={meas['leg']['left'][0]*1000:.1f} mm"
                           f"  vx={vx:+.3f} m/s")
+                    trim = S.theta_trim(sim.leg_length)
+                    print(f"    swing err L/R "
+                          f"{np.degrees(meas['leg']['left'][1] - trim):+6.2f} /"
+                          f" {np.degrees(meas['leg']['right'][1] - trim):+6.2f} deg"
+                          f"   (diff "
+                          f"{np.degrees(meas['leg']['left'][1] - meas['leg']['right'][1]):+5.2f} deg)")
                     print(f"    VMC Fcmd L/R {last_info['vmcFL']:+7.1f} /"
                           f" {last_info['vmcFR']:+7.1f} N"
                           f"    Tb L/R {last_info['vmcTbL']:+6.2f} /"
@@ -433,8 +474,8 @@ def main():
                           f" {last_info['gasFR']:+6.1f} N"
                           f"    jump {last_info['jumpPhase']}"
                           f"  height {last_info['jumpHeight']*100:.1f} cm")
-                    print(f"    rear pose {'on' if last_info['rearPose'] else 'off'}"
-                          f"  PID Tp L/R {last_info['rearTpL']:+6.2f} /"
+                    print(f"    Tp limit {'2 Nm (key 0)' if last_info['rearPose'] else '10 Nm'}"
+                          f"  Tp L/R {last_info['rearTpL']:+6.2f} /"
                           f" {last_info['rearTpR']:+6.2f} Nm")
                     print("    linkage deg  "
                           f"L[f1 {link_l['front1']:+5.1f}, f2 {link_l['front2']:+5.1f}, "
@@ -442,13 +483,18 @@ def main():
                           f"R[f1 {link_r['front1']:+5.1f}, f2 {link_r['front2']:+5.1f}, "
                           f"r1 {link_r['rear1']:+5.1f}, r2 {link_r['rear2']:+5.1f}]")
 
+            if sim.rescue_phase not in ("idle", "fault"):
+                state["speed"] = state["turn"] = 0.0
+                state["leg"] = 0.150
+                drive_dirty = True
             if drive_dirty:
                 apply_commands()
 
             for _ in range(clock.steps_due()):
                 if not v.is_running():
                     break
-                if not sim.jump_active and not sim.rear_pose_active:
+                if (not sim.jump_active and not sim.rear_pose_active
+                        and sim.rescue_phase == "idle"):
                     apply_leg_command(sim, state["leg"])
                 last_info = sim.step()
                 n_step += 1
@@ -462,6 +508,7 @@ def main():
 
             if hud.enabled:
                 meas = sim.measure()
+                trim = S.theta_trim(sim.leg_length)
                 link_l = sim.linkage_visual.angle_degrees("left")
                 link_r = sim.linkage_visual.angle_degrees("right")
                 vx = S.WHEEL_R * 0.5 * (meas["wheel_vel"]["left"]
@@ -472,7 +519,10 @@ def main():
                     f"turn  cmd  {state['turn']:+.2f} rad/s    "
                     f"yaw {np.degrees(meas['yaw']):+6.1f} deg",
                     f"leg   cmd  {state['leg']*1000:5.1f} mm      "
-                    f"actual {meas['leg']['left'][0]*1000:5.1f} mm",
+                    f"actual {meas['leg']['left'][0]*1000:5.1f} mm   "
+                    f"swing err L/R "
+                    f"{np.degrees(meas['leg']['left'][1] - trim):+5.2f} / "
+                    f"{np.degrees(meas['leg']['right'][1] - trim):+5.2f} deg",
                     f"VMC Fcmd L/R {last_info['vmcFL']:+6.1f} / "
                     f"{last_info['vmcFR']:+6.1f} N   "
                     f"Fact {last_info['legActFL']:+6.1f} / "
@@ -487,17 +537,17 @@ def main():
                     f"gas spring L/R {last_info['gasFL']:+6.1f} / "
                     f"{last_info['gasFR']:+6.1f} N   jump {last_info['jumpPhase']} "
                     f"{last_info['jumpHeight']*100:4.1f} cm",
-                    f"rear pose {'ON' if last_info['rearPose'] else 'off'}  "
-                    f"PID Tp L/R {last_info['rearTpL']:+5.1f} / "
+                    f"Tp limit {'2 Nm (0)' if last_info['rearPose'] else '10 Nm'}  "
+                    f"Tp L/R {last_info['rearTpL']:+5.1f} / "
                     f"{last_info['rearTpR']:+5.1f} Nm",
                     f"link q deg  F1 L/R {link_l['front1']:+5.1f} / "
                     f"{link_r['front1']:+5.1f}   R1 L/R "
                     f"{link_l['rear1']:+5.1f} / {link_r['rear1']:+5.1f}",
-                    f"pitch {np.degrees(meas['pitch']):+6.2f} deg   "
+                    f"pitch {np.degrees(meas['pitch_full']):+6.2f} deg   "
                     f"roll {np.degrees(meas['roll']):+6.2f} deg   "
                     f"z {sim.d.qpos[2]:.3f} m",
-                    ("E-STOP ENGAGED" if sim.estop else
-                     f"cam {state['cam']}   follow {'on' if state['follow'] else 'off'}"),
+                    ("DISABLED (7)   9 SELF-RIGHT" if sim.estop else
+                     f"self-right {sim.rescue_phase}   cam {state['cam']}"),
                 ])
             hud.draw(v)
             v.sync()

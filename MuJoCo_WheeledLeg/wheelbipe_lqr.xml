@@ -1,12 +1,20 @@
 <mujoco model="wheelbipe_lqr">
-  <compiler angle="radian" meshdir="meshes_lqr" autolimits="true"/>
+  <compiler angle="radian" meshdir="meshes_lqr" texturedir="meshes_lqr" autolimits="true"/>
   <option timestep="0.001" solver="Newton" iterations="80" cone="elliptic" jacobian="dense" integrator="implicitfast"/>
   <default>
     <geom friction="1.2 0.002 0.0001" solref="0.01 1" solimp="0.95 0.99 0.0005"/>
   </default>
   <worldbody>
-    <geom name="floor" type="plane" size="8 8 0.1" friction="1.5 0.002 0.0001" condim="3" conaffinity="3" material="floor_mat"/>
-    <geom name="step" type="box" size="1 0.5 0.1" pos="1.8 0 0.1" friction="1.5 0.002 0.0001" condim="3" conaffinity="3" material="step_mat"/>
+    <geom name="floor" type="plane" size="8 8 0.1" friction="1.5 0.002 0.0001" condim="3" conaffinity="3" rgba="0 0 0 0" group="3"/>
+    <!-- RMUL 2027 official STEP tessellation, CAD colours and top texture. -->
+    <geom name="arena_paper" type="mesh" mesh="arena_paper" material="arena_paper_mat" contype="0" conaffinity="0"/>
+    <geom name="arena_white" type="mesh" mesh="arena_white" material="arena_white_mat" contype="0" conaffinity="0"/>
+    <geom name="arena_red" type="mesh" mesh="arena_red" material="arena_red_mat" contype="0" conaffinity="0"/>
+    <geom name="arena_blue" type="mesh" mesh="arena_blue" material="arena_blue_mat" contype="0" conaffinity="0"/>
+    <geom name="arena_green" type="mesh" mesh="arena_green" material="arena_green_mat" contype="0" conaffinity="0"/>
+    <geom name="arena_dark" type="mesh" mesh="arena_dark" material="arena_dark_mat" contype="0" conaffinity="0"/>
+    <geom name="arena_light" type="mesh" mesh="arena_light" material="arena_light_mat" contype="0" conaffinity="0"/>
+    <include file="arena_collision.xml"/>
     <light pos="0 0 4" dir="0 0 -1" castshadow="false"/>
     <body name="base_link" pos="0 0 0.18483">
       <freejoint name="root"/>
@@ -21,32 +29,32 @@
       <geom type="mesh" mesh="base_link_mesh" contype="0" conaffinity="0" pos="0 0 0" quat="1 0 0 0" rgba="0.792157 0.819608 0.933333 1"/>
       <geom type="mesh" mesh="gimbal_yaw_link_mesh" contype="0" conaffinity="0" pos="0 0 0.05495" quat="1 0 0 0" rgba="0.839216 0.913725 0.960784 1"/>
       <geom type="mesh" mesh="gimbal_pitch_link_mesh" contype="0" conaffinity="0" pos="-0.058485 -0.0553 0.23495" quat="1 0 0 0" rgba="0.839216 0.913725 0.960784 1"/>
-      <geom type="mesh" mesh="left_bottom1_guide_link_mesh" contype="0" conaffinity="0" pos="0.125 -0.146 -0.156996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="left_bottom2_guide_link_mesh" contype="0" conaffinity="0" pos="0.025 0.146 -0.159" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="left_bottom3_guide_link_mesh" contype="0" conaffinity="0" pos="-0.025 0.146 -0.159" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="left_bottom4_guide_link_mesh" contype="0" conaffinity="0" pos="-0.125 0.146 -0.157" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="left_front1_guide_link_mesh" contype="0" conaffinity="0" pos="0.18571 0.115 -0.143725" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="left_front_guide_link_mesh" contype="0" conaffinity="0" pos="0.25549 0.115 -0.132" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="left_rear_guide_link_mesh" contype="0" conaffinity="0" pos="-0.24047 0.099 -0.137" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="right_bottom1_guide_link_mesh" contype="0" conaffinity="0" pos="0.125 -0.146 -0.156996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="right_bottom2_guide_link_mesh" contype="0" conaffinity="0" pos="0.025 -0.146 -0.158996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="right_bottom3_guide_link_mesh" contype="0" conaffinity="0" pos="-0.025 -0.146 -0.158996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="right_bottom4_guide_link_mesh" contype="0" conaffinity="0" pos="-0.125 -0.146 -0.156996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="right_front1_guide_link_mesh" contype="0" conaffinity="0" pos="0.18571 -0.115 -0.143725" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="right_front_guide_link_mesh" contype="0" conaffinity="0" pos="0.25549 -0.115 -0.132" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
-      <geom type="mesh" mesh="right_rear_guide_link_mesh" contype="0" conaffinity="0" pos="-0.24047 -0.099 -0.137" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="left_bottom1_guide_link_mesh" contype="2" conaffinity="0" pos="0.125 -0.146 -0.156996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="left_bottom2_guide_link_mesh" contype="2" conaffinity="0" pos="0.025 0.146 -0.159" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="left_bottom3_guide_link_mesh" contype="2" conaffinity="0" pos="-0.025 0.146 -0.159" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="left_bottom4_guide_link_mesh" contype="2" conaffinity="0" pos="-0.125 0.146 -0.157" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="left_front1_guide_link_mesh" contype="2" conaffinity="0" pos="0.18571 0.115 -0.143725" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="left_front_guide_link_mesh" contype="2" conaffinity="0" pos="0.25549 0.115 -0.132" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="left_rear_guide_link_mesh" contype="2" conaffinity="0" pos="-0.24047 0.099 -0.137" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="right_bottom1_guide_link_mesh" contype="2" conaffinity="0" pos="0.125 -0.146 -0.156996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="right_bottom2_guide_link_mesh" contype="2" conaffinity="0" pos="0.025 -0.146 -0.158996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="right_bottom3_guide_link_mesh" contype="2" conaffinity="0" pos="-0.025 -0.146 -0.158996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="right_bottom4_guide_link_mesh" contype="2" conaffinity="0" pos="-0.125 -0.146 -0.156996" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="right_front1_guide_link_mesh" contype="2" conaffinity="0" pos="0.18571 -0.115 -0.143725" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="right_front_guide_link_mesh" contype="2" conaffinity="0" pos="0.25549 -0.115 -0.132" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
+      <geom type="mesh" mesh="right_rear_guide_link_mesh" contype="2" conaffinity="0" pos="-0.24047 -0.099 -0.137" quat="1 0 0 0" rgba="0.298039 0.298039 0.298039 1"/>
       <body name="left_leg" pos="0 0.174 0">
-        <joint name="left_hip_joint" type="hinge" axis="0 1 0" range="-1.75 1.75" armature="0.002" damping="0.05"/>
+        <joint name="left_hip_joint" type="hinge" axis="0 1 0" limited="false" armature="0.002" damping="0.05" frictionloss="0.5"/>
         <inertial pos="0.00330501 0.024025 -0.062415" mass="1.06781" diaginertia="0.00041004 0.00180096 0.00180096" quat="0.415652 0.593221 0.572043 -0.384822"/>
-        <geom type="mesh" mesh="left_rear1_link_mesh" pos="0 0 0" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
-        <geom type="mesh" mesh="left_rear2_link_mesh" pos="-0.21 0.0145 0" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
-        <geom type="mesh" mesh="left_rear2_guide_link_mesh" pos="-0.247468 0.021 -0.014006" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <geom type="mesh" mesh="left_rear1_link_mesh" pos="0 0 0" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
+        <geom type="mesh" mesh="left_rear2_link_mesh" pos="-0.21 0.0145 0" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+        <geom type="mesh" mesh="left_rear2_guide_link_mesh" pos="-0.247468 0.021 -0.014006" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
         <geom type="mesh" mesh="left_spring1_link_mesh" pos="0.0023551 -0.002 -0.044938" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.866667 0.866667 0.890196 1"/>
         <geom type="mesh" mesh="left_spring2_link_mesh" pos="-0.0305949 -0.0075 -0.0405358" quat="0.997796 0 0.0663616 0" contype="0" conaffinity="0" rgba="0 0 0 1"/>
-        <geom type="mesh" mesh="left_front1_link_mesh" pos="0 0.0105 0" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
-        <geom type="mesh" mesh="left_front2_link_mesh" pos="0.11265 0.00100001 0.013046" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
-        <geom type="mesh" mesh="left_front3_link_mesh" pos="0.00386 0.00750001 -0.066895" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
-        <geom type="mesh" mesh="left_front4_link_mesh" pos="-0.16119 0.00100001 0.046965" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+        <geom type="mesh" mesh="left_front1_link_mesh" pos="0 0.0105 0" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
+        <geom type="mesh" mesh="left_front2_link_mesh" pos="0.11265 0.00100001 0.013046" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+        <geom type="mesh" mesh="left_front3_link_mesh" pos="0.00386 0.00750001 -0.066895" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+        <geom type="mesh" mesh="left_front4_link_mesh" pos="-0.16119 0.00100001 0.046965" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
         <body name="left_leg_ext" pos="0.00661001 0.04805 -0.12483">
           <joint name="left_legslide_joint" type="slide" axis="0.052878 0 -0.998601" range="-0.05 0.330" damping="40"/>
           <inertial pos="0 0 0" mass="0.001" diaginertia="1e-6 1e-6 1e-6"/>
@@ -59,17 +67,17 @@
         </body>
       </body>
       <body name="right_leg" pos="0 -0.174 0">
-        <joint name="right_hip_joint" type="hinge" axis="0 1 0" range="-1.75 1.75" armature="0.002" damping="0.05"/>
+        <joint name="right_hip_joint" type="hinge" axis="0 1 0" limited="false" armature="0.002" damping="0.05" frictionloss="0.5"/>
         <inertial pos="0.00330501 -0.024025 -0.062415" mass="1.04415" diaginertia="0.000400955 0.00176105 0.00176105" quat="0.593221 0.415652 0.384822 -0.572043"/>
-        <geom type="mesh" mesh="right_rear1_link_mesh" pos="0 0 0" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
-        <geom type="mesh" mesh="right_rear2_link_mesh" pos="-0.21 -0.0145 0" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
-        <geom type="mesh" mesh="right_rear2_guide_link_mesh" pos="-0.247468 -0.021 -0.0140058" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
+        <geom type="mesh" mesh="right_rear1_link_mesh" pos="0 0 0" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
+        <geom type="mesh" mesh="right_rear2_link_mesh" pos="-0.21 -0.0145 0" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+        <geom type="mesh" mesh="right_rear2_guide_link_mesh" pos="-0.247468 -0.021 -0.0140058" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.298039 0.298039 0.298039 1"/>
         <geom type="mesh" mesh="right_spring1_link_mesh" pos="0.0023551 0.00194999 -0.0449383" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.866667 0.866667 0.890196 1"/>
         <geom type="mesh" mesh="right_spring2_link_mesh" pos="-0.0305949 0.00744999 -0.0405361" quat="0.997796 0 0.0663616 0" contype="0" conaffinity="0" rgba="0 0 0 1"/>
-        <geom type="mesh" mesh="right_front1_link_mesh" pos="0 -0.0105 0" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
-        <geom type="mesh" mesh="right_front2_link_mesh" pos="0.11265 -0.00100001 0.013046" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
-        <geom type="mesh" mesh="right_front3_link_mesh" pos="0.00386 -0.00750001 -0.066895" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
-        <geom type="mesh" mesh="right_front4_link_mesh" pos="-0.16119 -0.00100001 0.046965" quat="1 0 0 0" contype="0" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+        <geom type="mesh" mesh="right_front1_link_mesh" pos="0 -0.0105 0" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.898039 0.917647 0.929412 1"/>
+        <geom type="mesh" mesh="right_front2_link_mesh" pos="0.11265 -0.00100001 0.013046" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+        <geom type="mesh" mesh="right_front3_link_mesh" pos="0.00386 -0.00750001 -0.066895" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
+        <geom type="mesh" mesh="right_front4_link_mesh" pos="-0.16119 -0.00100001 0.046965" quat="1 0 0 0" contype="2" conaffinity="0" rgba="0.929412 0.929412 0.929412 1"/>
         <body name="right_leg_ext" pos="0.00661001 -0.04805 -0.12483">
           <joint name="right_legslide_joint" type="slide" axis="0.052878 0 -0.998601" range="-0.05 0.330" damping="40"/>
           <inertial pos="0 0 0" mass="0.001" diaginertia="1e-6 1e-6 1e-6"/>
@@ -95,7 +103,14 @@
     <texture name="sky" type="skybox" builtin="gradient" rgb1="0.08 0.11 0.17" rgb2="0.28 0.34 0.44" width="512" height="3072"/>
     <texture name="floor_grid" type="2d" builtin="checker" rgb1="0.22 0.25 0.30" rgb2="0.30 0.34 0.40" width="512" height="512"/>
     <material name="floor_mat" texture="floor_grid" texrepeat="8 8" texuniform="true" reflectance="0.08"/>
-    <material name="step_mat" rgba="0.40 0.43 0.49 1" specular="0.12" shininess="0.18" reflectance="0.04"/>
+    <texture name="arena_top_tex" type="2d" file="arena_official_top.png"/>
+    <material name="arena_paper_mat" texture="arena_top_tex" rgba="1 1 1 1"/>
+    <material name="arena_white_mat" rgba="1 1 1 1"/>
+    <material name="arena_red_mat" rgba="1 0 0 1"/>
+    <material name="arena_blue_mat" rgba="0 0.00784314 1 1"/>
+    <material name="arena_green_mat" rgba="0 1 0 1"/>
+    <material name="arena_dark_mat" rgba="0.2 0.2 0.2 1"/>
+    <material name="arena_light_mat" rgba="0.8784 0.949 1 1"/>
     <mesh name="base_link_mesh" file="base_link.stl"/>
     <mesh name="gimbal_yaw_link_mesh" file="gimbal_yaw_link.stl"/>
     <mesh name="gimbal_pitch_link_mesh" file="gimbal_pitch_link.stl"/>
@@ -133,6 +148,13 @@
     <mesh name="right_front4_link_mesh" file="right_front4_link.stl"/>
     <mesh name="left_wheel_link_mesh" file="left_wheel_link.stl"/>
     <mesh name="right_wheel_link_mesh" file="right_wheel_link.stl"/>
+    <mesh name="arena_paper" file="arena_paper.obj" inertia="shell"/>
+    <mesh name="arena_white" file="arena_white.obj" inertia="shell"/>
+    <mesh name="arena_red" file="arena_red.obj" inertia="shell"/>
+    <mesh name="arena_blue" file="arena_blue.obj" inertia="shell"/>
+    <mesh name="arena_green" file="arena_green.obj" inertia="shell"/>
+    <mesh name="arena_dark" file="arena_dark.obj" inertia="shell"/>
+    <mesh name="arena_light" file="arena_light.obj" inertia="shell"/>
   </asset>
   <actuator>
     <motor name="left_wheel_motor" joint="left_wheel_joint" gear="1" ctrlrange="-7 7"/>
