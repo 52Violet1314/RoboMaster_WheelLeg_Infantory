@@ -1,6 +1,7 @@
 #include "Ground_clearance_detection.h"
 #include "app_leg_force_compensation.hpp"
 #include "arm_math.h"
+#include <math.h>
 
 /* ==================== 可调参数（上板标定） ==================== */
 /* 质量口径：轮毂电机转子 + 轮子。腿对轮轴的作用已由 F0/Tp 投影给出，
@@ -10,7 +11,7 @@
 
 #define GD_G                    9.81f
 
-/* Fn 一阶低通系数（1ms 周期时约 130Hz，保留冲击响应） */
+/* Fn 一阶低通系数（1 ms 周期时截止频率约 26 Hz） */
 #define GD_FN_FILTER_A          0.15f
 
 /* 离地/落地阈值（N）。先按“静态 Fn 的一半”预置，必须上板实测后改。 */
@@ -37,7 +38,12 @@ float Ground_Clearance_Detection(float f0_without_spring_n, float tp_vmc_nm, flo
                                  float d_L0, float dd_L0, float dd_zm,
                                  float phi, float d_phi, float dd_phi)
 {
-    if (L0 <= 0.0f) return 0.0f;
+    if (!isfinite(f0_without_spring_n) || !isfinite(tp_vmc_nm) ||
+        !isfinite(L0) || !isfinite(d_L0) || !isfinite(dd_L0) ||
+        !isfinite(dd_zm) || !isfinite(phi) || !isfinite(d_phi) ||
+        !isfinite(dd_phi) || L0 <= 0.0f) {
+        return 0.0f;
+    }
 
     const float cos_phi = arm_cos_f32(phi);
     const float sin_phi = arm_sin_f32(phi);
@@ -67,6 +73,16 @@ float GroundDetection_Update(uint8_t side,
 {
     if (side > 1U) return 0.0f;
 
+    GroundDetection_State_t *st = &s_state[side];
+    if (!isfinite(f0_command_n) || !isfinite(tp_vmc_nm) ||
+        !isfinite(L0) || !isfinite(d_L0) || !isfinite(dd_L0) ||
+        !isfinite(dd_zm) || !isfinite(phi) || !isfinite(d_phi) ||
+        !isfinite(dd_phi) || L0 <= 0.0f) {
+        /* 无效样本不允许污染滤波器，也不推进连续确认计数。 */
+        st->cnt = 0U;
+        return st->init ? st->fn_filt : 0.0f;
+    }
+
     /* 还原“腿对轮子的实际沿腿长支持力”。
      *
      * 沿腿长方向压在轮上的力有两部分：
@@ -81,8 +97,6 @@ float GroundDetection_Update(uint8_t side,
     const float fn_raw = Ground_Clearance_Detection(f0_without_spring_n, tp_vmc_nm, L0,
                                                     d_L0, dd_L0, dd_zm,
                                                     phi, d_phi, dd_phi);
-
-    GroundDetection_State_t *st = &s_state[side];
 
     if (!st->init) {
         st->fn_filt = fn_raw;

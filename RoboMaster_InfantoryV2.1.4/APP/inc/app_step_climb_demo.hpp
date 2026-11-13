@@ -3,23 +3,30 @@
 
 #include <stdbool.h>
 
-/* CH6（Channel[6]）演示开关；保持 CH7=LQR、CH9=总使能由操作手控制。 */
+/* 总开关默认关闭：关闭时 CalculateTask 不调用状态机，正常控制完全透传。 */
+#define STEP_CLIMB_CONTROL_ENABLE              0
+
+/* CH6（Channel[6]）模式开关；保持 CH7=LQR、CH9=总使能由操作手控制。 */
 #define STEP_CLIMB_SWITCH_THRESHOLD             100
 #define STEP_CLIMB_DETECT_ANGLE_ABS_RAD        0.35f
+#define STEP_CLIMB_DETECT_CONFIRM_S            0.020f
 #define STEP_CLIMB_TARGET_LENGTH_M             0.140f
 #define STEP_CLIMB_TARGET_REAR_ANGLE_RAD      -0.45f
 #define STEP_CLIMB_LENGTH_TOLERANCE_M          0.005f
 #define STEP_CLIMB_ANGLE_TOLERANCE_RAD         0.050f
 #define STEP_CLIMB_ACTION_TIMEOUT_S            3.0f
+#define STEP_CLIMB_RECOVER_TIMEOUT_S           3.0f
 
 typedef enum { STEP_CLIMB_IDLE, STEP_CLIMB_ARMED, STEP_CLIMB_ACTION,
                STEP_CLIMB_RECOVER, STEP_CLIMB_FAULT_HOLD } StepClimbState_t;
 
 typedef struct {
+    bool owns_control;
     bool force_not_up;
+    bool suppress_ground_detection;
     bool override_leg_length;
     bool swing_pid_enable;
-    bool allow_gravity_before_stand;
+    bool allow_gravity;
     bool allow_lqr;
     float leg_length_target_m;
     float swing_target_rad;

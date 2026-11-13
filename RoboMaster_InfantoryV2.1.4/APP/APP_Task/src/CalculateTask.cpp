@@ -31,6 +31,7 @@
 #include "app_K_value.hpp"
 #include "app_vmc.hpp"
 #include "app_leg_control.hpp"
+#include "app_step_climb_demo.hpp"
 
 // 定义参考值（根据实际需求调整）
 float theta_ref = 0.0f; // 期望整体角度
@@ -134,6 +135,7 @@ void CaculateTask(void *pvParameters) {
     float rescue_tp_l = 0.0f, rescue_tp_r = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     LegControl_Init();
+    StepClimb_Init();
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, DM_MOTOR_MODEL_8009, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P2, DM_MOTOR_MODEL_8009, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -355,6 +357,23 @@ void CaculateTask(void *pvParameters) {
         }
         const bool total_enable = (remote_snapshot.sbus_data.Channel[9] >= 100);
         const bool lqr_switch_enabled = (remote_snapshot.sbus_data.Channel[7] > 100);
+#if STEP_CLIMB_CONTROL_ENABLE
+        const bool step_detection_enabled =
+                (remote_snapshot.sbus_data.Channel[6] >= STEP_CLIMB_SWITCH_THRESHOLD);
+        const StepClimbCommand_t step_cmd = StepClimb_Update(
+                cal_dt, step_detection_enabled, total_enable, lqr_switch_enabled,
+                stand_state == StandState_Up,
+                pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.L0_R,
+                pClassicData->States_Data.theta_L, pClassicData->States_Data.theta_R);
+#else
+        StepClimbCommand_t step_cmd = {};
+        step_cmd.allow_gravity = true;
+        step_cmd.allow_lqr = true;
+#endif
+        if (step_cmd.force_not_up) {
+            stand_state = StandState_NotUp;
+            stand_not_up_time = 0.0f;
+        }
 #if LEG_CONTROL_TEST_MODE
         StandUp_Flag = true;
 #else
@@ -364,7 +383,7 @@ void CaculateTask(void *pvParameters) {
         // ====== 自救状态机：判定与相位推进 ======
         /* 只有在总使能打开时才让状态机启动；失能立即回到 Idle 并清状态，
          * 避免重新使能时复现上一次的残留命令。 */
-        const bool rescue_armed = (remote_snapshot.sbus_data.Channel[9] >= 100);
+        const bool rescue_armed = total_enable && !step_cmd.owns_control;
         const float rescue_pitch = pClassicData->IMU_Data.pitch;
         const float rescue_theta_l = pClassicData->States_Data.theta_L;
         const float rescue_theta_r = pClassicData->States_Data.theta_R;
@@ -421,7 +440,8 @@ void CaculateTask(void *pvParameters) {
         theta_L_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_L);
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
-        const bool lqr_enabled = !LEG_CONTROL_TEST_MODE && lqr_switch_enabled;
+        const bool lqr_enabled = !LEG_CONTROL_TEST_MODE && lqr_switch_enabled &&
+                                 step_cmd.allow_lqr;
         const bool leg_pid_enabled = total_enable;
         /* LQR 起身后以当前位姿作为位置/yaw 工作点。 */
         const bool pos_ref_ready = leg_pid_enabled && lqr_enabled && StandUp_Flag;
@@ -465,7 +485,7 @@ void CaculateTask(void *pvParameters) {
                                             pClassicData->States_Data.theta_R);
         }
 #else
-        if (leg_pid_enabled && StandUp_Flag) {
+        if (leg_pid_enabled && StandUp_Flag && step_cmd.allow_gravity) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
@@ -480,10 +500,10 @@ void CaculateTask(void *pvParameters) {
         const bool swing_pid_enable = false;
         const float swing_target_rad = 0.0f;
 #else
-        const bool override_leg_target = false;
-        const float override_leg_target_m = 0.0f;
-        const bool swing_pid_enable = false;
-        const float swing_target_rad = 0.0f;
+        const bool override_leg_target = step_cmd.override_leg_length;
+        const float override_leg_target_m = step_cmd.leg_length_target_m;
+        const bool swing_pid_enable = step_cmd.swing_pid_enable;
+        const float swing_target_rad = step_cmd.swing_target_rad;
 #endif
         /* 自救 Stand 相位把腿长钉在 150 mm；自救成功后的保持期同样忽略旋钮，
          * 避免刚站稳就被拉回旧档位。 */
@@ -614,30 +634,36 @@ void CaculateTask(void *pvParameters) {
         /* 离地检测使用本轮最终 F0 与真正送入 VMC 的 Tp。
          * GroundDetection_Update 内部只剔除弹簧内部抵消项，并完成滤波、
          * 迟滞及连续拍确认；不再用上一轮命令或重复叠加重力补偿。 */
-        const float fn_left = GroundDetection_Update(
-                GD_SIDE_LEFT,
-                pClassicData->Contronller_Data.F0_L,
-                pClassicData->Contronller_Data.Tp_L,
-                pClassicData->Leg_Data.L0_L,
-                pClassicData->Leg_Data.d_L0_L,
-                pClassicData->Leg_Data.dd_L0_L,
-                pClassicData->IMU_Data.accel_v,
-                pClassicData->States_Data.theta_L,
-                pClassicData->States_Data.d_theta_L,
-                pClassicData->States_Data.dd_theta_L);
-        const float fn_right = GroundDetection_Update(
-                GD_SIDE_RIGHT,
-                pClassicData->Contronller_Data.F0_R,
-                pClassicData->Contronller_Data.Tp_R,
-                pClassicData->Leg_Data.L0_R,
-                pClassicData->Leg_Data.d_L0_R,
-                pClassicData->Leg_Data.dd_L0_R,
-                pClassicData->IMU_Data.accel_v,
-                pClassicData->States_Data.theta_R,
-                pClassicData->States_Data.d_theta_R,
-                pClassicData->States_Data.dd_theta_R);
-        (void)fn_left;
-        (void)fn_right;
+#if GROUND_DETECTION_ENABLE
+        if (step_cmd.suppress_ground_detection) {
+            GroundDetection_Reset();
+        } else {
+            const float fn_left = GroundDetection_Update(
+                    GD_SIDE_LEFT,
+                    pClassicData->Contronller_Data.F0_L,
+                    pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
+                    pClassicData->Leg_Data.L0_L,
+                    pClassicData->Leg_Data.d_L0_L,
+                    pClassicData->Leg_Data.dd_L0_L,
+                    pClassicData->IMU_Data.accel_v,
+                    pClassicData->States_Data.theta_L,
+                    pClassicData->States_Data.d_theta_L,
+                    pClassicData->States_Data.dd_theta_L);
+            const float fn_right = GroundDetection_Update(
+                    GD_SIDE_RIGHT,
+                    pClassicData->Contronller_Data.F0_R,
+                    pClassicData->Contronller_Data.Tp_R + gravity_tp_r,
+                    pClassicData->Leg_Data.L0_R,
+                    pClassicData->Leg_Data.d_L0_R,
+                    pClassicData->Leg_Data.dd_L0_R,
+                    pClassicData->IMU_Data.accel_v,
+                    pClassicData->States_Data.theta_R,
+                    pClassicData->States_Data.d_theta_R,
+                    pClassicData->States_Data.dd_theta_R);
+            (void)fn_left;
+            (void)fn_right;
+        }
+#endif
 
         {
             /* 原控制周期末尾调试选择：默认不输出。 */

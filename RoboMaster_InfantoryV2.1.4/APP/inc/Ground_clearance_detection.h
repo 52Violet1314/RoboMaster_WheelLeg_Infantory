@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+/* 仅控制离地观测器是否在 CalculateTask 中运行。
+ * 默认关闭：当前 Fn/离地状态只用于观测，尚未接入正常控制决策。 */
+#define GROUND_DETECTION_ENABLE  0
+
 #ifdef __cplusplus
 extern "C" {
 #endif
