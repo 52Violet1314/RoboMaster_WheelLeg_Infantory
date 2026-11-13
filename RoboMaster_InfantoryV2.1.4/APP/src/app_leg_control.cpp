@@ -2,6 +2,7 @@
 
 #include "app_leg_force_compensation.hpp"
 #include "app_pid.h"
+#include "app_roll_stability.hpp"
 #include <cmath>
 #include <cstdint>
 
@@ -23,6 +24,7 @@ void LegControl_Init(void) {
                    LEG_LENGTH_PID_KI, LEG_LENGTH_PID_KD);
     Float_PID_Init(&leg_swing_pid_l, LEG_SWING_PID_KP, LEG_SWING_PID_KI, LEG_SWING_PID_KD);
     Float_PID_Init(&leg_swing_pid_r, LEG_SWING_PID_KP, LEG_SWING_PID_KI, LEG_SWING_PID_KD);
+    RollStability_Init();
 }
 
 void LegControl_Update(Classic_Data_t *pClassicData, float dt,
@@ -95,24 +97,24 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     if (override_leg_target) leg_knob_target_m = override_leg_target_m;
     pClassicData->Target_Data.Target_LegLong = leg_knob_target_m;
 
-    /* 仅已起身时计算左右反向的 roll F0 补偿。 */
-    float roll_comp = 0.0f;
-    if (stand_up && !LEG_CONTROL_TEST_MODE) {
-        constexpr float roll_kp = 40.0f;
-        constexpr float roll_kd = 2.5f;
-        constexpr float roll_f0_limit = 8.0f;
-        roll_comp = -(roll_kp * pClassicData->IMU_Data.roll
-                      + roll_kd * pClassicData->IMU_Data.delta_roll);
-        if (roll_comp > roll_f0_limit) {
-            roll_comp = roll_f0_limit;
-        } else if (roll_comp < -roll_f0_limit) {
-            roll_comp = -roll_f0_limit;
-        }
-    }
+    const bool roll_stability_enabled =
+            stand_up && leg_pid_enabled && !LEG_CONTROL_TEST_MODE;
+    const RollStabilityOutput_t roll_output = RollStability_Update(
+            pClassicData->IMU_Data.roll,
+            pClassicData->IMU_Data.delta_roll,
+            dt, roll_stability_enabled);
 
     /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
-    const float leg_target_r = pClassicData->Target_Data.Target_LegLong;
-    const float leg_target_l = leg_target_r;
+    float leg_target_l = pClassicData->Target_Data.Target_LegLong +
+                         roll_output.leg_length_delta_m;
+    float leg_target_r = pClassicData->Target_Data.Target_LegLong -
+                         roll_output.leg_length_delta_m;
+    if (stand_up && !LEG_CONTROL_TEST_MODE) {
+        if (leg_target_l < leg_knob_stand_min_m) leg_target_l = leg_knob_stand_min_m;
+        if (leg_target_l > leg_knob_stand_max_m) leg_target_l = leg_knob_stand_max_m;
+        if (leg_target_r < leg_knob_stand_min_m) leg_target_r = leg_knob_stand_min_m;
+        if (leg_target_r > leg_knob_stand_max_m) leg_target_r = leg_knob_stand_max_m;
+    }
     const float leg_err_l = leg_target_l - pClassicData->Leg_Data.L0_L;
     const float leg_err_r = leg_target_r - pClassicData->Leg_Data.L0_R;
     /* 仅用于腿长 PID 的误差死区。保留原始误差给调试和目标切换判断；
@@ -173,10 +175,10 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     const float stand_offset_r = (stand_up && !LEG_CONTROL_TEST_MODE) ? 10.0f : 0.0f;
     pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
             + stand_offset_l
-            + roll_comp;
+            + roll_output.support_force_delta_n;
     pClassicData->Contronller_Data.F0_R = leg_r_out + spring_preload_f0_r
             + stand_offset_r
-            - roll_comp;
+            - roll_output.support_force_delta_n;
     if (!LEG_CONTROL_TEST_MODE && swing_pid_enable && leg_pid_enabled) {
         const float tp_l = PID_Max_Float_Dt(&leg_swing_pid_l, swing_target_rad,
                 pClassicData->States_Data.theta_L, LEG_SWING_PID_OUTPUT_LIMIT_NM,
