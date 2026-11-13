@@ -248,6 +248,12 @@ class WheelLegLQR:
         self._jump_had_contact = False
         self.last_gas_force = {"left": 0.0, "right": 0.0}
         self.last_vmc_total = {"left": 0.0, "right": 0.0}
+        # Runtime telemetry consumed by the GUI data view.  These are copies
+        # of the values used by the controller, not a second calculation.
+        self.last_lqr_state = np.zeros(10)
+        self.last_virtual_input = np.zeros(4)
+        self.last_vmc_pid_force = {"left": 0.0, "right": 0.0}
+        self.last_vmc_roll_comp = 0.0
         self.speed_ramp = speed_ramp
         self.speed_cmd = target_speed
         self.turn_rate = 0.0          # yaw rate command [rad/s]
@@ -775,6 +781,8 @@ class WheelLegLQR:
             u[1] += turn
         # Keep the final virtual-input limits before VMC and auxiliary loops.
         u = np.clip(u, -limits, limits)
+        self.last_lqr_state = x.copy()
+        self.last_virtual_input = u.copy()
         ctrl = np.zeros(self.m.nu)
         for i, side in enumerate(("left", "right")):
             ctrl[self.a_wheel[side]] = sg["Tw"] * u[i]
@@ -837,10 +845,12 @@ class WheelLegLQR:
         roll_comp = float(np.clip(60.0 * meas["roll"]
                                   + 3.0 * meas["omega_heading"][0],
                                   -30.0, 30.0))
+        self.last_vmc_roll_comp = roll_comp
         for side, sign in (("left", -1.0), ("right", +1.0)):
             L0 = meas["leg"][side][0]
             pid = self.pid_l if side == "left" else self.pid_r
             pid_force = pid(self.leg_length, L0, self.dt)
+            self.last_vmc_pid_force[side] = pid_force
             total_force = self.F0_ff + pid_force + sign * roll_comp
             if self.jump_phase == "thrust":
                 total_force = JUMP_TOTAL_FORCE_PER_LEG + sign * roll_comp

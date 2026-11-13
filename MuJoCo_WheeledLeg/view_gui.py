@@ -19,6 +19,8 @@ Keyboard-driven MuJoCo GUI: VMC + explicit MPC (default) or LQR.
   F              toggle camera follow
   V              toggle contact-force display
   T              toggle the on-screen HUD
+  D              toggle VMC / LQR / MPC data view
+  P              toggle real-time Vofa-style waveform scope
   H              print the state to the console
   Esc            quit
 ------------------------------------------------------------------ mouse
@@ -32,7 +34,9 @@ import queue
 import sys
 import threading
 import time
+from collections import deque
 
+import matplotlib.pyplot as plt
 import mujoco
 import mujoco.viewer
 import numpy as np
@@ -63,7 +67,7 @@ CAM_ORDER = list(CAMERAS)
 class KeyEvents:
     """Small, bounded bridge from MuJoCo's UI thread to the sim thread."""
 
-    _DEBOUNCED = frozenset(" xzcvthfr12379")
+    _DEBOUNCED = frozenset(" xzcvtdphfr12379")
 
     def __init__(self, capacity=64, debounce_seconds=0.20):
         self._events = queue.Queue(maxsize=capacity)
@@ -244,6 +248,12 @@ def apply_key(state, keycode):
     if key == "t":
         state["hud"] = not state["hud"]
         return "hud"
+    if key == "d":
+        state["data_view"] = not state["data_view"]
+        return "data"
+    if key == "p":
+        state["scope"] = not state["scope"]
+        return "scope"
     if key == "h":
         return "print"
     return None
@@ -255,10 +265,12 @@ class HUD:
     def __init__(self, model):
         self.model = model
         self.lines: list[str] = []
+        self.data_lines: list[str] = []
         self.enabled = True
 
-    def set(self, lines):
+    def set(self, lines, data_lines=None):
         self.lines = lines
+        self.data_lines = data_lines or []
 
     def draw(self, viewer):
         if not self.enabled or not self.lines:
@@ -268,7 +280,106 @@ class HUD:
         gp = mujoco.mjtGridPos.mjGRID_BOTTOMLEFT
         # each line becomes its own overlay box stacked from the bottom up
         texts = [(fs, gp, "", "\n".join(self.lines))]
+        if self.data_lines:
+            texts.append((fs, mujoco.mjtGridPos.mjGRID_BOTTOMRIGHT,
+                          "", "\n".join(self.data_lines)))
         viewer.set_texts(texts)
+
+
+class ControlScope:
+    """Lightweight rolling scope: controller stays at 1 kHz; plotting does not."""
+
+    WINDOW_SECONDS = 5.0
+    SAMPLE_PERIOD_SECONDS = 0.005  # 200 Hz logging, independent of the control dt.
+    DRAW_PERIOD_SECONDS = 1.0 / 15.0
+
+    def __init__(self, _control_period):
+        self._max_points = int(self.WINDOW_SECONDS / self.SAMPLE_PERIOD_SECONDS) + 1
+        self.t = deque(maxlen=self._max_points)
+        self.body_state = [deque(maxlen=self._max_points) for _ in range(6)]
+        self.leg_state = [deque(maxlen=self._max_points) for _ in range(4)]
+        self.virtual_input = [deque(maxlen=self._max_points) for _ in range(4)]
+        self._last_sample_time = -np.inf
+        self._last_draw = 0.0
+
+        plt.ion()
+        self.fig, self.axes = plt.subplots(3, 1, figsize=(13, 8), sharex=True,
+                                           num="WheelLeg LQR / MPC scope")
+        self.fig.canvas.manager.set_window_title("WheelLeg state and LQR/MPC output")
+        self._lines = []
+        self._make_lines(self.axes[0], self.body_state,
+                         ("s", "ds", "yaw", "dyaw", "pitch", "dpitch"),
+                         "state x: body")
+        self._make_lines(self.axes[1], self.leg_state,
+                         ("thL", "dthL", "thR", "dthR"), "state x: legs")
+        self._make_lines(self.axes[2], self.virtual_input,
+                         ("TwL", "TwR", "TbL", "TbR"), "LQR / MPC output u [Nm]")
+        self.fig.supxlabel("simulation time [s]")
+        self.fig.tight_layout()
+        self.fig.show()
+
+    def _make_lines(self, axis, buffers, names, title):
+        axis.set_title(title)
+        axis.grid(True, alpha=0.30)
+        lines = [axis.plot([], [], label=name, linewidth=1.15)[0] for name in names]
+        axis.legend(loc="upper left", ncol=2, fontsize=8)
+        self._lines.append((axis, buffers, lines))
+
+    @property
+    def alive(self):
+        return plt.fignum_exists(self.fig.number)
+
+    def close(self):
+        if self.alive:
+            plt.close(self.fig)
+
+    def push(self, sim):
+        """Log only at 200 Hz, while control and MuJoCo still run at their own dt."""
+        sample_time = float(sim.d.time)
+        if sample_time < self._last_sample_time:
+            self.t.clear()
+            for buffers in (self.body_state, self.leg_state, self.virtual_input):
+                for buffer in buffers:
+                    buffer.clear()
+            self._last_sample_time = -np.inf
+        if sample_time - self._last_sample_time < self.SAMPLE_PERIOD_SECONDS:
+            return
+        self._last_sample_time = sample_time
+        self.t.append(sample_time)
+        x = sim.last_lqr_state
+        u = sim.last_virtual_input
+        values = (
+            (x[0], x[1], x[2], x[3], x[8], x[9]),
+            (x[4], x[5], x[6], x[7]),
+            (u[0], u[1], u[2], u[3]),
+        )
+        for buffers, group in zip((self.body_state, self.leg_state, self.virtual_input), values):
+            for buffer, value in zip(buffers, group):
+                buffer.append(float(value))
+
+    def draw(self, sim):
+        """Redraw a maximum of 15 times/s; at most 1001 points per curve."""
+        if not self.alive or not self.t:
+            return
+        now = time.perf_counter()
+        if now - self._last_draw < self.DRAW_PERIOD_SECONDS:
+            return
+        self._last_draw = now
+        t = np.asarray(self.t)
+        start = max(t[-1] - self.WINDOW_SECONDS, t[0])
+        for axis, buffers, lines in self._lines:
+            for line, buffer in zip(lines, buffers):
+                line.set_data(t, np.asarray(buffer))
+            axis.set_xlim(start, max(start + 1e-3, t[-1]))
+            axis.relim()
+            axis.autoscale_view(scalex=False, scaley=True)
+        if sim.mpc is not None:
+            mode = (f"explicit MPC  region={sim.mpc.last_region}, checks={sim.mpc.last_checks}")
+        else:
+            mode = "matrix LQR"
+        self.fig.suptitle(f"{mode}   |   chart 200 Hz / 5 s   |   refresh 15 Hz", fontsize=10)
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
 
 
 def main():
@@ -280,6 +391,8 @@ def main():
     ap.add_argument("--realtime", type=float, default=1.0,
                     help="1.0 = real time, 0 = maximum responsive speed")
     ap.add_argument("--no-hud", action="store_true")
+    ap.add_argument("--scope", action="store_true",
+                    help="open the live state + LQR/MPC-output waveform scope at startup")
     ap.add_argument("--duration", type=float, default=0.0,
                     help="close after this many wall-clock seconds (0 = until Esc)")
     args = ap.parse_args()
@@ -309,7 +422,7 @@ def main():
     print("  1/2/3 leg 150/270/350 mm   hold 0 hip torque limit 2 Nm")
     print("  Space jump (keeps speed)   7 disable all forces   9 stand at 150 mm")
     print("  X e-stop (toggle)")
-    print("  Z/R reset    C  camera    F  follow    V  contacts    T  HUD    H  print")
+    print("  Z/R reset    C  camera    F  follow    V  contacts    T  HUD    D  data    P  scope    H  print")
     print()
 
     state = {
@@ -319,9 +432,12 @@ def main():
         "cam": "free",
         "follow": True,
         "hud": not args.no_hud,
+        "data_view": True,
+        "scope": bool(args.scope),
         "contacts": False,
     }
     hud = HUD(sim.m)
+    scope = ControlScope(sim.dt) if state["scope"] else None
     key_events = KeyEvents()
     drive_keys = DriveKeyPoller(key_events)
 
@@ -441,6 +557,16 @@ def main():
                     print(f"  contact forces {'on' if state['contacts'] else 'off'}")
                 elif action == "hud":
                     hud.enabled = state["hud"]
+                elif action == "data":
+                    print(f"  control data view {'on' if state['data_view'] else 'off'}")
+                elif action == "scope":
+                    if state["scope"]:
+                        scope = ControlScope(sim.dt)
+                        print("  control waveform scope on")
+                    elif scope is not None:
+                        scope.close()
+                        scope = None
+                        print("  control waveform scope off")
                 elif action == "print":
                     meas = sim.measure()
                     link_l = sim.linkage_visual.angle_degrees("left")
@@ -497,7 +623,15 @@ def main():
                         and sim.rescue_phase == "idle"):
                     apply_leg_command(sim, state["leg"])
                 last_info = sim.step()
+                if scope is not None:
+                    scope.push(sim)
                 n_step += 1
+
+            if scope is not None:
+                scope.draw(sim)
+                if not scope.alive:
+                    scope = None
+                    state["scope"] = False
 
             if state["follow"]:
                 with v.lock():
@@ -513,7 +647,7 @@ def main():
                 link_r = sim.linkage_visual.angle_degrees("right")
                 vx = S.WHEEL_R * 0.5 * (meas["wheel_vel"]["left"]
                                         + meas["wheel_vel"]["right"])
-                hud.set([
+                summary_lines = [
                     f"speed cmd  {state['speed']:+.2f} m/s      "
                     f"actual {vx:+.3f} m/s",
                     f"turn  cmd  {state['turn']:+.2f} rad/s    "
@@ -548,7 +682,40 @@ def main():
                     f"z {sim.d.qpos[2]:.3f} m",
                     ("DISABLED (7)   9 SELF-RIGHT" if sim.estop else
                      f"self-right {sim.rescue_phase}   cam {state['cam']}"),
-                ])
+                ]
+                x = sim.last_lqr_state
+                u = sim.last_virtual_input
+                data_lines = []
+                if state["data_view"]:
+                    data_lines = [
+                        f"CONTROL DATA  ({sim.controller.upper()})",
+                        "VMC",
+                        f"Lref {sim.leg_length*1000:6.1f} mm  L L/R "
+                        f"{meas['leg']['left'][0]*1000:6.1f} / {meas['leg']['right'][0]*1000:6.1f}",
+                        f"Fff {sim.F0_ff:+6.1f} N  Fpid L/R "
+                        f"{sim.last_vmc_pid_force['left']:+6.1f} / {sim.last_vmc_pid_force['right']:+6.1f}",
+                        f"roll dF {sim.last_vmc_roll_comp:+6.1f} N  gas L/R "
+                        f"{sim.last_gas_force['left']:+6.1f} / {sim.last_gas_force['right']:+6.1f}",
+                        f"F0 total L/R {sim.last_vmc_total['left']:+6.1f} / "
+                        f"{sim.last_vmc_total['right']:+6.1f} N",
+                        "LQR STATE x",
+                        f"s {x[0]:+7.3f}  ds {x[1]:+7.3f}  yaw {x[2]:+7.3f}  dyaw {x[3]:+7.3f}",
+                        f"thL {x[4]:+7.3f} dthL {x[5]:+7.3f}  thR {x[6]:+7.3f} dthR {x[7]:+7.3f}",
+                        f"pitch {x[8]:+7.3f}  dpitch {x[9]:+7.3f}  sInt {sim.s_int:+7.3f}",
+                        f"u TwL/R {u[0]:+6.2f} / {u[1]:+6.2f} Nm  TbL/R {u[2]:+6.2f} / {u[3]:+6.2f} Nm",
+                    ]
+                    if sim.mpc is not None:
+                        data_lines.extend([
+                            "MPC",
+                            f"model L {sim._gain_leg_length*1000:6.1f} mm  horizon {sim.mpc.horizon:d}",
+                            f"region {sim.mpc.last_region:02d}  region checks {sim.mpc.last_checks:d}",
+                        ])
+                    else:
+                        data_lines.extend([
+                            "MPC",
+                            "inactive (matrix LQR mode)",
+                        ])
+                hud.set(summary_lines, data_lines)
             hud.draw(v)
             v.sync()
             # Limit redraw work and give the UI thread regular time slices.
@@ -556,6 +723,8 @@ def main():
             if remaining > 0:
                 time.sleep(remaining)
 
+    if scope is not None:
+        scope.close()
     print(f"  window closed ({n_step} physics steps)")
 
 
