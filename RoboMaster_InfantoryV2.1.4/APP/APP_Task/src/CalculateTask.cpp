@@ -32,6 +32,7 @@
 #include "app_vmc.hpp"
 #include "app_leg_control.hpp"
 #include "app_step_climb_demo.hpp"
+#include "app_stand_state_config.hpp"
 
 // 定义参考值（根据实际需求调整）
 float theta_ref = 0.0f; // 期望整体角度
@@ -339,8 +340,12 @@ void CaculateTask(void *pvParameters) {
         const float theta_l_abs = fabsf(pClassicData->States_Data.theta_L);
         const float theta_r_abs = fabsf(pClassicData->States_Data.theta_R);
         /* 两腿靠近竖直才起身，避免收腿经过中间角度时提前切换支撑力。 */
-        const bool both_legs_up = (theta_l_abs < 0.4f) && (theta_r_abs < 0.4f);
-        const bool either_leg_not_up = (theta_l_abs > 1.2f) || (theta_r_abs > 1.2f);
+        const bool both_legs_up =
+                (theta_l_abs < STAND_UP_ENTER_ANGLE_ABS_RAD) &&
+                (theta_r_abs < STAND_UP_ENTER_ANGLE_ABS_RAD);
+        const bool either_leg_not_up =
+                (theta_l_abs > STAND_UP_EXIT_ANGLE_ABS_RAD) ||
+                (theta_r_abs > STAND_UP_EXIT_ANGLE_ABS_RAD);
         if (both_legs_up)
         {
           stand_state = StandState_Up;
@@ -349,10 +354,10 @@ void CaculateTask(void *pvParameters) {
         else if (either_leg_not_up && stand_state != StandState_NotUp)
         {
           stand_not_up_time += cal_dt;
-          if (stand_not_up_time >= 1.0f)
+          if (stand_not_up_time >= STAND_UP_EXIT_CONFIRM_TIME_S)
           {
             stand_state = StandState_NotUp;
-            stand_not_up_time = 1.0f;
+            stand_not_up_time = STAND_UP_EXIT_CONFIRM_TIME_S;
             }
         }
         const bool total_enable = (remote_snapshot.sbus_data.Channel[9] >= 100);
@@ -515,6 +520,19 @@ void CaculateTask(void *pvParameters) {
                           override_leg_target || rescue_leg_target,
                           rescue_leg_target ? 0.150f : override_leg_target_m,
                           swing_pid_enable, swing_target_rad);
+
+        /* 台阶摆角 PID 动作阶段使用独立 Tp 安全范围。恢复阶段摆角 PID 已关闭，
+         * 不在这里钳制重新接管的 LQR Tp。 */
+        if (step_cmd.swing_pid_enable) {
+            pClassicData->Contronller_Data.Tp_L = fmaxf(
+                    STEP_CLIMB_TP_MIN_NM,
+                    fminf(STEP_CLIMB_TP_MAX_NM,
+                          pClassicData->Contronller_Data.Tp_L));
+            pClassicData->Contronller_Data.Tp_R = fmaxf(
+                    STEP_CLIMB_TP_MIN_NM,
+                    fminf(STEP_CLIMB_TP_MAX_NM,
+                          pClassicData->Contronller_Data.Tp_R));
+        }
        
         // ====== 自救状态机：接管执行器 ======
         /* 相位目标力先算出来，再按限速平滑写入，避免相位切换冲击；Fault 直接清零。 */
