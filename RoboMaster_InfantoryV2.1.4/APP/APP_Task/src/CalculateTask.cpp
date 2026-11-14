@@ -32,7 +32,7 @@
 #include "app_vmc.hpp"
 #include "app_leg_control.hpp"
 #include "app_step_climb_demo.hpp"
-#include "app_stand_state_config.hpp"
+#include "app_stand_state.hpp"
 
 // 定义参考值（根据实际需求调整）
 float theta_ref = 0.0f; // 期望整体角度
@@ -43,27 +43,6 @@ float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
 bool StandUp_Flag = false;
-
-typedef enum
-{
-    StandState_Up,
-    StandState_NotUp,
-} StandState_t;
-
-/* 自救（倒地翻正）状态机。仅在总使能打开、且起身状态机判定未起身时启动；
- * 启动后由本状态机接管 F0/Tp 输出，正常站立与行驶路径不受影响。 */
-enum class RescuePhase { Idle, Body, Lift, Sweep, Stand, Fault };
-
-static float RescueStep(float value, float target, float rate, float dt) {
-    const float step = rate * dt;
-    if (target > value + step) return value + step;
-    if (target < value - step) return value - step;
-    return target;
-}
-
-static float RescueClamp(float value, float limit) {
-    return fmaxf(-limit, fminf(limit, value));
-}
 
 #define a 0.2f // 一阶低通滤波
 
@@ -84,7 +63,7 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
                                      bool motor_feedback_fault,
                                      bool hip_driver_fault);
 
-/* FireWater CSV：左右腿长 PID 裸支持力输出，单位 N。 */
+/* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
 /* 仅供电机反馈超时/驱动故障恢复使用。
@@ -116,26 +95,14 @@ static void DM_Motor_SafeZeroAndEnableAllMonitored(void) {
         }
     }
 }
-
 void CaculateTask(void *pvParameters) {
     float Pos_INT = 0.0f;
     /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
     bool lqr_pos_ref_recorded = false;
     VMC_Kinematics_t vmc_kinematics;
-    // 左右腿共用一个状态：两侧角度都在阈值内才认为已起身，
-    // 任一侧超出阈值连续 1 s 才切换为未起身。
-    /* 上电先等待腿角给出一次已起身判定，避免起身过程提前记录位置零点。 */
-    StandState_t stand_state = StandState_NotUp;
-    float stand_not_up_time = 0.0f;
-    /* 自救状态机的持久状态：相位、相位计时、按腿的 phi 目标与平滑输出。 */
-    RescuePhase rescue_phase = RescuePhase::Idle;
-    bool rescue_hold_short = false;
-    float rescue_phase_time = 0.0f;
-    float rescue_phi_l = 0.0f, rescue_phi_r = 0.0f;
-    float rescue_f_l = 0.0f, rescue_f_r = 0.0f;
-    float rescue_tp_l = 0.0f, rescue_tp_r = 0.0f;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     LegControl_Init();
+    StandState_Init();
     StepClimb_Init();
     // --- DM 电机初始化（从 Data Task 移入） ---
     DM_Motor_Init(&DM_8009P1, DM_MOTOR_MODEL_8009, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -337,29 +304,9 @@ void CaculateTask(void *pvParameters) {
                 pClassicData->States_Data.d_X - pClassicData->Target_Data.Target_X_vel;//计算速度误差
         
         // ====== 起身状态机（左右腿共用一个状态）======
-        const float theta_l_abs = fabsf(pClassicData->States_Data.theta_L);
-        const float theta_r_abs = fabsf(pClassicData->States_Data.theta_R);
-        /* 两腿靠近竖直才起身，避免收腿经过中间角度时提前切换支撑力。 */
-        const bool both_legs_up =
-                (theta_l_abs < STAND_UP_ENTER_ANGLE_ABS_RAD) &&
-                (theta_r_abs < STAND_UP_ENTER_ANGLE_ABS_RAD);
-        const bool either_leg_not_up =
-                (theta_l_abs > STAND_UP_EXIT_ANGLE_ABS_RAD) ||
-                (theta_r_abs > STAND_UP_EXIT_ANGLE_ABS_RAD);
-        if (both_legs_up)
-        {
-          stand_state = StandState_Up;
-          stand_not_up_time = 0.0f;
-        }
-        else if (either_leg_not_up && stand_state != StandState_NotUp)
-        {
-          stand_not_up_time += cal_dt;
-          if (stand_not_up_time >= STAND_UP_EXIT_CONFIRM_TIME_S)
-          {
-            stand_state = StandState_NotUp;
-            stand_not_up_time = STAND_UP_EXIT_CONFIRM_TIME_S;
-            }
-        }
+        StandState_Update(cal_dt,
+                          pClassicData->States_Data.theta_L,
+                          pClassicData->States_Data.theta_R);
         const bool total_enable = (remote_snapshot.sbus_data.Channel[9] >= 100);
         const bool lqr_switch_enabled = (remote_snapshot.sbus_data.Channel[7] > 100);
 #if STEP_CLIMB_CONTROL_ENABLE
@@ -367,72 +314,21 @@ void CaculateTask(void *pvParameters) {
                 (remote_snapshot.sbus_data.Channel[6] >= STEP_CLIMB_SWITCH_THRESHOLD);
         const StepClimbCommand_t step_cmd = StepClimb_Update(
                 cal_dt, step_detection_enabled, total_enable, lqr_switch_enabled,
-                stand_state == StandState_Up,
+                StandState_IsUp(),
                 pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.L0_R,
                 pClassicData->States_Data.theta_L, pClassicData->States_Data.theta_R);
 #else
         StepClimbCommand_t step_cmd = {};
-        step_cmd.allow_gravity = true;
         step_cmd.allow_lqr = true;
 #endif
         if (step_cmd.force_not_up) {
-            stand_state = StandState_NotUp;
-            stand_not_up_time = 0.0f;
+            StandState_ForceNotUp();
         }
 #if LEG_CONTROL_TEST_MODE
         StandUp_Flag = true;
 #else
-        StandUp_Flag = (stand_state == StandState_Up);
+        StandUp_Flag = StandState_IsUp();
 #endif
-
-        // ====== 自救状态机：判定与相位推进 ======
-        /* 只有在总使能打开时才让状态机启动；失能立即回到 Idle 并清状态，
-         * 避免重新使能时复现上一次的残留命令。 */
-        const bool rescue_armed = total_enable && !step_cmd.owns_control;
-        const float rescue_pitch = pClassicData->IMU_Data.pitch;
-        const float rescue_theta_l = pClassicData->States_Data.theta_L;
-        const float rescue_theta_r = pClassicData->States_Data.theta_R;
-        const bool rescue_valid = isfinite(rescue_pitch) && isfinite(rescue_theta_l) &&
-                                  isfinite(rescue_theta_r) &&
-                                  isfinite(pClassicData->IMU_Data.delta_pitch) &&
-                                  isfinite(pClassicData->Leg_Data.phi_0_L) &&
-                                  isfinite(pClassicData->Leg_Data.phi_0_R) &&
-                                  isfinite(pClassicData->Leg_Data.L0_L) &&
-                                  isfinite(pClassicData->Leg_Data.L0_R);
-        if (!rescue_armed) {
-            rescue_phase = RescuePhase::Idle;
-            rescue_hold_short = false;
-            rescue_phase_time = 0.0f;
-            rescue_f_l = rescue_f_r = rescue_tp_l = rescue_tp_r = 0.0f;
-        } else if (!rescue_valid) {
-            rescue_phase = RescuePhase::Fault;
-        } else if (rescue_phase == RescuePhase::Idle &&
-                   (fabsf(rescue_pitch) > 1.5707963f || stand_state == StandState_NotUp)) {
-            /* 车身已经翻倒先压地放平，否则直接把腿折回下方。 */
-            rescue_hold_short = false;
-            rescue_phase = fabsf(rescue_pitch) > 1.5707963f ? RescuePhase::Body
-                                                            : RescuePhase::Lift;
-            rescue_phase_time = 0.0f;
-            rescue_phi_l = pClassicData->Leg_Data.phi_0_L;
-            rescue_phi_r = pClassicData->Leg_Data.phi_0_R;
-            rescue_f_l = rescue_f_r = rescue_tp_l = rescue_tp_r = 0.0f;
-        }
-
-        if (rescue_phase != RescuePhase::Idle && rescue_phase != RescuePhase::Fault) {
-            rescue_phase_time += cal_dt;
-            if (fabsf(rescue_pitch) > 1.5707963f && rescue_phase != RescuePhase::Body) {
-                /* 中途又被翻倒：立即回到压地相位重新开始。 */
-                rescue_phase = RescuePhase::Body;
-                rescue_phase_time = 0.0f;
-            }
-            if (rescue_phase_time > 5.0f) rescue_phase = RescuePhase::Fault;
-        }
-
-        /* 自救期间交出站立标志：LQR 位置零点、重力补偿、roll 差分和
-         * 腿长旋钮的起身限幅都不参与，避免与接管输出互相拉扯。 */
-        if (rescue_phase != RescuePhase::Idle) {
-            StandUp_Flag = false;
-        }
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
         /* LQR 仅在遥控器开关打开时运行；关闭时清零，避免沿用旧输出。 */
@@ -459,8 +355,8 @@ void CaculateTask(void *pvParameters) {
             lqr_pos_ref_recorded = false;
         }
 
-        /* LQR 仅由 Channel[7] 控制，并用左右实际腿长均值查表；自救期间停算。 */
-        if (lqr_enabled && rescue_phase == RescuePhase::Idle) {
+        /* LQR 仅由 Channel[7] 控制，并用左右实际腿长均值查表。 */
+        if (lqr_enabled) {
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
             const float scheduled_leg_length = average_leg_length;
@@ -473,12 +369,6 @@ void CaculateTask(void *pvParameters) {
         }
         /* LQR 自己负责不经 VMC 的轮端虚拟力 Fw 限幅。 */
         LQR_LimitWheelForces(pClassicData);
-        /* 自救接管期间不使用轮端虚拟力。 */
-        if (rescue_phase != RescuePhase::Idle) {
-            pClassicData->Contronller_Data.Fw_L = 0.0f;
-            pClassicData->Contronller_Data.Fw_R = 0.0f;
-        }
-
         /* 总使能且已起身后叠加双腿重力补偿；起身前不叠加。
          * 总使能关闭时 ControlTask 向全部电机发送零力矩。 */
         float gravity_tp_l = 0.0f;
@@ -490,7 +380,7 @@ void CaculateTask(void *pvParameters) {
                                             pClassicData->States_Data.theta_R);
         }
 #else
-        if (leg_pid_enabled && StandUp_Flag && step_cmd.allow_gravity) {
+        if (leg_pid_enabled && StandUp_Flag) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
@@ -505,20 +395,23 @@ void CaculateTask(void *pvParameters) {
         const bool swing_pid_enable = false;
         const float swing_target_rad = 0.0f;
 #else
-        const bool override_leg_target = step_cmd.override_leg_length;
-        const float override_leg_target_m = step_cmd.leg_length_target_m;
+#if GROUND_DETECTION_ENABLE
+        const bool airborne_before_update = GroundDetection_IsAirborne() != 0U;
+#else
+        const bool airborne_before_update = false;
+#endif
+        /* 离地是并行控制覆盖：不关闭 LQR 或任何补偿，只将腿长目标设为
+         * 全行程最大值。该状态来自上一拍完成确认的检测结果。 */
+        const bool override_leg_target =
+                airborne_before_update || step_cmd.override_leg_length;
+        const float override_leg_target_m = airborne_before_update
+                ? LEG_LENGTH_FULL_MAX_M : step_cmd.leg_length_target_m;
         const bool swing_pid_enable = step_cmd.swing_pid_enable;
         const float swing_target_rad = step_cmd.swing_target_rad;
 #endif
-        /* 自救 Stand 相位把腿长钉在 150 mm；自救成功后的保持期同样忽略旋钮，
-         * 避免刚站稳就被拉回旧档位。 */
-        const bool rescue_leg_target =
-                (rescue_phase == RescuePhase::Stand) ||
-                (rescue_phase == RescuePhase::Idle && rescue_hold_short);
         LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
                           remote_snapshot.sbus_data.Channel[5],
-                          override_leg_target || rescue_leg_target,
-                          rescue_leg_target ? 0.150f : override_leg_target_m,
+                          override_leg_target, override_leg_target_m,
                           swing_pid_enable, swing_target_rad);
 
         /* 台阶摆角 PID 动作阶段使用独立 Tp 安全范围。恢复阶段摆角 PID 已关闭，
@@ -534,79 +427,6 @@ void CaculateTask(void *pvParameters) {
                           pClassicData->Contronller_Data.Tp_R));
         }
        
-        // ====== 自救状态机：接管执行器 ======
-        /* 相位目标力先算出来，再按限速平滑写入，避免相位切换冲击；Fault 直接清零。 */
-        if (rescue_phase != RescuePhase::Idle) {
-            float f_l = 0.0f, f_r = 0.0f, tp_l = 0.0f, tp_r = 0.0f;
-            if (rescue_phase == RescuePhase::Body) {
-                /* 双腿撑地把车身压回水平；Tp 是腿端力矩，车身反作用与其相反。 */
-                f_l = f_r = 10.0f;
-                tp_l = tp_r = RescueClamp(1.2f * rescue_pitch + 0.15f *
-                                             pClassicData->IMU_Data.delta_pitch, 1.5f);
-                if (fabsf(rescue_pitch) < 1.30f &&
-                    fabsf(pClassicData->IMU_Data.delta_pitch) < 0.7f) {
-                    rescue_phase = RescuePhase::Lift;
-                    rescue_phase_time = 0.0f;
-                }
-            } else if (rescue_phase == RescuePhase::Lift ||
-                       rescue_phase == RescuePhase::Sweep) {
-                /* theta = pi/2 - phi - pitch：两侧各自闭环，先抬前伸的腿。 */
-                const float target_l = rescue_phase == RescuePhase::Lift ?
-                        fminf(rescue_theta_l, 0.0f) : -0.30f;
-                const float target_r = rescue_phase == RescuePhase::Lift ?
-                        fminf(rescue_theta_r, 0.0f) : -0.30f;
-                rescue_phi_l = RescueStep(rescue_phi_l,
-                                          1.5707963f - rescue_pitch - target_l, 0.35f, cal_dt);
-                rescue_phi_r = RescueStep(rescue_phi_r,
-                                          1.5707963f - rescue_pitch - target_r, 0.35f, cal_dt);
-                tp_l = RescueClamp(4.0f * (rescue_phi_l - pClassicData->Leg_Data.phi_0_L)
-                                   - 0.25f * pClassicData->Leg_Data.delta_phi_0_L, 1.5f);
-                tp_r = RescueClamp(4.0f * (rescue_phi_r - pClassicData->Leg_Data.phi_0_R)
-                                   - 0.25f * pClassicData->Leg_Data.delta_phi_0_R, 1.5f);
-                f_l = f_r = 8.0f;
-                if (rescue_phase == RescuePhase::Lift &&
-                    rescue_theta_l < 0.12f && rescue_theta_r < 0.12f) {
-                    rescue_phase = RescuePhase::Sweep;
-                    rescue_phase_time = 0.0f;
-                } else if (rescue_phase == RescuePhase::Sweep &&
-                           rescue_theta_l < -0.20f && rescue_theta_r < -0.20f) {
-                    rescue_phase = RescuePhase::Stand;
-                    rescue_phase_time = 0.0f;
-                }
-            } else if (rescue_phase == RescuePhase::Stand) {
-                /* 腿长已由 LegControl_Update 闭环到 150 mm，这里只平滑接管其输出。 */
-                f_l = pClassicData->Contronller_Data.F0_L;
-                f_r = pClassicData->Contronller_Data.F0_R;
-                rescue_phi_l = RescueStep(rescue_phi_l, 1.5707963f - rescue_pitch,
-                                          0.35f, cal_dt);
-                rescue_phi_r = RescueStep(rescue_phi_r, 1.5707963f - rescue_pitch,
-                                          0.35f, cal_dt);
-                tp_l = RescueClamp(4.0f * (rescue_phi_l - pClassicData->Leg_Data.phi_0_L), 1.5f);
-                tp_r = RescueClamp(4.0f * (rescue_phi_r - pClassicData->Leg_Data.phi_0_R), 1.5f);
-                if (fabsf(rescue_pitch) < 0.35f &&
-                    fabsf(rescue_theta_l) < 0.30f && fabsf(rescue_theta_r) < 0.30f &&
-                    fabsf(pClassicData->Leg_Data.L0_L - 0.150f) < 0.025f &&
-                    fabsf(pClassicData->Leg_Data.L0_R - 0.150f) < 0.025f) {
-                    rescue_phase = RescuePhase::Idle;
-                    rescue_hold_short = true;
-                    stand_state = StandState_Up;
-                    stand_not_up_time = 0.0f;
-                }
-            }
-            if (rescue_phase == RescuePhase::Fault) {
-                rescue_f_l = rescue_f_r = rescue_tp_l = rescue_tp_r = 0.0f;
-            } else {
-                rescue_f_l = RescueStep(rescue_f_l, f_l, 80.0f, cal_dt);
-                rescue_f_r = RescueStep(rescue_f_r, f_r, 80.0f, cal_dt);
-                rescue_tp_l = RescueStep(rescue_tp_l, tp_l, 8.0f, cal_dt);
-                rescue_tp_r = RescueStep(rescue_tp_r, tp_r, 8.0f, cal_dt);
-            }
-            pClassicData->Contronller_Data.F0_L = rescue_f_l;
-            pClassicData->Contronller_Data.F0_R = rescue_f_r;
-            pClassicData->Contronller_Data.Tp_L = rescue_tp_l;
-            pClassicData->Contronller_Data.Tp_R = rescue_tp_r;
-        }
-
         /* F0 已在 LegControl 内限幅；Tp 是 VMC 的虚拟输入，在 VMC 模块限幅。 */
         VMC_LimitVirtualPitchTorque(pClassicData);
         // ====== VMC 力矩分配 ======
@@ -624,39 +444,11 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Contronller_Data.T2_L = 0.0f;
 #endif
 
-        /* 折叠连杆会让 VMC 雅可比奇异。绝不允许非有限值进入 MIT 模式，
-         * 尤其是自救撑地阶段；出现即清零并转入 Fault。 */
-        if (!isfinite(pClassicData->Contronller_Data.T1_L) ||
-            !isfinite(pClassicData->Contronller_Data.T2_L) ||
-            !isfinite(pClassicData->Contronller_Data.T1_R) ||
-            !isfinite(pClassicData->Contronller_Data.T2_R)) {
-            pClassicData->Contronller_Data.T1_L = 0.0f;
-            pClassicData->Contronller_Data.T2_L = 0.0f;
-            pClassicData->Contronller_Data.T1_R = 0.0f;
-            pClassicData->Contronller_Data.T2_R = 0.0f;
-            pClassicData->Contronller_Data.Fw_L = 0.0f;
-            pClassicData->Contronller_Data.Fw_R = 0.0f;
-            rescue_phase = RescuePhase::Fault;
-        }
-        if (rescue_phase != RescuePhase::Idle) {
-            pClassicData->Contronller_Data.T1_L =
-                    RescueClamp(pClassicData->Contronller_Data.T1_L, 8.0f);
-            pClassicData->Contronller_Data.T2_L =
-                    RescueClamp(pClassicData->Contronller_Data.T2_L, 8.0f);
-            pClassicData->Contronller_Data.T1_R =
-                    RescueClamp(pClassicData->Contronller_Data.T1_R, 8.0f);
-            pClassicData->Contronller_Data.T2_R =
-                    RescueClamp(pClassicData->Contronller_Data.T2_R, 8.0f);
-        }
-
         /* 离地检测使用本轮最终 F0 与真正送入 VMC 的 Tp。
          * GroundDetection_Update 内部只剔除弹簧内部抵消项，并完成滤波、
          * 迟滞及连续拍确认；不再用上一轮命令或重复叠加重力补偿。 */
 #if GROUND_DETECTION_ENABLE
-        if (step_cmd.suppress_ground_detection) {
-            GroundDetection_Reset();
-        } else {
-            const float fn_left = GroundDetection_Update(
+        const float fn_left = GroundDetection_Update(
                     GD_SIDE_LEFT,
                     pClassicData->Contronller_Data.F0_L,
                     pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
@@ -667,7 +459,7 @@ void CaculateTask(void *pvParameters) {
                     pClassicData->States_Data.theta_L,
                     pClassicData->States_Data.d_theta_L,
                     pClassicData->States_Data.dd_theta_L);
-            const float fn_right = GroundDetection_Update(
+        const float fn_right = GroundDetection_Update(
                     GD_SIDE_RIGHT,
                     pClassicData->Contronller_Data.F0_R,
                     pClassicData->Contronller_Data.Tp_R + gravity_tp_r,
@@ -678,8 +470,14 @@ void CaculateTask(void *pvParameters) {
                     pClassicData->States_Data.theta_R,
                     pClassicData->States_Data.d_theta_R,
                     pClassicData->States_Data.dd_theta_R);
-            (void)fn_left;
-            (void)fn_right;
+        (void)fn_left;
+        (void)fn_right;
+
+        /* 双腿均确认离地时只禁止轮毂扭矩输出。LQR 本身继续计算，腿长 PID、
+         * 气弹簧补偿、腿重力补偿及两套 roll 补偿均保持原运行条件。 */
+        if (GroundDetection_IsAirborne()) {
+            pClassicData->Contronller_Data.Fw_L = 0.0f;
+            pClassicData->Contronller_Data.Fw_R = 0.0f;
         }
 #endif
 
@@ -704,102 +502,6 @@ void CaculateTask(void *pvParameters) {
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
 }
-
-#if 0 /* VMC implementation moved to APP/src/app_vmc.cpp. */
-static VMC_LegKinematics_t VMC_ForwardLeg(float phi1, float phi4) {
-    constexpr float l1 = 0.210f;
-    constexpr float l2 = 0.250f;
-    constexpr float l3 = 0.250f;
-    constexpr float l4 = 0.210f;
-    VMC_LegKinematics_t leg = {};
-    leg.phi1 = phi1;
-    leg.phi4 = phi4;
-    const float yd = l4 * arm_sin_f32(phi4);
-    const float yb = l1 * arm_sin_f32(phi1);
-    const float xd = l4 * arm_cos_f32(phi4);
-    const float xb = l1 * arm_cos_f32(phi1);
-    const float dx = xd - xb;
-    const float dy = yd - yb;
-    float lbd;
-    arm_sqrt_f32(dx * dx + dy * dy, &lbd);
-    const float a0 = 2.0f * l2 * dx;
-    const float b0 = 2.0f * l2 * dy;
-    const float c0 = l2 * l2 + lbd * lbd - l3 * l3;
-    float root;
-    arm_sqrt_f32(a0 * a0 + b0 * b0 - c0 * c0, &root);
-    leg.phi2 = 2.0f * atan2f(b0 + root, a0 + c0);
-    leg.phi3 = atan2f(yb - yd + l2 * arm_sin_f32(leg.phi2),
-                      xb - xd + l2 * arm_cos_f32(leg.phi2));
-    const float xc = l1 * arm_cos_f32(phi1) + l2 * arm_cos_f32(leg.phi2);
-    const float yc = l1 * arm_sin_f32(phi1) + l2 * arm_sin_f32(leg.phi2);
-    arm_sqrt_f32(xc * xc + yc * yc, &leg.L0);
-    leg.phi0 = atan2f(yc, xc);
-    return leg;
-}
-
-static void VMC_UpdateLegFeedback(Classic_Data_t *data,
-                                  VMC_Kinematics_t *kinematics, float dt) {
-    const float inv_dt = 1.0f / dt;
-    kinematics->left = VMC_ForwardLeg(data->Motor_Data.L1_Motor_POS,
-                                      data->Motor_Data.L2_Motor_POS);
-    kinematics->right = VMC_ForwardLeg(data->Motor_Data.R1_Motor_POS,
-                                       data->Motor_Data.R2_Motor_POS);
-    VMC_LegKinematics_t *legs[2] = {&kinematics->left, &kinematics->right};
-    float *l0[2] = {&data->Leg_Data.L0_L, &data->Leg_Data.L0_R};
-    float *phi0[2] = {&data->Leg_Data.phi_0_L, &data->Leg_Data.phi_0_R};
-    float *dl0[2] = {&data->Leg_Data.d_L0_L, &data->Leg_Data.d_L0_R};
-    float *ddl0[2] = {&data->Leg_Data.dd_L0_L, &data->Leg_Data.dd_L0_R};
-    float *last_dl0[2] = {&data->Leg_Data.d_last_L0_L, &data->Leg_Data.d_last_L0_R};
-    float *dphi0[2] = {&data->Leg_Data.delta_phi_0_L, &data->Leg_Data.delta_phi_0_R};
-    static float last_l0[2] = {0.0f, 0.0f};
-    static float last_phi0[2] = {0.0f, 0.0f};
-    for (uint32_t side = 0; side < 2U; ++side) {
-        *l0[side] = legs[side]->L0;
-        *phi0[side] = legs[side]->phi0;
-        const float raw_dl0 = (legs[side]->L0 - last_l0[side]) * inv_dt;
-        *dl0[side] = a * raw_dl0 + (1.0f - a) * *dl0[side];
-        const float raw_ddl0 = (*dl0[side] - *last_dl0[side]) * inv_dt;
-        *ddl0[side] = a * raw_ddl0 + (1.0f - a) * *ddl0[side];
-        *last_dl0[side] = *dl0[side];
-        /* 保持原来的腿角速度定义；本次仅调整正运动学与控制的先后顺序。 */
-        const float raw_dphi0 = (legs[side]->phi0 - last_phi0[side]) * 1000.0f;
-        *dphi0[side] = a * raw_dphi0 + (1.0f - a) * *dphi0[side];
-        last_l0[side] = legs[side]->L0;
-        last_phi0[side] = legs[side]->phi0;
-    }
-}
-
-static void VMC_MapForceToJointTorques(Classic_Data_t *data,
-                                       const VMC_Kinematics_t *kinematics,
-                                       float F0L, float F0R, float TpL,
-                                       float TpR) {
-    constexpr float l1 = 0.210f;
-    constexpr float l4 = 0.210f;
-    const VMC_LegKinematics_t *legs[2] = {&kinematics->left, &kinematics->right};
-    const float f0[2] = {F0L, F0R};
-    const float tp[2] = {TpL, TpR};
-    float *t1[2] = {&data->Contronller_Data.T1_L, &data->Contronller_Data.T1_R};
-    float *t2[2] = {&data->Contronller_Data.T2_L, &data->Contronller_Data.T2_R};
-    for (uint32_t side = 0; side < 2U; ++side) {
-        const VMC_LegKinematics_t *leg = legs[side];
-        const float sin32 = arm_sin_f32(leg->phi3 - leg->phi2);
-        const float sin12 = arm_sin_f32(leg->phi1 - leg->phi2);
-        const float sin03 = arm_sin_f32(leg->phi0 - leg->phi3);
-        const float cos03 = arm_cos_f32(leg->phi0 - leg->phi3);
-        const float sin02 = arm_sin_f32(leg->phi0 - leg->phi2);
-        const float cos02 = arm_cos_f32(leg->phi0 - leg->phi2);
-        const float sin34 = arm_sin_f32(leg->phi3 - leg->phi4);
-        const float j11 = l1 * sin03 * sin12 / sin32;
-        const float j12 = l1 * cos03 * sin12 / (leg->L0 * sin32);
-        const float j21 = l4 * sin02 * sin34 / sin32;
-        const float j22 = l4 * cos02 * sin34 / (leg->L0 * sin32);
-        *t1[side] = j11 * f0[side] + j12 * tp[side];
-        *t2[side] = j21 * f0[side] + j22 * tp[side];
-    }
-    data->Contronller_Data.Tp_L = TpL;
-    data->Contronller_Data.Tp_R = TpR;
-}
-#endif
 
 /**
  * @brief 将角度（度）转换为弧度
@@ -930,17 +632,25 @@ void IMU_Data_Print(Classic_Data_t *pClassicData) {
 }
 
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV：左腿长 PID 输出、右腿长 PID 输出；单位 N。 */
-    const int left_milli = (int)lroundf(
-            pClassicData->Contronller_Data.LegLengthPID_F0_L * 1000.0f);
-    const int right_milli = (int)lroundf(
-            pClassicData->Contronller_Data.LegLengthPID_F0_R * 1000.0f);
+    /* FireWater 纯 CSV：目标L0、左L0、右L0、左F0、右F0；单位 m,m,m,N,N。 */
+    const float target = pClassicData->Target_Data.Target_LegLong;
+    const float values[5] = {
+        target,
+        pClassicData->Leg_Data.L0_L,
+        pClassicData->Leg_Data.L0_R,
+        pClassicData->Contronller_Data.F0_L,
+        pClassicData->Contronller_Data.F0_R,
+    };
+    int milli[5];
+    for (uint32_t index = 0; index < 5U; ++index)
+        milli[index] = (int)lroundf(values[index] * 1000.0f);
 
-    uart_print("%c%d.%03d,%c%d.%03d\r\n",
-               left_milli < 0 ? '-' : ' ', abs(left_milli) / 1000,
-               abs(left_milli) % 1000,
-               right_milli < 0 ? '-' : ' ', abs(right_milli) / 1000,
-               abs(right_milli) % 1000);
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
+               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
+               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
+               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000);
 }
 
 void State_Data_Print(Classic_Data_t *pClassicData) {
@@ -1049,36 +759,3 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
                phi1_mdeg < 0 ? '-' : ' ', abs(phi1_mdeg) / 1000, abs(phi1_mdeg) % 1000,
                phi4_mdeg < 0 ? '-' : ' ', abs(phi4_mdeg) / 1000, abs(phi4_mdeg) % 1000);
 }
-
-#if 0 /* LQR implementation moved to APP/src/app_K_value.cpp. */
-static void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
-                                     K_Fixed_Leg_t gain) {
-    /* K 矩阵对应 [x, dx, yaw, dyaw, thetaL, dthetaL,
-     * thetaR, dthetaR, pitch, dpitch] 十维状态。 */
-    /* 仅限制送入 K 的位置误差，状态记录保留原值。 */
-    const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos,
-                                        -0.30f), 0.30f);
-    float states[10] = {
-        x_pos_lqr,
-        pClassicData->States_Data.d_x_err,
-        pClassicData->States_Data.yaw_err,
-        pClassicData->States_Data.d_yaw_err,
-        pClassicData->States_Data.theta_L - theta_L_ref,
-        pClassicData->States_Data.d_theta_L - d_theta_L_ref,
-        pClassicData->States_Data.theta_R - theta_R_ref,
-        pClassicData->States_Data.d_theta_R - d_theta_R_ref,
-        -(pClassicData->States_Data.theta - theta_ref),
-        -(pClassicData->States_Data.d_theta - d_theta_ref)
-    };
-    float control[4] = {0.0f};
-    arm_matrix_instance_f32 K = {4, 10, &gain[0][0]};
-    arm_matrix_instance_f32 state = {10, 1, states};
-    arm_matrix_instance_f32 output = {4, 1, control};
-    arm_mat_mult_f32(&K, &state, &output);
-
-    pClassicData->Contronller_Data.Fw_L = control[0];
-    pClassicData->Contronller_Data.Fw_R = control[1];
-    pClassicData->Contronller_Data.Tp_L = control[2];
-    pClassicData->Contronller_Data.Tp_R = control[3];
-}
-#endif

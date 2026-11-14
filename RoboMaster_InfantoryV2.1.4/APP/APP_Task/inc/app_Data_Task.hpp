@@ -87,9 +87,6 @@ typedef struct {
     struct {
         float F0_L;
         float F0_R;
-        /* 仅调试：腿长 PID 裸输出，未叠加气弹簧、起身预置力和 roll 补偿。 */
-        float LegLengthPID_F0_L;
-        float LegLengthPID_F0_R;
         float T1_L;
         float T2_L;
         float T1_R;

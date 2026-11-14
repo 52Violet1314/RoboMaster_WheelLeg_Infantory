@@ -11,8 +11,8 @@
 #define ROLL_ANGLE_LENGTH_PID_I_LIMIT_M           0.020f
 #define ROLL_ANGLE_LENGTH_PID_OUTPUT_LIMIT_M      0.020f
 
-/* roll 角速度环：输出左右腿 F0 支持力差。默认关闭，待单独实车标定。 */
-#define ROLL_RATE_FORCE_PID_ENABLE                 0
+/* roll 角速度环：输出左右腿 F0 支持力差。 */
+#define ROLL_RATE_FORCE_PID_ENABLE                 1
 #define ROLL_RATE_FORCE_PID_KP_N_PER_RAD_S         2.500f
 #define ROLL_RATE_FORCE_PID_KI_N_PER_RAD           0.000f
 #define ROLL_RATE_FORCE_PID_KD_N_S2_PER_RAD        0.000f

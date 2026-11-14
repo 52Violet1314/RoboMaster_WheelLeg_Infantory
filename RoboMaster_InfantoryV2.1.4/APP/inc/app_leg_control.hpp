@@ -22,6 +22,7 @@
 #define LEG_SWING_PID_KD                    0.0f
 #define LEG_SWING_PID_OUTPUT_LIMIT_NM       1.5f
 #define LEG_SWING_PID_OUTPUT_SIGN           1.0f
+#define LEG_LENGTH_FULL_MAX_M               0.380f
 
 /* 腿长旋钮映射、气弹簧补偿、roll 差分和腿长 PID 的统一入口。
  * 起身状态机仍由 CalculateTask 维护；本模块只使用其本轮判定结果。 */
