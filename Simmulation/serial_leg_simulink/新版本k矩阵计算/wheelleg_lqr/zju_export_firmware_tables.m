@@ -68,8 +68,6 @@ end_at = strfind(source, end_marker);
 assert(numel(begin_at) == 1 && numel(end_at) == 1 && end_at > begin_at, ...
     'Expected exactly one valid generated K-table marker pair in %s.', path);
 
-backup_path = [path '.' datestr(now, 'yyyymmdd_HHMMSS') '.bak'];
-assert(copyfile(path, backup_path), 'Unable to back up %s.', path);
 updated = [source(1:begin_at-1) generated_text source(end_at+length(end_marker):end)];
 temporary_path = [path '.tmp'];
 fid = fopen(temporary_path, 'w');
@@ -85,7 +83,6 @@ text = strtrim(sprintf('%.9g ', values));
 end
 
 function write_theta_table(path, schedule, com_forward_m)
-backup_file(path);
 fid = fopen(path, 'w');
 assert(fid >= 0, 'Unable to write %s.', path);
 cleanup = onCleanup(@() fclose(fid)); %#ok<NASGU>
@@ -114,7 +111,6 @@ fprintf(fid, [ ...
 end
 
 function write_theta_header(path, com_forward_m)
-backup_file(path);
 fid = fopen(path, 'w');
 assert(fid >= 0, 'Unable to write %s.', path);
 cleanup = onCleanup(@() fclose(fid)); %#ok<NASGU>
@@ -130,11 +126,4 @@ end
 
 function out = ternary(condition, yes, no)
 if condition, out = yes; else, out = no; end
-end
-
-function backup_file(path)
-if isfile(path)
-    backup_path = [path '.' datestr(now, 'yyyymmdd_HHMMSS') '.bak'];
-    assert(copyfile(path, backup_path), 'Unable to back up %s.', path);
-end
 end
