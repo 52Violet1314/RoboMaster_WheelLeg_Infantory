@@ -33,6 +33,7 @@
 #include "app_leg_control.hpp"
 #include "app_step_climb_demo.hpp"
 #include "app_stand_state.hpp"
+#include "app_chassis_position_hold.hpp"
 
 // 定义参考值（根据实际需求调整）
 float theta_ref = 0.0f; // 期望整体角度
@@ -42,9 +43,7 @@ float d_theta_R_ref = 0.0f; // 期望右腿角速度
 float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
-bool StandUp_Flag = false;
-
-#define a 0.2f // 一阶低通滤波
+static constexpr float kStateDerivativeFilterAlpha = 0.2f;
 
 float angle_to_rad(float degrees);
 
@@ -96,9 +95,6 @@ static void DM_Motor_SafeZeroAndEnableAllMonitored(void) {
     }
 }
 void CaculateTask(void *pvParameters) {
-    float Pos_INT = 0.0f;
-    /* 每次 LQR 重新有效时，仅记录一次当前位置为位置控制零点。 */
-    bool lqr_pos_ref_recorded = false;
     VMC_Kinematics_t vmc_kinematics;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     LegControl_Init();
@@ -120,6 +116,7 @@ void CaculateTask(void *pvParameters) {
     
     WheelKalman_Init(&Wheel_Kalman_L, 0.001f, 0.0f, 0.0f);
     WheelKalman_Init(&Wheel_Kalman_R, 0.001f, 0.0f, 0.0f);
+    ChassisPositionHold_Init(0.0f);
 
     // 串口 DMA 接收初始化（从 Data Task 移入）
     HAL_UARTEx_ReceiveToIdle_DMA(&huart5, rx_buff, BUFF_SIZE);
@@ -277,13 +274,17 @@ void CaculateTask(void *pvParameters) {
             float raw_dd_theta_L = (pClassicData->States_Data.d_theta_L
                                   - pClassicData->States_Data.d_last_d_theta_L) * inv_dt;
             pClassicData->States_Data.dd_theta_L =
-                    a * raw_dd_theta_L + (1 - a) * pClassicData->States_Data.dd_theta_L;
+                    kStateDerivativeFilterAlpha * raw_dd_theta_L +
+                    (1.0f - kStateDerivativeFilterAlpha) *
+                    pClassicData->States_Data.dd_theta_L;
             pClassicData->States_Data.d_last_d_theta_L = pClassicData->States_Data.d_theta_L;
 
             float raw_dd_theta_R = (pClassicData->States_Data.d_theta_R
                                   - pClassicData->States_Data.d_last_d_theta_R) * inv_dt;
             pClassicData->States_Data.dd_theta_R =
-                    a * raw_dd_theta_R + (1 - a) * pClassicData->States_Data.dd_theta_R;
+                    kStateDerivativeFilterAlpha * raw_dd_theta_R +
+                    (1.0f - kStateDerivativeFilterAlpha) *
+                    pClassicData->States_Data.dd_theta_R;
             pClassicData->States_Data.d_last_d_theta_R = pClassicData->States_Data.d_theta_R;
         }
         //二阶导腿角加速度使用于离地检测
@@ -294,12 +295,10 @@ void CaculateTask(void *pvParameters) {
         WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L, pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
         WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R, pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
 
-        /* Kalman 校正完成后再生成公共底盘状态，供下游状态监视使用。 */
+        /* Kalman 校正完成后先生成公共底盘速度；位置稳位误差在控制模式
+         * 判断完成后由 ChassisPositionHold 统一生成。 */
         pClassicData->States_Data.d_X =
                 (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f; // 算出平均车身速度
-        Pos_INT += pClassicData->Target_Data.Target_X_vel / 1000.0f;//算出车身位移目标值（只有目标速度没输入的时候才会保持不变维持车身位置）
-        pClassicData->States_Data.X_pos =
-                (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f - Pos_INT;//计算车身位移误差
         pClassicData->States_Data.d_x_err =
                 pClassicData->States_Data.d_X - pClassicData->Target_Data.Target_X_vel;//计算速度误差
         
@@ -325,9 +324,9 @@ void CaculateTask(void *pvParameters) {
             StandState_ForceNotUp();
         }
 #if LEG_CONTROL_TEST_MODE
-        StandUp_Flag = true;
+        const bool stand_up = true;
 #else
-        StandUp_Flag = StandState_IsUp();
+        const bool stand_up = StandState_IsUp();
 #endif
 
         // ====== LQR + 腿长 PID + roll 差分补偿（phi PID 当前关闭） ======
@@ -344,15 +343,33 @@ void CaculateTask(void *pvParameters) {
         const bool lqr_enabled = !LEG_CONTROL_TEST_MODE && lqr_switch_enabled &&
                                  step_cmd.allow_lqr;
         const bool leg_pid_enabled = total_enable;
-        /* LQR 起身后以当前位姿作为位置/yaw 工作点。 */
-        const bool pos_ref_ready = leg_pid_enabled && lqr_enabled && StandUp_Flag;
-        if (pos_ref_ready && !lqr_pos_ref_recorded) {
-            Pos_INT = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
-            pClassicData->States_Data.X_pos = 0.0f;
+#if GROUND_DETECTION_ENABLE
+        /* 离地检测只在正常起身工作角内运行。角度仅作为运行门限；真正的
+         * 离地判据仍是左右腿各自的法向力 Fn 及原有连续确认时间。 */
+        const bool ground_detection_active =
+                total_enable && lqr_enabled && stand_up &&
+                (fabsf(pClassicData->States_Data.theta_L) <
+                 STAND_UP_ENTER_ANGLE_ABS_RAD) &&
+                (fabsf(pClassicData->States_Data.theta_R) <
+                 STAND_UP_ENTER_ANGLE_ABS_RAD);
+        const bool airborne_control_active =
+                ground_detection_active &&
+                (GroundDetection_IsAirborne() != 0U);
+#else
+        const bool ground_detection_active = false;
+        const bool airborne_control_active = false;
+#endif
+        const float current_position_m =
+                (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
+        const bool position_hold_enable =
+                leg_pid_enabled && lqr_enabled && stand_up &&
+                !airborne_control_active;
+        pClassicData->States_Data.X_pos = ChassisPositionHold_Update(
+                current_position_m,
+                pClassicData->Target_Data.Target_X_vel,
+                position_hold_enable);
+        if (!position_hold_enable) {
             pClassicData->States_Data.yaw_err = 0.0f;
-            lqr_pos_ref_recorded = true;
-        } else if (!pos_ref_ready) {
-            lqr_pos_ref_recorded = false;
         }
 
         /* LQR 仅由 Channel[7] 控制，并用左右实际腿长均值查表。 */
@@ -380,7 +397,7 @@ void CaculateTask(void *pvParameters) {
                                             pClassicData->States_Data.theta_R);
         }
 #else
-        if (leg_pid_enabled && StandUp_Flag) {
+        if (leg_pid_enabled && stand_up) {
             gravity_tp_l = LegGravity_GetTp(pClassicData->Leg_Data.L0_L,
                                             pClassicData->States_Data.theta_L);
             gravity_tp_r = LegGravity_GetTp(pClassicData->Leg_Data.L0_R,
@@ -395,38 +412,20 @@ void CaculateTask(void *pvParameters) {
         const bool swing_pid_enable = false;
         const float swing_target_rad = 0.0f;
 #else
-#if GROUND_DETECTION_ENABLE
-        const bool airborne_before_update = GroundDetection_IsAirborne() != 0U;
-#else
-        const bool airborne_before_update = false;
-#endif
         /* 离地是并行控制覆盖：不关闭 LQR 或任何补偿，只将腿长目标设为
-         * 全行程最大值。该状态来自上一拍完成确认的检测结果。 */
+         * 0.350 m。该状态来自上一拍在起身工作角内完成确认的 Fn 结果。 */
         const bool override_leg_target =
-                airborne_before_update || step_cmd.override_leg_length;
-        const float override_leg_target_m = airborne_before_update
-                ? LEG_LENGTH_FULL_MAX_M : step_cmd.leg_length_target_m;
+                airborne_control_active || step_cmd.override_leg_length;
+        const float override_leg_target_m = airborne_control_active
+                ? GROUND_DETECTION_LEG_TARGET_M : step_cmd.leg_length_target_m;
         const bool swing_pid_enable = step_cmd.swing_pid_enable;
         const float swing_target_rad = step_cmd.swing_target_rad;
 #endif
-        LegControl_Update(pClassicData, cal_dt, StandUp_Flag, leg_pid_enabled,
+        LegControl_Update(pClassicData, cal_dt, stand_up, leg_pid_enabled,
                           remote_snapshot.sbus_data.Channel[5],
                           override_leg_target, override_leg_target_m,
                           swing_pid_enable, swing_target_rad);
 
-        /* 台阶摆角 PID 动作阶段使用独立 Tp 安全范围。恢复阶段摆角 PID 已关闭，
-         * 不在这里钳制重新接管的 LQR Tp。 */
-        if (step_cmd.swing_pid_enable) {
-            pClassicData->Contronller_Data.Tp_L = fmaxf(
-                    STEP_CLIMB_TP_MIN_NM,
-                    fminf(STEP_CLIMB_TP_MAX_NM,
-                          pClassicData->Contronller_Data.Tp_L));
-            pClassicData->Contronller_Data.Tp_R = fmaxf(
-                    STEP_CLIMB_TP_MIN_NM,
-                    fminf(STEP_CLIMB_TP_MAX_NM,
-                          pClassicData->Contronller_Data.Tp_R));
-        }
-       
         /* F0 已在 LegControl 内限幅；Tp 是 VMC 的虚拟输入，在 VMC 模块限幅。 */
         VMC_LimitVirtualPitchTorque(pClassicData);
         // ====== VMC 力矩分配 ======
@@ -448,7 +447,8 @@ void CaculateTask(void *pvParameters) {
          * GroundDetection_Update 内部只剔除弹簧内部抵消项，并完成滤波、
          * 迟滞及连续拍确认；不再用上一轮命令或重复叠加重力补偿。 */
 #if GROUND_DETECTION_ENABLE
-        const float fn_left = GroundDetection_Update(
+        if (ground_detection_active) {
+            const float fn_left = GroundDetection_Update(
                     GD_SIDE_LEFT,
                     pClassicData->Contronller_Data.F0_L,
                     pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
@@ -459,7 +459,7 @@ void CaculateTask(void *pvParameters) {
                     pClassicData->States_Data.theta_L,
                     pClassicData->States_Data.d_theta_L,
                     pClassicData->States_Data.dd_theta_L);
-        const float fn_right = GroundDetection_Update(
+            const float fn_right = GroundDetection_Update(
                     GD_SIDE_RIGHT,
                     pClassicData->Contronller_Data.F0_R,
                     pClassicData->Contronller_Data.Tp_R + gravity_tp_r,
@@ -470,12 +470,16 @@ void CaculateTask(void *pvParameters) {
                     pClassicData->States_Data.theta_R,
                     pClassicData->States_Data.d_theta_R,
                     pClassicData->States_Data.dd_theta_R);
-        (void)fn_left;
-        (void)fn_right;
+            (void)fn_left;
+            (void)fn_right;
+        } else {
+            /* 工作角外不运行、不累计确认时间，也不保留旧离地状态。 */
+            GroundDetection_Reset();
+        }
 
         /* 双腿均确认离地时只禁止轮毂扭矩输出。LQR 本身继续计算，腿长 PID、
          * 气弹簧补偿、腿重力补偿及两套 roll 补偿均保持原运行条件。 */
-        if (GroundDetection_IsAirborne()) {
+        if (ground_detection_active && GroundDetection_IsAirborne()) {
             pClassicData->Contronller_Data.Fw_L = 0.0f;
             pClassicData->Contronller_Data.Fw_R = 0.0f;
         }

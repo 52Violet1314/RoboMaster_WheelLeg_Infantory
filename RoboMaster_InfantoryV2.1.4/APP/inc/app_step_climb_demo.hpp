@@ -16,8 +16,6 @@
 #define STEP_CLIMB_ANGLE_TOLERANCE_RAD         0.050f
 #define STEP_CLIMB_ACTION_TIMEOUT_S            3.0f
 #define STEP_CLIMB_RECOVER_TIMEOUT_S           3.0f
-#define STEP_CLIMB_TP_MIN_NM                  -1.5f
-#define STEP_CLIMB_TP_MAX_NM                   1.5f
 
 typedef enum { STEP_CLIMB_IDLE, STEP_CLIMB_ARMED, STEP_CLIMB_SWING_REAR,
                STEP_CLIMB_RETRACT, STEP_CLIMB_RECOVER,

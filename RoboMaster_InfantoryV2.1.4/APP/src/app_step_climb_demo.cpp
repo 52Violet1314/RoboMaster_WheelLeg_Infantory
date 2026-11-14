@@ -77,7 +77,7 @@ StepClimbCommand_t StepClimb_Update(float dt, bool ch6, bool enabled, bool lqr_s
         }
     } else if (s_state == STEP_CLIMB_RECOVER) {
         /* 后摆、收腿完成后释放两个目标，由原 LQR 起身。重力补偿只服从
-         * CalculateTask 中原有的 StandUp_Flag 门控。 */
+         * 起身状态模块的结果。 */
         cmd.allow_lqr = enabled && lqr_switch;
         s_action_time_s += dt;
         if (stand_up) {

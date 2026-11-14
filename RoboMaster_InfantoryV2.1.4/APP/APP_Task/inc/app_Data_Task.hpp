@@ -100,7 +100,6 @@ typedef struct {
 
     struct {
         float X_pos;
-        float X_pos_Err;
         float d_X;
         float theta_L;
         float d_theta_L;
