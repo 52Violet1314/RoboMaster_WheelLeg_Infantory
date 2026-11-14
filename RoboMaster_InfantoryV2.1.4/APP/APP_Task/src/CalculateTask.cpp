@@ -356,7 +356,6 @@ void CaculateTask(void *pvParameters) {
                 ground_detection_active &&
                 (GroundDetection_IsAirborne() != 0U);
 #else
-        const bool ground_detection_active = false;
         const bool airborne_control_active = false;
 #endif
         const float current_position_m =

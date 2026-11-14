@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* 控制离地观测器及其并行控制覆盖是否在 CalculateTask 中运行。 */
-#define GROUND_DETECTION_ENABLE  1
+#define GROUND_DETECTION_ENABLE  0
 
 /* 双腿确认离地后的腿长目标。仅在起身工作角内允许离地状态接管。 */
 #define GROUND_DETECTION_LEG_TARGET_M  0.350f

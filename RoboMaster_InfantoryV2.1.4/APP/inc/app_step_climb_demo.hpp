@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 /* 台阶状态机编译开关；CH6 仍是运行时使能。 */
-#define STEP_CLIMB_CONTROL_ENABLE              1
+#define STEP_CLIMB_CONTROL_ENABLE              0
 
 /* CH6（Channel[6]）模式开关；保持 CH7=LQR、CH9=总使能由操作手控制。 */
 #define STEP_CLIMB_SWITCH_THRESHOLD             100

@@ -4,7 +4,7 @@
 #include <stdbool.h>
 
 /* roll 角度环：输出左右腿长目标差。单位为 rad、m、s。 */
-#define ROLL_ANGLE_LENGTH_PID_ENABLE              1
+#define ROLL_ANGLE_LENGTH_PID_ENABLE              0
 #define ROLL_ANGLE_LENGTH_PID_KP_M_PER_RAD        0.050f
 #define ROLL_ANGLE_LENGTH_PID_KI_M_PER_RAD_S      0.010f
 #define ROLL_ANGLE_LENGTH_PID_KD_M_S_PER_RAD      0.000f
