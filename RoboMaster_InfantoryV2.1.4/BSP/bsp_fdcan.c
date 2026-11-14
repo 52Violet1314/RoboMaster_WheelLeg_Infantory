@@ -25,6 +25,7 @@ volatile uint8_t dm_motor_driver_fault_flag = 0U;
 volatile uint8_t dm_motor_feedback_timeout_flag = 1U;
 
 #define DM_MOTOR_FEEDBACK_COUNT       8U
+#define DM_CHASSIS_FEEDBACK_COUNT     6U
 #define DM_MOTOR_FEEDBACK_TIMEOUT_MS  10U
 
 static volatile TickType_t dm_motor_last_feedback_tick[DM_MOTOR_FEEDBACK_COUNT] = {0};
@@ -60,7 +61,7 @@ static void motor_control_snapshot_publish_from_isr(void) {
 
 static void dm_motor_timeout_timer_callback(TimerHandle_t xTimer) {
   TickType_t now = xTaskGetTickCount();
-  uint32_t required_feedback_count = DM_MOTOR_FEEDBACK_COUNT;
+  uint32_t required_feedback_count = DM_CHASSIS_FEEDBACK_COUNT;
   (void)xTimer;
 
 #if DM_FOUR_HIP_COMMISSIONING_BYPASS
@@ -113,8 +114,12 @@ static void dm_motor_update_driver_fault(uint8_t motor_id, uint8_t fault) {
 static uint8_t dm_motor_feedback_valid(const FDCAN_RxHeaderTypeDef *header,
                                        const uint8_t *data,
                                        uint16_t expected_feedback_id,
-                                       uint8_t expected_motor_id) {
-  uint8_t status;
+                                       uint8_t expected_motor_id,
+                                       uint16_t expected_control_id) {
+  uint8_t status_raw;
+  uint8_t control_id_high;
+  uint8_t definite_fault_bits;
+  uint8_t prior_fault;
 
   if ((header->IdType != FDCAN_STANDARD_ID) ||
       (header->RxFrameType != FDCAN_DATA_FRAME) ||
@@ -129,16 +134,21 @@ static uint8_t dm_motor_feedback_valid(const FDCAN_RxHeaderTypeDef *header,
     return 0;
   }
 
-  /*
-   * state 的编码含义由电机固件版本决定。达妙官方例程和旧控制链路都只是
-   * 保存该字段，并没有把 state > 1 擅自判成故障。此前这里拒绝该帧会停止
-   * 刷新四髋超时计时，造成“有反馈快照但始终 timeout”的架构回归。
-   * 未建立型号/固件版本对应的故障码表前，state 只作为诊断数据保留；合法
-   * 的 8 字节反馈必须继续更新位置、速度和接收时间戳。
-   */
-  status = (uint8_t)(data[0] >> 4);
-  (void)status;
-  dm_motor_update_driver_fault(expected_motor_id, 0U);
+  /* 手册定义 D0 = ID | (ERR << 4)。本车 ESC_ID 使用 0x51~0x58，
+   * ID 的高四位 0x5 会与 ERR 按位或，导致 raw=5 可能是正常使能，
+   * raw=D 也无法唯一还原为 8/9/C/D。已被 OR 覆盖的位不可逆；这里只
+   * 剔除已知 ID 高位，检测能够确定存在的故障位，绝不把 raw=5 误报为
+   * “传感器错误”。合法反馈仍刷新接收时间，故障状态单独交给安全门。 */
+  status_raw = (uint8_t)(data[0] >> 4);
+  control_id_high = (uint8_t)((expected_control_id >> 4) & 0x0FU);
+  definite_fault_bits = (uint8_t)(status_raw & (uint8_t)(~control_id_high));
+  prior_fault = dm_motor_driver_fault_state[expected_motor_id - 1U];
+  if ((definite_fault_bits != 0U) && (prior_fault == 0U)) {
+    dm_motor_record_fault(header->Identifier, expected_motor_id, status_raw,
+                          DM_MOTOR_FAULT_DRIVER_STATUS);
+  }
+  dm_motor_update_driver_fault(expected_motor_id,
+                               (definite_fault_bits != 0U) ? 1U : 0U);
 
   return 1;
 }
@@ -444,25 +454,25 @@ void fdcan1_rx_callback(void) {
     // 软件过滤特定ID
     switch (rec_id) {
       case 0x091: //  8009电机1ID
-        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x091, 0x01)) {
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x091, 0x01, 0x051)) {
           DM_Motor_FeedbackDecode(&DM_8009P1, buf);
           dm_motor_feedback_mark_received(0);
         }
         break;
       case 0x092: //  8009电机2ID
-        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x092, 0x02)) {
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x092, 0x02, 0x052)) {
           DM_Motor_FeedbackDecode(&DM_8009P2, buf);
           dm_motor_feedback_mark_received(1);
         }
         break;
       case 0x093: //  8009电机3ID
-        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x093, 0x03)) {
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x093, 0x03, 0x053)) {
           DM_Motor_FeedbackDecode(&DM_8009P3, buf);
           dm_motor_feedback_mark_received(2);
         }
         break;
       case 0x094: //  8009电机4ID
-        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x094, 0x04)) {
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x094, 0x04, 0x054)) {
           DM_Motor_FeedbackDecode(&DM_8009P4, buf);
           dm_motor_feedback_mark_received(3);
         }
@@ -483,13 +493,13 @@ void fdcan2_rx_callback(void) {
          HAL_OK) {
     switch (pRxHeader.Identifier) {
       case 0x095:
-        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x095, 0x05)) {
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x095, 0x05, 0x055)) {
           DM_Motor_FeedbackDecode(&DM_3519L, buf);
           dm_motor_feedback_mark_received(4);
         }
         break;
       case 0x096:
-        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x096, 0x06)) {
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x096, 0x06, 0x056)) {
           DM_Motor_FeedbackDecode(&DM_3519R, buf);
           dm_motor_feedback_mark_received(5);
         }
@@ -509,13 +519,13 @@ void fdcan2_rx_fifo1_callback(void) {
          HAL_OK) {
     switch (pRxHeader.Identifier) {
       case 0x097: // 拨弹 DM_3507
-        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x097, 0x07)) {
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x097, 0x07, 0x057)) {
           DM_Motor_FeedbackDecode(&DM_3507, buf);
           dm_motor_feedback_mark_received(6);
         }
         break;
       case 0x098: // yaw DM_4310
-        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x098, 0x08)) {
+        if (dm_motor_feedback_valid(&pRxHeader, buf, 0x098, 0x08, 0x058)) {
           DM_Motor_FeedbackDecode(&DM_4310, buf);
           dm_motor_feedback_mark_received(7);
         }

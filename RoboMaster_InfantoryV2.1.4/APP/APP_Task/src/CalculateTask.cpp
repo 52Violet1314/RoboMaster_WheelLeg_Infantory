@@ -60,7 +60,8 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
                                      bool remote_snapshot_updated,
                                      bool motor_snapshot_updated,
                                      bool motor_feedback_fault,
-                                     bool hip_driver_fault);
+                                     bool hip_driver_fault,
+                                     const Motor_ControlSnapshot_t &motor_snapshot);
 
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
@@ -73,7 +74,8 @@ static void DM_Motor_SafeZeroAndEnableAllMonitored(void) {
         &DM_8009P1, &DM_8009P2, &DM_8009P3, &DM_8009P4,
         &DM_3519L, &DM_3519R, &DM_3507, &DM_4310,
     };
-    uint32_t monitored_count = sizeof(motors) / sizeof(motors[0]);
+    /* 正常模式只恢复四关节和两轮毂；3507/4310属于上装。 */
+    uint32_t monitored_count = 6U;
 #if DM_FOUR_HIP_COMMISSIONING_BYPASS
     /* 四髋接线调试只触及已接的 P1~P4，绝不向未接电机反复广播使能。 */
     monitored_count = 4U;
@@ -188,17 +190,23 @@ void CaculateTask(void *pvParameters) {
                 break;
             }
         }
+        bool chassis_driver_fault = hip_driver_fault;
+        for (uint32_t i = 4U; i < 6U && !chassis_driver_fault; ++i) {
+            if (motor_snapshot.driver_fault_state[i] != 0U) {
+                chassis_driver_fault = true;
+            }
+        }
 #if DM_FOUR_HIP_COMMISSIONING_BYPASS
         const bool motor_feedback_fault =
                 (dm_motor_feedback_timeout_flag != 0U) || hip_driver_fault;
 #else
         const bool motor_feedback_fault =
                 (dm_motor_feedback_timeout_flag != 0U) ||
-                (motor_snapshot.driver_fault_flag != 0U);
+                chassis_driver_fault;
 #endif
         ControlHealth_Data_Print(imu_snapshot_updated, remote_snapshot_updated,
                                  motor_snapshot_updated, motor_feedback_fault,
-                                 hip_driver_fault);
+                                 hip_driver_fault, motor_snapshot);
         if (motor_feedback_fault ||
             (imu_data_timeout_flag != 0U) ||
             (remote_data_timeout_flag != 0U)) {
@@ -492,7 +500,7 @@ void CaculateTask(void *pvParameters) {
                 /* 调试打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);
-                LegLengthPID_Data_Print(pClassicData);
+                // LegLengthPID_Data_Print(pClassicData);
                 // IMU_Data_Print(pClassicData);
                 // State_Data_Print(pClassicData);
                 // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
@@ -517,13 +525,37 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
                                      bool remote_snapshot_updated,
                                      bool motor_snapshot_updated,
                                      bool motor_feedback_fault,
-                                     bool hip_driver_fault) {
+                                     bool hip_driver_fault,
+                                     const Motor_ControlSnapshot_t &motor_snapshot) {
     static TickType_t last_print_tick = 0;
     const TickType_t now = xTaskGetTickCount();
     if ((now - last_print_tick) < pdMS_TO_TICKS(200)) return;
     last_print_tick = now;
-    uart_print("HEALTH,imu_to=%u,remote_to=%u,hip_to=%u,motor_fault=%u,hip_fault=%u,"
-               "imu_q=%u,remote_q=%u,motor_q=%u\r\n",
+    /* 电机顺序：P1,P2,P3,P4,3519L,3519R,3507,4310。
+     * st=驱动器反馈高四位原始状态码；sw=软件故障位。
+     * last_* 是最近一条非法帧/驱动状态故障记录。 */
+    uart_print("FAULT,st=%X/%X/%X/%X/%X/%X/%X/%X,"
+               "sw=%u/%u/%u/%u/%u/%u/%u/%u,"
+               "to=%u/%u/%u,mf=%u,hf=%u,q=%u/%u/%u,"
+               "last=%lu/%03X/%u/%X/%u,"
+               "txf=%lu/%lu/%lu,bo=%lu/%lu/%lu,"
+               "ep=%lu/%lu/%lu,ew=%lu/%lu/%lu,rst=%lu/%lu/%lu\r\n",
+               (unsigned)motor_snapshot.data[0].err,
+               (unsigned)motor_snapshot.data[1].err,
+               (unsigned)motor_snapshot.data[2].err,
+               (unsigned)motor_snapshot.data[3].err,
+               (unsigned)motor_snapshot.data[4].err,
+               (unsigned)motor_snapshot.data[5].err,
+               (unsigned)motor_snapshot.data[6].err,
+               (unsigned)motor_snapshot.data[7].err,
+               (unsigned)motor_snapshot.driver_fault_state[0],
+               (unsigned)motor_snapshot.driver_fault_state[1],
+               (unsigned)motor_snapshot.driver_fault_state[2],
+               (unsigned)motor_snapshot.driver_fault_state[3],
+               (unsigned)motor_snapshot.driver_fault_state[4],
+               (unsigned)motor_snapshot.driver_fault_state[5],
+               (unsigned)motor_snapshot.driver_fault_state[6],
+               (unsigned)motor_snapshot.driver_fault_state[7],
                (unsigned)imu_data_timeout_flag,
                (unsigned)remote_data_timeout_flag,
                (unsigned)dm_motor_feedback_timeout_flag,
@@ -531,7 +563,27 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
                (unsigned)hip_driver_fault,
                (unsigned)imu_snapshot_updated,
                (unsigned)remote_snapshot_updated,
-               (unsigned)motor_snapshot_updated);
+               (unsigned)motor_snapshot_updated,
+               (unsigned long)dm_motor_fault_record.count,
+               (unsigned)dm_motor_fault_record.feedback_id,
+               (unsigned)dm_motor_fault_record.motor_id,
+               (unsigned)dm_motor_fault_record.status,
+               (unsigned)dm_motor_fault_record.reason,
+               (unsigned long)fdcan1_tx_fifo_full_count,
+               (unsigned long)fdcan2_tx_fifo_full_count,
+               (unsigned long)fdcan3_tx_fifo_full_count,
+               (unsigned long)fdcan1_bus_off_count,
+               (unsigned long)fdcan2_bus_off_count,
+               (unsigned long)fdcan3_bus_off_count,
+               (unsigned long)fdcan1_error_passive_count,
+               (unsigned long)fdcan2_error_passive_count,
+               (unsigned long)fdcan3_error_passive_count,
+               (unsigned long)fdcan1_error_warning_count,
+               (unsigned long)fdcan2_error_warning_count,
+               (unsigned long)fdcan3_error_warning_count,
+               (unsigned long)fdcan1_restart_count,
+               (unsigned long)fdcan2_restart_count,
+               (unsigned long)fdcan3_restart_count);
 }
 
 void LEG_Data_Print(Classic_Data_t *pClassicData) {

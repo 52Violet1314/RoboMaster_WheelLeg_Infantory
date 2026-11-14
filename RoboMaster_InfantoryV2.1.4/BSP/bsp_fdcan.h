@@ -76,7 +76,7 @@ extern volatile uint8_t dm_motor_feedback_timeout_flag;
  * 清零。P1~P4 任一台超时/驱动故障仍保持原有的清零保护，遥控器和 IMU
  * 超时、遥控总使能关闭也完全不受影响。完成四髋检查后必须恢复为 0。
  */
-#define DM_FOUR_HIP_COMMISSIONING_BYPASS 1U
+#define DM_FOUR_HIP_COMMISSIONING_BYPASS 0U
 
 void bsp_can_init(void);
 void can_filter_init(void);
