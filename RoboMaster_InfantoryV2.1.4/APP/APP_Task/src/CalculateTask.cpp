@@ -84,7 +84,7 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
                                      bool motor_feedback_fault,
                                      bool hip_driver_fault);
 
-/* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
+/* FireWater CSV：左右腿长 PID 裸支持力输出，单位 N。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
 /* 仅供电机反馈超时/驱动故障恢复使用。
@@ -930,25 +930,17 @@ void IMU_Data_Print(Classic_Data_t *pClassicData) {
 }
 
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV：目标L0、左L0、右L0、左F0、右F0；单位 m,m,m,N,N。 */
-    const float target = pClassicData->Target_Data.Target_LegLong;
-    const float values[5] = {
-        target,
-        pClassicData->Leg_Data.L0_L,
-        pClassicData->Leg_Data.L0_R,
-        pClassicData->Contronller_Data.F0_L,
-        pClassicData->Contronller_Data.F0_R,
-    };
-    int milli[5];
-    for (uint32_t index = 0; index < 5U; ++index)
-        milli[index] = (int)lroundf(values[index] * 1000.0f);
+    /* FireWater 纯 CSV：左腿长 PID 输出、右腿长 PID 输出；单位 N。 */
+    const int left_milli = (int)lroundf(
+            pClassicData->Contronller_Data.LegLengthPID_F0_L * 1000.0f);
+    const int right_milli = (int)lroundf(
+            pClassicData->Contronller_Data.LegLengthPID_F0_R * 1000.0f);
 
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
-               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
-               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
-               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
-               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
-               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000);
+    uart_print("%c%d.%03d,%c%d.%03d\r\n",
+               left_milli < 0 ? '-' : ' ', abs(left_milli) / 1000,
+               abs(left_milli) % 1000,
+               right_milli < 0 ? '-' : ' ', abs(right_milli) / 1000,
+               abs(right_milli) % 1000);
 }
 
 void State_Data_Print(Classic_Data_t *pClassicData) {

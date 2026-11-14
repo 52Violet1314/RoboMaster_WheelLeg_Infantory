@@ -24,11 +24,20 @@
 #define SCOPE_DECIMATE 10
 #define DERIVATIVE_FILTER_A .15
 #define SUPPORT_LINES 6
+#define JUMP_CROUCH_LENGTH .150
+#define JUMP_EXTENSION_LENGTH .350
+#define JUMP_RETRACT_LENGTH .135
+#define JUMP_TOTAL_FORCE_PER_LEG 200.0
+#define SPEED_RAMP 1.0
+#define GUI_SPEED_ACCEL 5.0
+#define GUI_TURN_ACCEL 25.0
+#define GUI_SPEED_MAX 2.5
+#define GUI_TURN_MAX 2.5
 
 typedef struct { double kp,ki,kd,out,ilim,i,last; int valid; } PID;
 typedef struct { int hip[2],wheel[2],slide[2],awheel[2],ahip[2],aleg[2],bhip[2],bwheel[2],gwheel[2],bbase; } Ids;
 typedef struct {
-  double yaw,pitch,roll,om[3],len[2],theta[2],wheel_vel[2];
+  double yaw,pitch,pitch_full,roll,om[3],len[2],theta[2],wheel_vel[2];
 } Meas;
 typedef struct {
   int count;
@@ -48,7 +57,16 @@ typedef struct {
   double dt, target_len, speed, target_speed, turn_rate, target_yaw, f0, pos, pos_i, last_theta[2];
   double last_len[2], d_len[2], dd_len[2], d_theta[2], dd_theta[2], last_z_velocity;
   double body_accel_down, leg_force_cmd[2], spring_force[2], tp_cmd[2], contact_fn[2];
-  int theta_valid, derivative_valid, rear_pose_active, ticks; float x[10],u[4]; Scope scope; LinkageVisual visual;
+  double stop_brake_int, stop_brake_torque;
+  int theta_valid, derivative_valid, rear_pose_active, estop, ticks;
+  int position_tracking, position_hold;
+  int jump_phase, rescue_phase;
+  double jump_time, jump_return_len, jump_apex_z, jump_takeoff_z;
+  int jump_had_contact;
+  double rescue_time,rescue_total,rescue_sign,rescue_length;
+  double rescue_q[2],rescue_targets[2],rescue_ctrl[6];
+  int rescue_front[2];
+  float x[10],u[4]; Scope scope; LinkageVisual visual;
   GroundDetector ground_detector;
   GroundDetectionOutput ground[2];
 } Ctrl;
@@ -138,25 +156,19 @@ static double trim(double l) {
   static const double b[]={.040,.040,.037,.027,.0205,.017,.0145,.012};
   if(l<=a[0]) return b[0]; for(int i=1;i<8;i++) if(l<=a[i]) return b[i-1]+(l-a[i-1])*(b[i]-b[i-1])/(a[i]-a[i-1]); return b[7];
 }
-/* Exact continuous fit used by app_leg_force_compensation.cpp.  The returned
-   value is the motor compensation (negative = retract); the passive spring is
-   the equal and opposite positive extension force. */
-static double leg_spring_compensation(double length) {
-  if(!isfinite(length)||length<.130)return 0;
-  if(length>.380)length=.380;
-  if(length<.140) {
-    double t=(length-.130)/.010,h01=-2*t*t*t+3*t*t,h11=t*t*t-t*t;
-    return -28*h01+(.010*-222.33253)*h11;
-  }
-  double z=(length-.260)/.120;
-  double base=((((.83489717*z-6.16044808)*z+2.88790652)*z+.91684180)*z-36.96640998);
-  if(length<=.300)return base;
-  double t=(length-.300)/.080,s=6*t*t*t*t*t-15*t*t*t*t+10*t*t*t;
-  return base-2.5*s;
+/* Python sim_lqr.py derives the passive 15 N m gas-spring force from the
+   linkage table.  Use the same centred 0.5 mm finite difference and clamp so
+   the C plant, VMC motor command and ground detector see identical numbers. */
+static double gas_spring_force(double slide) {
+  double lo[8],hi[8];
+  interpolate_linkage_angles(slide-.0005,lo);
+  interpolate_linkage_angles(slide+.0005,hi);
+  return clip(fabs(15.0*(hi[5]-lo[5])/.001),0,120);
 }
 static void measure(const Ctrl*c,Meas*o) {
   double r[3][3],w[3],cy,sy; quat_matrix(c->d->qpos+3,r);
-  o->yaw=atan2(r[1][0],r[0][0]); o->pitch=asin(clip(-r[2][0],-1,1)); o->roll=atan2(r[2][1],r[2][2]);
+  o->yaw=atan2(r[1][0],r[0][0]); o->pitch=asin(clip(-r[2][0],-1,1));
+  o->pitch_full=atan2(-r[2][0],r[2][2]); o->roll=atan2(r[2][1],r[2][2]);
   for(int i=0;i<3;i++) w[i]=r[i][0]*c->d->qvel[3]+r[i][1]*c->d->qvel[4]+r[i][2]*c->d->qvel[5];
   cy=cos(o->yaw); sy=sin(o->yaw); o->om[0]=cy*w[0]+sy*w[1]; o->om[1]=-sy*w[0]+cy*w[1]; o->om[2]=w[2];
   for(int k=0;k<2;k++) {
@@ -195,10 +207,21 @@ static void update_derivatives(Ctrl*c,const Meas*q) {
 }
 static void state(Ctrl*c,const Meas*q) {
   double vx=WHEEL_R*.5*(q->wheel_vel[0]+q->wheel_vel[1]);
-  c->pos+=(vx-c->target_speed)*c->dt;
+  if(c->position_tracking)c->pos+=(vx-c->target_speed)*c->dt;else c->pos=0;
   c->x[0]=c->pos; c->x[1]=vx-c->target_speed; c->x[2]=wrap(q->yaw-c->target_yaw); c->x[3]=q->om[2];
   c->x[4]=-(q->theta[0]-trim(c->target_len)); c->x[5]=-c->d_theta[0];
   c->x[6]=-(q->theta[1]-trim(c->target_len)); c->x[7]=-c->d_theta[1]; c->x[8]=q->pitch; c->x[9]=q->om[1];
+}
+static int wheels_grounded(const Ctrl*c) {
+  for(int i=0;i<c->d->ncon;i++) {
+    const mjContact* contact=&c->d->contact[i];
+    for(int side=0;side<2;side++) {
+      int other=contact->geom1==c->id.gwheel[side]?contact->geom2:
+                (contact->geom2==c->id.gwheel[side]?contact->geom1:-1);
+      if(other>=0 && c->m->geom_bodyid[other]==0)return 1;
+    }
+  }
+  return 0;
 }
 static void measure_contact_support(Ctrl*c) {
   c->contact_fn[0]=c->contact_fn[1]=0;
@@ -259,19 +282,42 @@ static void control(Ctrl*c,const Meas*q) {
   c->pos_i=clip(c->pos_i+c->x[0]*c->dt,-1,1); off[0]=off[1]=.6f*(float)c->pos_i; off[2]=off[3]=0;
   if(!wheelleg_mpc_evaluate(&c->mpc,c->x,lim,off,c->u)) memset(c->u,0,sizeof(c->u));
   for(int k=0;k<2;k++) { v[c->id.awheel[k]]=c->u[k]; v[c->id.ahip[k]]=c->u[k+2]+c->u[k]; }
+
+  /* Python's bounded PI parking brake is selected from the raw operator
+     command so key release acts immediately while target_speed ramps down. */
+  if(fabs(c->speed)<=1e-9 && (!c->jump_phase || c->jump_phase>=4)) {
+    double r[3][3];quat_matrix(c->d->qpos+3,r);
+    double forward_v=r[0][0]*c->d->qvel[0]+r[1][0]*c->d->qvel[1]+r[2][0]*c->d->qvel[2];
+    if(forward_v*c->stop_brake_int<0)c->stop_brake_int=0;
+    c->stop_brake_int=clip(c->stop_brake_int+(forward_v-.25*c->stop_brake_int)*c->dt,-.75,.75);
+    double wanted=clip(3*forward_v+4*c->stop_brake_int,-4,4);
+    double alpha=fmin(1.0,c->dt/.10);
+    c->stop_brake_torque+=alpha*(wanted-c->stop_brake_torque);
+    for(int k=0;k<2;k++)v[c->id.awheel[k]]+=c->stop_brake_torque;
+  } else c->stop_brake_int=c->stop_brake_torque=0;
+
   double ac=pid(&c->anti,0,q->theta[0]-q->theta[1],c->dt); v[c->id.ahip[0]]-=ac; v[c->id.ahip[1]]+=ac;
+  double roll_comp=clip(60*q->roll+3*q->om[0],-30,30);
+  memset(c->d->qfrc_applied,0,(size_t)c->m->nv*sizeof(c->d->qfrc_applied[0]));
   for(int k=0;k<2;k++) {
-    double desired_total=c->f0+pid(&c->length_pid[k],c->target_len,q->len[k],c->dt);
-    double compensation=leg_spring_compensation(q->len[k]);
-    c->spring_force[k]=-compensation;
-    c->leg_force_cmd[k]=clip(desired_total+compensation,-FORCE_LIMIT,FORCE_LIMIT);
+    double pid_force=pid(&c->length_pid[k],c->target_len,q->len[k],c->dt);
+    double desired_total=(c->jump_phase==2?JUMP_TOTAL_FORCE_PER_LEG:c->f0)+pid_force+(k?roll_comp:-roll_comp);
+    if(c->jump_phase==3)desired_total=pid_force;
+    desired_total=clip(desired_total,-FORCE_LIMIT,FORCE_LIMIT);
+    int sj=c->m->jnt_qposadr[c->id.slide[k]];
+    c->spring_force[k]=gas_spring_force(c->d->qpos[sj]);
+    c->leg_force_cmd[k]=clip(desired_total-c->spring_force[k],-FORCE_LIMIT,FORCE_LIMIT);
     v[c->id.aleg[k]]=c->leg_force_cmd[k];
     c->d->qfrc_applied[c->m->jnt_dofadr[c->id.slide[k]]]=c->spring_force[k];
+  }
+  if(c->jump_phase==3)for(int k=0;k<2;k++)v[c->id.awheel[k]]=v[c->id.ahip[k]]=0;
+  else if(c->jump_phase==4) {
+    double blend=clip((c->jump_time-.12)/.80,0,1);
+    for(int k=0;k<2;k++){v[c->id.awheel[k]]=clip(blend*v[c->id.awheel[k]],-6,6);v[c->id.ahip[k]]=clip(blend*v[c->id.ahip[k]],-12,12);}
+  }
+  for(int k=0;k<2;k++) {
     v[c->id.awheel[k]]=clip(v[c->id.awheel[k]],-WHEEL_LIMIT,WHEEL_LIMIT);
     v[c->id.ahip[k]]=clip(v[c->id.ahip[k]],-hip_limit,hip_limit);
-    /* The wheel motor reacts on the leg through the hip.  Therefore the
-       virtual pitch torque actually delivered after the final actuator clamp
-       is hip_motor - wheel_motor. */
     c->tp_cmd[k]=v[c->id.ahip[k]]-v[c->id.awheel[k]];
   }
 }
@@ -279,11 +325,16 @@ static void reset(Ctrl*c) {
   mjModel*m=c->m; mjData*d=c->d; mj_resetData(m,d); d->qpos[0]=1.25; d->qpos[1]=6.75; d->qpos[2]=c->target_len+WHEEL_R; d->qpos[3]=1;
   for(int k=0;k<2;k++) { int h=m->jnt_qposadr[c->id.hip[k]],s=m->jnt_qposadr[c->id.slide[k]]; d->qpos[h]=HIP_VERTICAL;
     d->qpos[s]=clip(c->target_len-LEG_NOMINAL,m->jnt_range[2*c->id.slide[k]],m->jnt_range[2*c->id.slide[k]+1]); pid_reset(&c->length_pid[k]); }
-  pid_reset(&c->anti); c->pos=c->pos_i=0;c->theta_valid=0;c->derivative_valid=0;c->rear_pose_active=0;c->ticks=0;
+  pid_reset(&c->anti); c->pos=c->pos_i=0;c->target_speed=0;c->target_yaw=0;c->theta_valid=0;c->derivative_valid=0;c->rear_pose_active=0;c->estop=0;c->jump_phase=0;c->rescue_phase=0;c->ticks=0;
+  c->position_tracking=c->position_hold=0;c->stop_brake_int=c->stop_brake_torque=0;
+  c->jump_had_contact=0;c->jump_time=0;c->jump_takeoff_z=0;c->jump_apex_z=d->qpos[2];
   c->body_accel_down=0;c->last_z_velocity=0;
   memset(c->d_len,0,sizeof(c->d_len));memset(c->dd_len,0,sizeof(c->dd_len));
   memset(c->d_theta,0,sizeof(c->d_theta));memset(c->dd_theta,0,sizeof(c->dd_theta));
   memset(c->leg_force_cmd,0,sizeof(c->leg_force_cmd));memset(c->spring_force,0,sizeof(c->spring_force));memset(c->tp_cmd,0,sizeof(c->tp_cmd));
+  memset(c->d->ctrl,0,(size_t)c->m->nu*sizeof(c->d->ctrl[0]));
+  memset(c->d->qfrc_applied,0,(size_t)c->m->nv*sizeof(c->d->qfrc_applied[0]));
+  memset(c->d->xfrc_applied,0,(size_t)6*c->m->nbody*sizeof(c->d->xfrc_applied[0]));
   ground_detection_init(&c->ground_detector,NULL);memset(c->ground,0,sizeof(c->ground));
   memset(&c->scope,0,sizeof(c->scope));
   update_linkage_visual(c); mj_forward(m,d);
@@ -295,24 +346,123 @@ static int init(Ctrl*c,mjModel*m,mjData*d,double leg,double speed) {
   for(int i=0;i<m->nbody;i++)c->f0+=m->body_mass[i];c->f0=(.5*c->f0-m->body_mass[c->id.bwheel[0]])*G;reset(c);Meas z;measure(c,&z);c->target_yaw=z.yaw;return 1;
 }
 static void set_leg_target(Ctrl*c,double length) {
-  c->target_len=clip(length,LEG_MIN,LEG_MAX);
-  wheelleg_mpc_select_length(&c->mpc,(float)c->target_len);
-  for(int side=0;side<2;side++) pid_reset(&c->length_pid[side]);
+  double target=clip(length,LEG_MIN,LEG_MAX);
+  if(fabs(target-c->target_len)<=1e-12)return;
+  c->target_len=target;wheelleg_mpc_select_length(&c->mpc,(float)c->target_len);
+}
+static void reset_length_pids(Ctrl*c){for(int side=0;side<2;side++)pid_reset(&c->length_pid[side]);}
+static void request_jump(Ctrl*c) {
+  if(c->jump_phase||c->estop||c->rescue_phase)return;
+  c->rear_pose_active=0;c->jump_phase=1;c->jump_time=0;
+  c->jump_return_len=c->target_len;c->jump_apex_z=c->d->qpos[2];
+  c->jump_takeoff_z=0;c->jump_had_contact=0;c->position_tracking=c->position_hold=0;c->pos=c->pos_i=0;
+}
+static void update_jump(Ctrl*c,const Meas*q) {
+  if(!c->jump_phase)return;
+  c->jump_time+=c->dt;c->jump_apex_z=fmax(c->jump_apex_z,c->d->qpos[2]);
+  int grounded=wheels_grounded(c);
+  if(c->jump_phase==1) {
+    set_leg_target(c,JUMP_CROUCH_LENGTH);
+    int crouched=fmax(q->len[0],q->len[1])<=.158;
+    int settled=fabs(c->d->qvel[2])<.15&&fabs(q->pitch)<.10;
+    if(crouched&&settled&&c->jump_time>=.15){c->jump_phase=2;c->jump_time=0;c->jump_had_contact=grounded;set_leg_target(c,JUMP_EXTENSION_LENGTH);reset_length_pids(c);}
+  } else if(c->jump_phase==2) {
+    set_leg_target(c,JUMP_EXTENSION_LENGTH);c->jump_had_contact|=grounded;
+    if((c->jump_had_contact&&!grounded&&c->jump_time>=.02&&c->d->qvel[2]>.2)||c->jump_time>=.35){c->jump_phase=3;c->jump_time=0;c->jump_takeoff_z=c->d->qpos[2];c->jump_apex_z=c->jump_takeoff_z;set_leg_target(c,JUMP_RETRACT_LENGTH);reset_length_pids(c);}
+  } else if(c->jump_phase==3) {
+    set_leg_target(c,JUMP_RETRACT_LENGTH);
+    if(c->jump_time>=.10&&grounded&&c->d->qvel[2]<=0){c->jump_phase=4;c->jump_time=0;reset_length_pids(c);c->position_tracking=c->position_hold=0;c->pos=c->pos_i=0;c->derivative_valid=0;}
+  } else if(c->jump_phase==4) {
+    set_leg_target(c,JUMP_RETRACT_LENGTH);
+    int retracted=fmax(fabs(q->len[0]-JUMP_RETRACT_LENGTH),fabs(q->len[1]-JUMP_RETRACT_LENGTH))<.010;
+    int settled=fabs(c->d->qvel[2])<.10&&fabs(q->pitch)<.10;
+    if(c->jump_time>=.25&&retracted&&settled){c->jump_phase=5;c->jump_time=0;set_leg_target(c,c->jump_return_len);reset_length_pids(c);}
+  } else if(c->jump_phase==5) {
+    set_leg_target(c,c->jump_return_len);
+    int restored=fmax(fabs(q->len[0]-c->jump_return_len),fabs(q->len[1]-c->jump_return_len))<.010;
+    int settled=fabs(c->d->qvel[2])<.08&&fabs(q->pitch)<.08;
+    if(c->jump_time>=.50&&restored&&settled){c->jump_phase=0;c->jump_time=0;}
+  }
+}
+enum { RESCUE_IDLE,RESCUE_BODY,RESCUE_BODY_SETTLE,RESCUE_LIFT,
+       RESCUE_SWEEP,RESCUE_STAND,RESCUE_BALANCE,RESCUE_FAULT };
+static double positive_mod(double x,double period){x=fmod(x,period);return x<0?x+period:x;}
+static void rescue_enter(Ctrl*c,int phase) {
+  c->rescue_phase=phase;c->rescue_time=0;
+  for(int k=0;k<2;k++) {
+    int qa=c->m->jnt_qposadr[c->id.hip[k]];double q=c->d->qpos[qa],local=wrap(q-HIP_VERTICAL);
+    if(phase==RESCUE_LIFT){c->rescue_front[k]=local<-.15;c->rescue_targets[k]=c->rescue_front[k]?q-M_PI-local:q;}
+    else if(phase==RESCUE_SWEEP)c->rescue_targets[k]=c->rescue_front[k]?q-positive_mod(local-M_PI/2,2*M_PI):q+wrap(M_PI/2-local);
+  }
+}
+static void request_stand(Ctrl*c) {
+  Meas q;measure(c,&q);c->estop=0;c->rear_pose_active=0;set_leg_target(c,.150);
+  c->speed=c->target_speed=c->turn_rate=0;c->target_yaw=q.yaw;c->jump_phase=0;c->jump_time=0;
+  reset_length_pids(c);pid_reset(&c->anti);c->position_tracking=c->position_hold=0;c->pos=c->pos_i=0;
+  c->stop_brake_int=c->stop_brake_torque=0;c->derivative_valid=0;
+  c->rescue_time=c->rescue_total=0;c->rescue_sign=q.pitch_full>=0?1:-1;
+  for(int k=0;k<2;k++){c->rescue_q[k]=c->d->qpos[c->m->jnt_qposadr[c->id.hip[k]]];c->rescue_targets[k]=c->rescue_q[k];c->rescue_front[k]=0;}
+  memset(c->rescue_ctrl,0,sizeof(c->rescue_ctrl));c->rescue_length=fmax(.150,.5*(q.len[0]+q.len[1]));
+  int phase=fabs(q.pitch_full)>M_PI/2?RESCUE_BODY:RESCUE_LIFT;
+  if(fabs(q.pitch_full)<.35&&fmax(fabs(q.theta[0]),fabs(q.theta[1]))<.4)phase=RESCUE_BALANCE;
+  rescue_enter(c,phase);
+}
+/* Return 1 when the rescue controller consumed this physics step. */
+static int rescue_step(Ctrl*c) {
+  if(c->rescue_phase==RESCUE_IDLE||c->rescue_phase==RESCUE_FAULT)return 0;
+  c->speed=c->target_speed=c->turn_rate=0;c->rescue_time+=c->dt;c->rescue_total+=c->dt;
+  Meas q;measure(c,&q);double p=q.pitch_full;int phase=c->rescue_phase;
+  int finite=1;for(int i=0;i<c->m->nq;i++)if(!isfinite(c->d->qpos[i])){finite=0;break;}
+  if(c->rescue_total>45||!finite){c->estop=1;c->rescue_phase=RESCUE_FAULT;memset(c->d->ctrl,0,(size_t)c->m->nu*sizeof(c->d->ctrl[0]));memset(c->d->qfrc_applied,0,(size_t)c->m->nv*sizeof(c->d->qfrc_applied[0]));memset(c->u,0,sizeof(c->u));scope_sample(c);update_linkage_visual(c);mj_step(c->m,c->d);return 1;}
+  if(fabs(p)>M_PI/2+.08&&phase!=RESCUE_BODY&&phase!=RESCUE_BODY_SETTLE){c->rescue_sign=p>=0?1:-1;rescue_enter(c,RESCUE_BODY);phase=RESCUE_BODY;}
+  if(phase==RESCUE_BODY&&fabs(p)<1.2){rescue_enter(c,RESCUE_BODY_SETTLE);phase=RESCUE_BODY_SETTLE;}
+  if(phase==RESCUE_BODY_SETTLE&&fabs(p)<.35){rescue_enter(c,RESCUE_LIFT);phase=RESCUE_LIFT;}
+  if(phase==RESCUE_LIFT||phase==RESCUE_SWEEP){int reached=1;for(int k=0;k<2;k++)if(fabs(c->d->qpos[c->m->jnt_qposadr[c->id.hip[k]]]-c->rescue_targets[k])>=.12)reached=0;if(reached&&c->rescue_time>.2){rescue_enter(c,phase==RESCUE_LIFT?RESCUE_SWEEP:RESCUE_STAND);phase=c->rescue_phase;}}
+  if(phase==RESCUE_STAND&&fabs(p)<.20&&fabs(q.roll)<.20&&fmax(fabs(q.theta[0]),fabs(q.theta[1]))<.20&&fmax(fabs(c->d->qvel[c->m->jnt_dofadr[c->id.hip[0]]]),fabs(c->d->qvel[c->m->jnt_dofadr[c->id.hip[1]]]))<.6){rescue_enter(c,RESCUE_BALANCE);phase=RESCUE_BALANCE;}
+  if(phase==RESCUE_BALANCE){set_leg_target(c,.150);if(c->rescue_time>.8&&fabs(p)<.25&&fabs(q.len[0]-.150)<.02&&fabs(q.len[1]-.150)<.02)c->rescue_phase=RESCUE_IDLE;return 0;}
+  update_derivatives(c,&q);state(c,&q);
+  double desired=(phase==RESCUE_BODY||phase==RESCUE_BODY_SETTLE||phase==RESCUE_LIFT)?.30:.150;
+  c->rescue_length+=clip(desired-c->rescue_length,-.06*c->dt,.06*c->dt);
+  double wanted[6]={0};
+  for(int k=0;k<2;k++) {
+    int qa=c->m->jnt_qposadr[c->id.hip[k]],va=c->m->jnt_dofadr[c->id.hip[k]];double pos=c->d->qpos[qa],vel=c->d->qvel[va],target;
+    if(phase==RESCUE_BODY)target=c->rescue_q[k]+c->rescue_sign*.6*c->dt;
+    else if(phase==RESCUE_BODY_SETTLE||phase==RESCUE_STAND){double rear=(phase==RESCUE_BODY_SETTLE?.30:.08)*c->rescue_sign;target=pos+wrap(HIP_VERTICAL-p+rear-pos);}
+    else target=c->rescue_targets[k];
+    c->rescue_q[k]+=clip(target-c->rescue_q[k],-.6*c->dt,.6*c->dt);
+    double torque=clip(30*(c->rescue_q[k]-pos)-4*vel,-20,20);if(fabs(vel)>1.5&&torque*vel>0)torque=-copysign(fmin(20.0,6*(fabs(vel)-1.5)),vel);
+    wanted[c->id.ahip[k]]=torque;
+    int sj=c->id.slide[k],sq=c->m->jnt_qposadr[sj],sv=c->m->jnt_dofadr[sj];
+    wanted[c->id.aleg[k]]=clip(1800*(c->rescue_length-LEG_NOMINAL-c->d->qpos[sq])-60*c->d->qvel[sv]+50,-100,200);
+  }
+  for(int i=0;i<c->m->nu;i++)c->rescue_ctrl[i]+=clip(wanted[i]-c->rescue_ctrl[i],-400*c->dt,400*c->dt);
+  memcpy(c->d->ctrl,c->rescue_ctrl,(size_t)c->m->nu*sizeof(c->d->ctrl[0]));
+  memset(c->d->qfrc_applied,0,(size_t)c->m->nv*sizeof(c->d->qfrc_applied[0]));memset(c->spring_force,0,sizeof(c->spring_force));
+  memset(c->u,0,sizeof(c->u));scope_sample(c);update_linkage_visual(c);mj_step(c->m,c->d);return 1;
 }
 static void tick(Ctrl*c) {
   Meas q; measure(c,&q);
-  c->target_speed += clip(c->speed-c->target_speed,-5*c->dt,5*c->dt);
+  if(c->estop) {
+    memset(c->d->ctrl,0,(size_t)c->m->nu*sizeof(c->d->ctrl[0]));
+    memset(c->d->qfrc_applied,0,(size_t)c->m->nv*sizeof(c->d->qfrc_applied[0]));
+    memset(c->d->xfrc_applied,0,(size_t)6*c->m->nbody*sizeof(c->d->xfrc_applied[0]));
+    update_derivatives(c,&q);state(c,&q);memset(c->u,0,sizeof(c->u));scope_sample(c);update_linkage_visual(c); mj_step(c->m,c->d); return;
+  }
+  if(rescue_step(c))return;
+  c->target_speed += clip(c->speed-c->target_speed,-SPEED_RAMP*c->dt,SPEED_RAMP*c->dt);
+  if(fabs(c->speed)>1e-9&&!c->jump_phase){if(!c->position_tracking||c->position_hold)c->pos=c->pos_i=0;c->position_tracking=1;c->position_hold=0;}
+  else if(c->position_tracking&&!c->position_hold)c->position_hold=1;
   if(fabs(c->turn_rate)>1e-6) {
     double requested=wrap(c->target_yaw+c->turn_rate*c->dt);
     double lead=wrap(requested-q.yaw);
     c->target_yaw=fabs(lead)>.16 ? wrap(q.yaw+(lead>0?.16:-.16)) : requested;
   }
-  update_derivatives(c,&q);state(c,&q);control(c,&q);update_ground_detection(c,&q);
+  update_jump(c,&q);update_derivatives(c,&q);state(c,&q);control(c,&q);update_ground_detection(c,&q);
   scope_sample(c);update_linkage_visual(c);mj_step(c->m,c->d);
 }
 
 typedef struct {
-  HWND hwnd; HDC dc; HGLRC gl; int running, paused, follow, show_contacts;
+  HWND hwnd; HDC dc; HGLRC gl; int running, follow, show_contacts;
   int forward, backward, turn_left, turn_right, drag_left, drag_right, last_x, last_y;
   double camera_azimuth, camera_elevation, camera_distance;
   Ctrl* ctrl;
@@ -321,21 +471,31 @@ static Gui* g_gui;
 static LRESULT CALLBACK window_proc(HWND hwnd,UINT msg,WPARAM wp,LPARAM lp) {
   if(g_gui && (msg==WM_KEYDOWN || msg==WM_KEYUP)) {
     int down=msg==WM_KEYDOWN;
-    if(wp=='W'||wp==VK_NUMPAD8) g_gui->forward=down;
-    if(wp=='S'||wp==VK_NUMPAD5) g_gui->backward=down;
-    if(wp=='A'||wp==VK_NUMPAD4) g_gui->turn_left=down;
-    if(wp=='D'||wp==VK_NUMPAD6) g_gui->turn_right=down;
-    if(wp=='0'||wp==VK_NUMPAD0) g_gui->ctrl->rear_pose_active=down;
+    if(wp=='8'||wp=='W'||wp==VK_NUMPAD8||wp==VK_UP) g_gui->forward=down;
+    if(wp=='5'||wp=='S'||wp==VK_NUMPAD5||wp==VK_CLEAR) g_gui->backward=down;
+    if(wp=='4'||wp=='A'||wp==VK_NUMPAD4||wp==VK_LEFT) g_gui->turn_left=down;
+    if(wp=='6'||wp=='D'||wp==VK_NUMPAD6||wp==VK_RIGHT) g_gui->turn_right=down;
+    if(wp=='0'||wp==VK_NUMPAD0||wp==VK_INSERT) g_gui->ctrl->rear_pose_active=down&&!g_gui->ctrl->jump_phase&&!g_gui->ctrl->estop&&!g_gui->ctrl->rescue_phase;
     if(down && wp==VK_ESCAPE) g_gui->running=0;
-    if(down && wp==VK_SPACE && !(lp&0x40000000)) g_gui->paused=!g_gui->paused;
-    if(down && wp=='R' && !(lp&0x40000000)) reset(g_gui->ctrl);
+    if(down && wp==VK_SPACE && !(lp&0x40000000)) request_jump(g_gui->ctrl);
+    if(down && (wp=='7'||wp==VK_NUMPAD7||wp==VK_HOME) && !(lp&0x40000000)) {
+      g_gui->ctrl->estop=1; g_gui->ctrl->speed=0; g_gui->ctrl->turn_rate=0;
+    }
+    if(down && wp=='X' && !(lp&0x40000000)) {
+      if(g_gui->ctrl->estop){g_gui->ctrl->speed=g_gui->ctrl->turn_rate=0;reset(g_gui->ctrl);g_gui->ctrl->estop=0;}
+      else g_gui->ctrl->estop=1;
+    }
+    if(down && (wp=='9'||wp==VK_NUMPAD9||wp==VK_PRIOR) && !(lp&0x40000000)) {
+      request_stand(g_gui->ctrl);
+    }
+    if(down && (wp=='R'||wp=='Z') && !(lp&0x40000000)) reset(g_gui->ctrl);
     if(down && wp=='F' && !(lp&0x40000000)) g_gui->follow=!g_gui->follow;
     if(down && wp=='V' && !(lp&0x40000000)) g_gui->show_contacts=!g_gui->show_contacts;
     if(down && wp=='C' && !(lp&0x40000000)) {g_gui->camera_azimuth=135;g_gui->camera_elevation=-18;g_gui->camera_distance=2.1;}
     if(down && wp=='J' && !(lp&0x40000000)) g_gui->ctrl->d->qvel[2]+=1.8;
-    if(down && (wp=='1'||wp==VK_NUMPAD1)) set_leg_target(g_gui->ctrl,.150);
-    if(down && (wp=='2'||wp==VK_NUMPAD2)) set_leg_target(g_gui->ctrl,.270);
-    if(down && (wp=='3'||wp==VK_NUMPAD3)) set_leg_target(g_gui->ctrl,.350);
+    if(down && (wp=='1'||wp==VK_NUMPAD1||wp==VK_END)) set_leg_target(g_gui->ctrl,.150);
+    if(down && (wp=='2'||wp==VK_NUMPAD2||wp==VK_DOWN)) set_leg_target(g_gui->ctrl,.270);
+    if(down && (wp=='3'||wp==VK_NUMPAD3||wp==VK_NEXT)) set_leg_target(g_gui->ctrl,.350);
   }
   if(g_gui && msg==WM_KILLFOCUS) {
     g_gui->forward=g_gui->backward=g_gui->turn_left=g_gui->turn_right=0;
@@ -406,10 +566,16 @@ static int run_gui(Ctrl*c) {
   init_figure(&fig_body,"state x: body",body,6);init_figure(&fig_leg,"state x: legs",leg,4);init_figure(&fig_out,"MPC output u [N m]",out,4);init_figure(&fig_support,"ground support Fn [N]",support,SUPPORT_LINES);
   double last=wall_time(),acc=0;
   while(gui.running) { MSG msg;while(PeekMessage(&msg,NULL,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessage(&msg);}double now=wall_time(),frame_dt=clip(now-last,0,.05);acc+=frame_dt;last=now;
-    { int direction=gui.forward-gui.backward; if(direction) c->speed=clip(c->speed+direction*frame_dt,-1,1); else c->speed=0; c->turn_rate=.5*(gui.turn_left-gui.turn_right); }
-    if(!gui.paused){int safety=0;while(acc>=c->dt&&safety++<50){tick(c);acc-=c->dt;}} else acc=0;
+    {
+      int direction=gui.forward-gui.backward,turn_direction=gui.turn_left-gui.turn_right;
+      if(!direction)c->speed=0;else{if(c->speed*direction<0)c->speed=0;c->speed=clip(c->speed+direction*GUI_SPEED_ACCEL*frame_dt,-GUI_SPEED_MAX,GUI_SPEED_MAX);}
+      int was_turning=fabs(c->turn_rate)>1e-6;
+      if(!turn_direction)c->turn_rate=0;else{if(c->turn_rate*turn_direction<0)c->turn_rate=0;c->turn_rate=clip(c->turn_rate+turn_direction*GUI_TURN_ACCEL*frame_dt,-GUI_TURN_MAX,GUI_TURN_MAX);}
+      if(was_turning&&fabs(c->turn_rate)<=1e-6){Meas q;measure(c,&q);c->target_yaw=q.yaw;}
+    }
+    {int safety=0;while(acc>=c->dt&&safety++<50){tick(c);acc-=c->dt;}}
     RECT r;GetClientRect(gui.hwnd,&r);mjrRect full={0,0,r.right-r.left,r.bottom-r.top};cam.azimuth=gui.camera_azimuth;cam.elevation=gui.camera_elevation;cam.distance=gui.camera_distance;if(gui.follow){cam.lookat[0]=c->d->qpos[0];cam.lookat[1]=c->d->qpos[1];}opt.flags[mjVIS_CONTACTFORCE]=gui.show_contacts;mjv_updateScene(c->m,c->d,&opt,NULL,&cam,mjCAT_ALL,&scene);mjr_render(full,&scene,&con);
-    char left[512],right[640];snprintf(left,sizeof(left),"C VMC + explicit MPC\n%s8/5 speed  4/6 turn  1/2/3 leg\nhold 0 compliant hips: %s\nJ airborne test  V contact arrows:%s\nF follow:%s  mouse left rotate  right/wheel zoom\nSpace pause | R reset | C camera | Esc close",gui.paused?"PAUSED\n":"",c->rear_pose_active?"ON (2 Nm)":"off (10 Nm)",gui.show_contacts?"on":"off",gui.follow?"on":"off");snprintf(right,sizeof(right),"t %.2f s  %s\nleg target %.1f mm  F0 %.1f N\nhip limit %.1f Nm\nmotor F L/R %6.1f / %6.1f N\nspring L/R  %6.1f / %6.1f N\nFn est L/R  %6.1f / %6.1f N\nFn raw L/R  %6.1f / %6.1f N\nFn contact  %6.1f / %6.1f N\nleg state   %s / %s\nconfirm     %u / %u ticks\nMPC region %u\nlink L deg F1 %+5.1f F2 %+5.1f R1 %+5.1f R2 %+5.1f",c->d->time,ground_detection_airborne(&c->ground_detector)?"AIRBORNE":"GROUNDED",1000*c->target_len,c->f0,c->rear_pose_active?COMPLIANT_HIP_LIMIT:HIP_LIMIT,c->leg_force_cmd[0],c->leg_force_cmd[1],c->spring_force[0],c->spring_force[1],c->ground[0].fn_filtered_n,c->ground[1].fn_filtered_n,c->ground[0].fn_raw_n,c->ground[1].fn_raw_n,c->contact_fn[0],c->contact_fn[1],c->ground[0].off_ground?"AIR":"ON",c->ground[1].off_ground?"AIR":"ON",c->ground[0].confirm_count,c->ground[1].confirm_count,c->mpc.region,57.2957795*c->visual.angles[0][0],57.2957795*c->visual.angles[0][1],57.2957795*c->visual.angles[0][4],57.2957795*c->visual.angles[0][5]);mjr_overlay(mjFONT_NORMAL,mjGRID_TOPLEFT,full,left,right,&con);
+    char left[512],right[640];snprintf(left,sizeof(left),"C VMC + explicit MPC\n8/5 speed  4/6 turn  1/2/3 leg\n7 disable  X e-stop/release  Space jump\n9 physical self-right  Z/R reset\nhold 0 compliant hips: %s\nJ airborne test  V contact arrows:%s\nF follow:%s  mouse left rotate  right/wheel zoom\nC camera | Esc close",c->rear_pose_active?"ON (2 Nm)":"off (10 Nm)",gui.show_contacts?"on":"off",gui.follow?"on":"off");snprintf(right,sizeof(right),"t %.2f s  %s%s\nleg target %.1f mm  F0 %.1f N\ncmd v/yaw %+.2f / %+.2f\nhip limit %.1f Nm\nmotor F L/R %6.1f / %6.1f N\nspring L/R  %6.1f / %6.1f N\nFn est L/R  %6.1f / %6.1f N\nFn raw L/R  %6.1f / %6.1f N\nFn contact  %6.1f / %6.1f N\nleg state   %s / %s\nconfirm     %u / %u ticks\nMPC region %u\nlink L deg F1 %+5.1f F2 %+5.1f R1 %+5.1f R2 %+5.1f",c->d->time,c->estop?"DISABLED ":"",ground_detection_airborne(&c->ground_detector)?"AIRBORNE":"GROUNDED",1000*c->target_len,c->f0,c->speed,c->turn_rate,c->rear_pose_active?COMPLIANT_HIP_LIMIT:HIP_LIMIT,c->leg_force_cmd[0],c->leg_force_cmd[1],c->spring_force[0],c->spring_force[1],c->ground[0].fn_filtered_n,c->ground[1].fn_filtered_n,c->ground[0].fn_raw_n,c->ground[1].fn_raw_n,c->contact_fn[0],c->contact_fn[1],c->ground[0].off_ground?"AIR":"ON",c->ground[1].off_ground?"AIR":"ON",c->ground[0].confirm_count,c->ground[1].confirm_count,c->mpc.region,57.2957795*c->visual.angles[0][0],57.2957795*c->visual.angles[0][1],57.2957795*c->visual.angles[0][4],57.2957795*c->visual.angles[0][5]);mjr_overlay(mjFONT_NORMAL,mjGRID_TOPLEFT,full,left,right,&con);
     { const int body_map[]={0,1,2,3,8,9},leg_map[]={4,5,6,7}; update_state_figure(&fig_body,&c->scope,body_map,6);update_state_figure(&fig_leg,&c->scope,leg_map,4); } update_figure(&fig_out,&c->scope,0,4,1);update_support_figure(&fig_support,&c->scope);
     int w=full.width/3,h=full.height/4;mjr_figure((mjrRect){full.width-w,3*h,w,h},&fig_body,&con);mjr_figure((mjrRect){full.width-w,2*h,w,h},&fig_leg,&con);mjr_figure((mjrRect){full.width-w,h,w,h},&fig_out,&con);mjr_figure((mjrRect){full.width-w,0,w,h},&fig_support,&con);SwapBuffers(gui.dc);Sleep(1);
   }

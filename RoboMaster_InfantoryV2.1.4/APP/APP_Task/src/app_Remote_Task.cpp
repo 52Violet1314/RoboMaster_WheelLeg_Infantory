@@ -36,15 +36,16 @@ void app_Remote_Task(void *pvParameters) {
             DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
             DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
         }
-        /* 底盘遥控死区：CH0 转向、CH1 前后在 ±5 原始值内视为零。 */
+        /* Mode-2 映射：右摇杆左右 CH1（数组[0]）转向，
+         * 左摇杆上下 CH3（数组[2]）控制前后；两路死区均为 ±5。 */
         const int16_t chassis_yaw_channel =
                 (SBUS_Data.Channel[0] > 5 || SBUS_Data.Channel[0] < -5)
                     ? SBUS_Data.Channel[0] : 0;
         const int16_t chassis_x_channel =
-                (SBUS_Data.Channel[1] > 5 || SBUS_Data.Channel[1] < -5)
-                    ? SBUS_Data.Channel[1] : 0;
+                (SBUS_Data.Channel[2] > 5 || SBUS_Data.Channel[2] < -5)
+                    ? SBUS_Data.Channel[2] : 0;
         const float target_yaw_vel = chassis_yaw_channel / 783.0f * 4.0f;
-        const float target_x_vel = chassis_x_channel / 783.0f * 4.0f - target_yaw_vel * 0.240f;
+        const float target_x_vel = chassis_x_channel / 783.0f * 4.0f;
         if(SBUS_Data.Channel[3] > 10 || SBUS_Data.Channel[3] < -10)
         {
             Gimbal_Yaw_Vel = SBUS_Data.Channel[3] / 783.0f * -4.71f;

@@ -170,6 +170,9 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
                                        leg_r_iout_limit_n, leg_r_out_limit, dt);
     leg_length_pid_l.Ki = leg_l_ki;
     leg_length_pid_r.Ki = leg_r_ki;
+    /* 保存 PID 裸输出供串口标定使用；不包含任何前馈/补偿项。 */
+    pClassicData->Contronller_Data.LegLengthPID_F0_L = leg_l_out;
+    pClassicData->Contronller_Data.LegLengthPID_F0_R = leg_r_out;
     /* 仅已起身时保留原有 +10 N F0 预输出；未起身不再叠加写死的预输出。 */
     const float stand_offset_l = (stand_up && !LEG_CONTROL_TEST_MODE) ? 10.0f : 0.0f;
     const float stand_offset_r = (stand_up && !LEG_CONTROL_TEST_MODE) ? 10.0f : 0.0f;
