@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define WHEEL_RADIUS 0.05f   // 轮子半径（单位：米）
+#define WHEEL_RADIUS 0.0575f   // 轮子半径（单位：米），轮径 11.5 cm
 
 /**
  * @brief 轮式里程计卡尔曼滤波器

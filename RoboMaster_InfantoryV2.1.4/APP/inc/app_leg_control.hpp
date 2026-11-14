@@ -2,6 +2,7 @@
 #define __APP_LEG_CONTROL_HPP__
 
 #include "app_Data_Task.hpp"
+#include "app_roll_stability.hpp"
 #include <cstdint>
 
 #define LEG_CONTROL_TEST_MODE                       0
@@ -13,16 +14,15 @@
  * 左右腿使用同一组参数。 */
 #define LEG_LENGTH_PID_KP                 700.0f
 #define LEG_LENGTH_PID_KI                 600.0f
-#define LEG_LENGTH_PID_KD                   0.0f
+#define LEG_LENGTH_PID_KD                   1.0f
 #define LEG_LENGTH_PID_DEADBAND_M           0.0001f
-#define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N    80.0f
-#define LEG_LENGTH_PID_OUTPUT_LIMIT_N      80.0f
+#define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N    100.0f
+#define LEG_LENGTH_PID_OUTPUT_LIMIT_N      100.0f
 #define LEG_SWING_PID_KP                    4.0f
 #define LEG_SWING_PID_KI                    0.0f
 #define LEG_SWING_PID_KD                    0.0f
 #define LEG_SWING_PID_OUTPUT_LIMIT_NM       1.5f
 #define LEG_SWING_PID_OUTPUT_SIGN           1.0f
-#define LEG_LENGTH_FULL_MAX_M               0.380f
 
 /* 腿长旋钮映射、气弹簧补偿、roll 差分和腿长 PID 的统一入口。
  * 起身状态机仍由 CalculateTask 维护；本模块只使用其本轮判定结果。 */
@@ -32,5 +32,8 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
                        int16_t leg_knob_channel, bool override_leg_target,
                        float override_leg_target_m, bool swing_pid_enable,
                        float swing_target_rad);
+
+/* 获取本轮纯腿长 PID 输出（N）：不含弹簧、固定 +10 N、roll 等补偿。 */
+void LegControl_GetLengthPidForce(float *left_n, float *right_n);
 
 #endif

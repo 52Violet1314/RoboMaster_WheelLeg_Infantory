@@ -105,11 +105,11 @@ void VMC_MapForceToJointTorques(Classic_Data_t *data,
     data->Contronller_Data.Tp_R = TpR;
 }
 
-void VMC_LimitVirtualPitchTorque(Classic_Data_t *data) {
+void VMC_LimitVirtualPitchTorque(Classic_Data_t *data, float limit_nm) {
     data->Contronller_Data.Tp_L = VMC_ClampSymmetric(
-            data->Contronller_Data.Tp_L, VMC_VIRTUAL_TP_LIMIT_NM);
+            data->Contronller_Data.Tp_L, limit_nm);
     data->Contronller_Data.Tp_R = VMC_ClampSymmetric(
-            data->Contronller_Data.Tp_R, VMC_VIRTUAL_TP_LIMIT_NM);
+            data->Contronller_Data.Tp_R, limit_nm);
 }
 
 void VMC_LimitJointTorques(Classic_Data_t *data) {

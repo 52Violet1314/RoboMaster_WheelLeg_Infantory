@@ -249,9 +249,9 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Motor_Data.R1_Motor_VEL = motor_snapshot.data[3].velocity_rad_s;
         pClassicData->Motor_Data.R2_Motor_VEL = motor_snapshot.data[2].velocity_rad_s;
         pClassicData->Motor_Data.Left_Wheel_Motor_VEL =
-                -(motor_snapshot.data[4].velocity_rad_s / 15.8f * 19.2f);
+                -(motor_snapshot.data[4].velocity_rad_s / 19.2f);
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
-                +(motor_snapshot.data[5].velocity_rad_s / 15.8f * 19.2f);
+                +(motor_snapshot.data[5].velocity_rad_s / 19.2f);
 
         /* 本轮四个髋电机反馈已经就绪。先完成正运动学并写入 Leg_Data，
          * 后面的 Kalman、起身判断、LQR、PID 与补偿都只使用本轮同一套腿状态。 */
@@ -434,7 +434,7 @@ void CaculateTask(void *pvParameters) {
                           swing_pid_enable, swing_target_rad);
 
         /* F0 已在 LegControl 内限幅；Tp 是 VMC 的虚拟输入，在 VMC 模块限幅。 */
-        VMC_LimitVirtualPitchTorque(pClassicData);
+        VMC_LimitVirtualPitchTorque(pClassicData, 4.0f);
         // ====== VMC 力矩分配 ======
         VMC_MapForceToJointTorques(
                 pClassicData, &vmc_kinematics,

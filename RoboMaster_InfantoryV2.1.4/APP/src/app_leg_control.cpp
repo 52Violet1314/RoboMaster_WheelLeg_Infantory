@@ -69,7 +69,7 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
         leg_knob_raw = leg_knob_raw_max;
     }
     constexpr float leg_knob_full_min_m = 0.140f;
-    constexpr float leg_knob_full_max_m = LEG_LENGTH_FULL_MAX_M;
+    constexpr float leg_knob_full_max_m = 0.380f;
     constexpr float leg_knob_stand_min_m = 0.150f;
     constexpr float leg_knob_stand_max_m = 0.350f;
     float leg_knob_full_target_m = leg_knob_full_min_m;
