@@ -9,11 +9,11 @@ function result = zju_firmware_schedule(Qdiag, Rdiag, print_report)
 
 if nargin < 1 || isempty(Qdiag)
     % [X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, pitch, dpitch]
-    % 当前调参：X=40，dX=4，dyaw=2，thetaL/R=35000，dthetaL/R=9，pitch=40000，dpitch=4。
-    Qdiag = [40 4 400 2 35000 9 35000 9 40000 4];
+    % 当前部署调参：X=28，dX=3，dyaw=2，thetaL/R=35000，dthetaL/R=9，pitch=30000，dpitch=12。
+    Qdiag = [28 3 400 2 35000 9 35000 9 30000 12];
 end
 if nargin < 2 || isempty(Rdiag)
-    Rdiag = [10 10 1 1];
+    Rdiag = [31 31 1 1];
 end
 if nargin < 3 || isempty(print_report)
     print_report = false;

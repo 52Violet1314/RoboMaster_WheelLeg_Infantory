@@ -1,7 +1,7 @@
 #include "app_leg_angle_target.hpp"
 #include <stdint.h>
 
-/* Auto-generated from -25.000000 mm fore-aft CoM static equilibrium. */
+/* Auto-generated from static equilibrium with fore-aft CoM offset -25.000000 mm. */
 const LegAngleTargetParam_t LegAngleTargetTable[LEG_ANGLE_TARGET_TABLE_COUNT] = {
     {0.150f, -0.159282947f},
     {0.155f, -0.154103021f},
