@@ -46,8 +46,10 @@ void app_Remote_Task(void *pvParameters) {
         const int16_t chassis_x_channel =
                 (SBUS_Data.Channel[2] > 5 || SBUS_Data.Channel[2] < -5)
                     ? SBUS_Data.Channel[2] : 0;
+        /* 前后和偏航是独立自由度：偏航由 LQR 的 yaw 状态形成左右轮差动，
+         * 不应再注入公共前向速度，否则纯转向也会驱动车体前后移动。 */
         const float target_yaw_vel = chassis_yaw_channel / 783.0f * 4.0f;
-        const float target_x_vel = chassis_x_channel / 783.0f * 4.0f - target_yaw_vel * 0.240f;
+        const float target_x_vel = chassis_x_channel / 783.0f * 4.0f;
         /* 云台 yaw 速度不再由本板解析：左杆前后已让给底盘前后。
          * 此处保持云台 yaw 电机静止，等待后续云台板联调再接入。 */
         Gimbal_Yaw_Vel = 0.0f;

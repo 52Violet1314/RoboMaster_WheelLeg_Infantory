@@ -167,7 +167,17 @@ void CaculateTask(void *pvParameters) {
 
         /* Classic_Data 从这里起由 Calculate 持有并使用本周期输入快照。 */
         pClassicData->IMU_Data = imu_snapshot.data;
-        pClassicData->Target_Data.Target_X_vel = remote_snapshot.target_x_vel;
+        /*
+         * 对前向命令先做统一死区，再供速度环与位置保持共同使用。只在
+         * PositionHold 内判断会造成 X_pos 已锁定、d_x_err 却继续追逐
+         * 遥控器/转向耦合残余速度，从而松杆后缓慢爬行。
+         */
+        float effective_target_x_vel = remote_snapshot.target_x_vel;
+        if (fabsf(effective_target_x_vel) <
+            CHASSIS_POSITION_HOLD_VELOCITY_EPS_M_S) {
+            effective_target_x_vel = 0.0f;
+        }
+        pClassicData->Target_Data.Target_X_vel = effective_target_x_vel;
         pClassicData->Target_Data.Target_yaw_vel = remote_snapshot.target_yaw_vel;
         pClassicData->Contronller_Data.total_enable =
                 (remote_snapshot.sbus_data.Channel[9] >= 100) ? 1U : 0U;
