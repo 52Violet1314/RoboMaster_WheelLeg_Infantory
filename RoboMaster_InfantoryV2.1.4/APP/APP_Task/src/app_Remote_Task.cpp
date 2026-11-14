@@ -36,23 +36,21 @@ void app_Remote_Task(void *pvParameters) {
             DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
             DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
         }
-        /* 底盘遥控死区：CH0 转向、CH1 前后在 ±5 原始值内视为零。 */
+        /* 底盘遥控死区：CH0 转向（右杆左右）、CH2 前后（左杆前后）。
+         * 实测排除法结论：CH1=右杆前后（用过），CH3=左杆左右（用过），
+         * 剩下左杆前后只能是 CH2。
+         * 云台 pitch 在云台板也走 CH2，本板不消费。 */
         const int16_t chassis_yaw_channel =
                 (SBUS_Data.Channel[0] > 5 || SBUS_Data.Channel[0] < -5)
                     ? SBUS_Data.Channel[0] : 0;
         const int16_t chassis_x_channel =
-                (SBUS_Data.Channel[1] > 5 || SBUS_Data.Channel[1] < -5)
-                    ? SBUS_Data.Channel[1] : 0;
+                (SBUS_Data.Channel[2] > 5 || SBUS_Data.Channel[2] < -5)
+                    ? SBUS_Data.Channel[2] : 0;
         const float target_yaw_vel = chassis_yaw_channel / 783.0f * 4.0f;
         const float target_x_vel = chassis_x_channel / 783.0f * 4.0f - target_yaw_vel * 0.240f;
-        if(SBUS_Data.Channel[3] > 10 || SBUS_Data.Channel[3] < -10)
-        {
-            Gimbal_Yaw_Vel = SBUS_Data.Channel[3] / 783.0f * -4.71f;
-        }
-        else
-        {
-            Gimbal_Yaw_Vel = 0.0f;
-        }
+        /* 云台 yaw 速度不再由本板解析：左杆前后已让给底盘前后。
+         * 此处保持云台 yaw 电机静止，等待后续云台板联调再接入。 */
+        Gimbal_Yaw_Vel = 0.0f;
         if(SBUS_Data.Channel[4] > 100)
         {
             DM_Motor_Speed_Control(&DM_3507, 3.14f);

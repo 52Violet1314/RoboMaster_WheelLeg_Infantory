@@ -66,6 +66,12 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
+/* FireWater CSV：LQR 十维误差 + 双轮转速原始反馈 + 双 Fw 输出，共 14 列：
+ * X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, -pitch, -dpitch,
+ * wheelVEL_L/R(轮轴rad/s原始), Fw_L/R(N)。
+ * 后四列用于判断尖峰时刻是"反馈先动"还是"输出先动"、左右是否对称。 */
+void LQR_State_Data_Print(Classic_Data_t *pClassicData);
+
 /* 仅供电机反馈超时/驱动故障恢复使用。
  * 先向当前受反馈状态机监管、且已初始化的电机下发零命令，再重发使能帧。
  * 正常配置覆盖八台受监管电机；四髋接线调试仅覆盖已接的 P1~P4。 */
@@ -493,18 +499,33 @@ void CaculateTask(void *pvParameters) {
 #endif
 
         {
-            /* 原控制周期末尾调试选择：默认不输出。 */
+            /* 原控制周期末尾调试选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
             static TickType_t xLastPrintTick = 0;
             TickType_t xNow = xTaskGetTickCount();
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
-                /* 调试打印选择：一次只启用一种，避免不同字段混在同一 CSV 流。 */
+                /* 调试打印选择（100ms 一帧，FireWater 纯 CSV，一次只开一个）：
+                 * Motor_Data_Print       - 8 列：四髋电机角度(rad)×4 + 速度(rad/s)×2 + 左右轮速
+                 * LEG_Data_Print         - 8 列：L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,dphi0_L,dphi0_R
+                 *                         （腿长 m、腿角 rad、速度）
+                 * LegLengthPID_Data_Print- 5 列：目标腿长,左L0,右L0,左F0,右F0（m,m,m,N,N）
+                 *                         （腿长环跟踪与输出力）
+                 * IMU_Data_Print         - 6 列：pitch,roll,yaw + 三轴机体加速度
+                 * State_Data_Print       - 14 列：10 个 LQR 状态 + P1/P2raw/phi1/phi4 关节角(度)
+                 *                         （全状态总览，角度类为度）
+                 * LQR_State_Data_Print   - 14 列：X,dX,yaw,dyaw,thetaL,dthetaL,thetaR,dthetaR,
+                 *                         -pitch,-dpitch,轮速L,轮速R,Fw_L,Fw_R
+                 *                         （LQR 误差 + 双轮原始反馈 + 双轮输出力；诊断速度环用）
+                 * WheelKalman_Print('L'/'R') - 5 列：该侧 Kalman 内部
+                 *                         （原始位置,原始速度,滤波位置,滤波速度）
+                 * */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
-                // LEG_Data_Print(pClassicData);
-                // LegLengthPID_Data_Print(pClassicData);
-                // IMU_Data_Print(pClassicData);
-                // State_Data_Print(pClassicData);
-                // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧：原始位置、原始速度、滤波位置、滤波速度
-                // WheelKalman_Print(&Wheel_Kalman_R, 'R'); // 右侧：原始位置、原始速度、滤波位置、滤波速度
+                // LEG_Data_Print(pClassicData);            // 腿长/腿角/腿速
+                // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
+                // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
+                // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
+                LQR_State_Data_Print(pClassicData);          // LQR 误差 + 轮速 + Fw（速度环诊断）
+                // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧 Kalman 内部状态
+                // WheelKalman_Print(&Wheel_Kalman_R, 'R'); // 右侧 Kalman 内部状态
                 xLastPrintTick = xNow;
             }
 
@@ -706,6 +727,49 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
                milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
                milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
                milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000);
+}
+
+void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
+    /* 与 LQR_K_CalculateWithGain 内的 state[10] 完全一致的构造：
+     * 只读状态、不改变任何控制量。 */
+    const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos, -1.00f), 1.00f);
+    const float values[14] = {
+        x_pos_lqr,
+        pClassicData->States_Data.d_x_err,
+        pClassicData->States_Data.yaw_err,
+        pClassicData->States_Data.d_yaw_err,
+        pClassicData->States_Data.theta_L - theta_L_ref,
+        pClassicData->States_Data.d_theta_L - d_theta_L_ref,
+        pClassicData->States_Data.theta_R - theta_R_ref,
+        pClassicData->States_Data.d_theta_R - d_theta_R_ref,
+        -(pClassicData->States_Data.theta - theta_ref),
+        -(pClassicData->States_Data.d_theta - d_theta_ref),
+        pClassicData->Motor_Data.Left_Wheel_Motor_VEL,
+        pClassicData->Motor_Data.Right_Wheel_Motor_VEL,
+        pClassicData->Contronller_Data.Fw_L,
+        pClassicData->Contronller_Data.Fw_R,
+    };
+    int milli[14];
+    for (uint32_t index = 0; index < 14U; ++index)
+        milli[index] = (int)lroundf(values[index] * 1000.0f);
+
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
+               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
+               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
+               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
+               milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
+               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
+               milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000,
+               milli[8] < 0 ? '-' : ' ', abs(milli[8]) / 1000, abs(milli[8]) % 1000,
+               milli[9] < 0 ? '-' : ' ', abs(milli[9]) / 1000, abs(milli[9]) % 1000,
+               milli[10] < 0 ? '-' : ' ', abs(milli[10]) / 1000, abs(milli[10]) % 1000,
+               milli[11] < 0 ? '-' : ' ', abs(milli[11]) / 1000, abs(milli[11]) % 1000,
+               milli[12] < 0 ? '-' : ' ', abs(milli[12]) / 1000, abs(milli[12]) % 1000,
+               milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000);
 }
 
 void State_Data_Print(Classic_Data_t *pClassicData) {
