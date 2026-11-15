@@ -252,6 +252,9 @@ void CaculateTask(void *pvParameters) {
         last_cal_tick = now_tick;
         
         // ====== 原 Data Task：读取电机数据 ======
+        /* 电机安装轴映射：右腿编码器与左腿机械正向相反，故 R1/R2 在
+         * 原始反馈进入 VMC 前取反；pi 常数是零位对齐。它们只是传感器
+         * 坐标统一，不是 LQR 的“当前减目标”反馈取号。 */
         pClassicData->Motor_Data.L1_Motor_POS =
                 motor_snapshot.data[0].position_rad + 3.1415926f;
         pClassicData->Motor_Data.L2_Motor_POS =
@@ -264,6 +267,8 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Motor_Data.L2_Motor_VEL = motor_snapshot.data[1].velocity_rad_s;
         pClassicData->Motor_Data.R1_Motor_VEL = motor_snapshot.data[3].velocity_rad_s;
         pClassicData->Motor_Data.R2_Motor_VEL = motor_snapshot.data[2].velocity_rad_s;
+        /* 左右轮电机安装方向相反；映射后两侧 wheel_vel 均统一为
+         * “车辆前进为正”，供 KF 使用，不是速度目标的符号处理。 */
         pClassicData->Motor_Data.Left_Wheel_Motor_VEL =
                 -(motor_snapshot.data[4].velocity_rad_s / 19.2f);
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
@@ -273,24 +278,30 @@ void CaculateTask(void *pvParameters) {
          * 后面的 Kalman、起身判断、LQR、PID 与补偿都只使用本轮同一套腿状态。 */
         VMC_UpdateLegFeedback(pClassicData, &vmc_kinematics, cal_dt);
 
+        /* yaw 通道是遥控命令与 IMU 测量的既有组合约定：遥控 Target_yaw_vel
+         * 已按手柄方向预置符号，所以这里是“命令 + 实测”，不是通用的
+         * current - target。不要只改其中一项的符号；yaw_err 是对此量积分。 */
         pClassicData->States_Data.d_yaw_err =
-                pClassicData->Target_Data.Target_yaw_vel + pClassicData->IMU_Data.delta_yaw;//计算yaw速度误差
+                pClassicData->Target_Data.Target_yaw_vel + pClassicData->IMU_Data.delta_yaw;
         pClassicData->States_Data.yaw_err +=
                 (pClassicData->States_Data.d_yaw_err) / 1000.f;//计算目标yaw角度误差
         if (pClassicData->States_Data.yaw_err > 3.1415926f)
           pClassicData->States_Data.yaw_err = 3.1415926f;
         if (pClassicData->States_Data.yaw_err < -3.1415926f)
           pClassicData->States_Data.yaw_err = -3.1415926f;//限制yaw的LQR角度差范围
+        /* VMC phi0 是车身系“后摆正”。合成为地面系后 theta_L/R 为
+         * “前摆正、后摆负”，这正是 LQR 的腿角坐标；随后进入 K 时按
+         * 正常 current - reference 构造误差。 */
         pClassicData->States_Data.theta_L =
-                +1.5708f - pClassicData->Leg_Data.phi_0_L - pClassicData->IMU_Data.pitch;//（左腿）将相对于vmc坐标系的腿角度转化为相对于地面的供LQR使用
+                +1.5708f - pClassicData->Leg_Data.phi_0_L - pClassicData->IMU_Data.pitch;
         pClassicData->States_Data.d_theta_L = -pClassicData->Leg_Data.delta_phi_0_L -
-                                              pClassicData->IMU_Data.delta_pitch;//角速度
+                                              pClassicData->IMU_Data.delta_pitch;
         pClassicData->States_Data.theta_R =
-                +1.5708f - pClassicData->Leg_Data.phi_0_R - pClassicData->IMU_Data.pitch;//（右腿）将相对于vmc坐标系的腿角度转化为相对于地面的供LQR使用
+                +1.5708f - pClassicData->Leg_Data.phi_0_R - pClassicData->IMU_Data.pitch;
         pClassicData->States_Data.d_theta_R = -pClassicData->Leg_Data.delta_phi_0_R -
-                                              pClassicData->IMU_Data.delta_pitch;//角速度
-        pClassicData->States_Data.theta = pClassicData->IMU_Data.pitch;//车身pitch角度
-        pClassicData->States_Data.d_theta = pClassicData->IMU_Data.delta_pitch;//车身pitch角速度
+                                              pClassicData->IMU_Data.delta_pitch;
+        pClassicData->States_Data.theta = pClassicData->IMU_Data.pitch;          // 低头为正
+        pClassicData->States_Data.d_theta = pClassicData->IMU_Data.delta_pitch;  // 低头角速度为正
 
         /* theta_L / theta_R 二阶导（角加速度）：后向差分 + 一阶低通，使用定时器 dt */
         {
@@ -315,7 +326,9 @@ void CaculateTask(void *pvParameters) {
         
         /* Kalman 的控制输入必须是带方向的前向加速度；accel_h 是幅值，
          * 会在静止/转向时持续向位置状态注入正向偏置。 */
-        //上一次预测加速度，周期时间间隔，腿角，腿角速度，腿长，腿长变化速度，车身pitch角速度，轮毂电机角速度预测车位置速度
+        /* KF 的 phi/dot_phi 特意再取负：地面系 theta 是“后摆负”，而
+         * KF 运动学公式定义 phi 为“后摆正”。这只改变 KF 内部角度正向，
+         * 不会把腿角转回车身系；IMU delta_pitch 仍保持低头为正。 */
         WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L, pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
         WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R, pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
 
@@ -516,10 +529,11 @@ void CaculateTask(void *pvParameters) {
                 /* 调试打印选择（100ms 一帧，FireWater 纯 CSV，一次只开一个）：
                  * Motor_Data_Print       - 8 列：四髋电机角度(rad)×4 + 速度(rad/s)×2 + 左右轮速
                  * LEG_Data_Print         - 8 列：L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,dphi0_L,dphi0_R
-                 *                         （腿长 m、腿角 rad、速度）
+                 *                         （VMC车身系腿角：后摆正，不是地面系 theta）
                  * LegLengthPID_Data_Print- 5 列：目标腿长,左L0,右L0,左F0,右F0（m,m,m,N,N）
                  *                         （腿长环跟踪与输出力）
-                 * IMU_Data_Print         - 6 列：pitch,roll,yaw + 三轴机体加速度
+                 * IMU_Data_Print         - 6 列：roll,pitch,yaw,droll,dpitch,dyaw
+                 *                         （已完成原始HI14轴映射：pitch低头正，yaw左转正）
                  * State_Data_Print       - 14 列：10 个 LQR 状态 + P1/P2raw/phi1/phi4 关节角(度)
                  *                         （全状态总览，角度类为度）
                  * LQR_State_Data_Print   - 14 列：X,dX,yaw,dyaw,thetaL,dthetaL,thetaR,dthetaR,
@@ -620,6 +634,7 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
 void LEG_Data_Print(Classic_Data_t *pClassicData) {
     /* FireWater 纯 CSV，依次为：
      * L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,dphi0_L,dphi0_R。
+     * phi0/dphi0 是 VMC 车身系量，后摆为正，尚未合成地面系 theta。
      * 单位依次为 m,m,m/s,m/s,rad,rad,rad/s,rad/s。 */
     const float values[8] = {
         pClassicData->Leg_Data.L0_L,
@@ -699,7 +714,9 @@ void Motor_Data_Print(Classic_Data_t *pClassicData) {
 }
 
 void IMU_Data_Print(Classic_Data_t *pClassicData) {
-    /* FireWater: 纯 CSV，依次为 roll,pitch,yaw,droll,dpitch,dyaw。 */
+    /* FireWater: 纯 CSV，依次为 roll,pitch,yaw,droll,dpitch,dyaw。
+     * 这是安装轴映射后的控制数据，不是 HI14 原始字段：pitch/ dpitch
+     * 为低头正；yaw/dyaw 不取反，实车左转正。 */
     const int value_milli[6] = {
         (int)lroundf(pClassicData->IMU_Data.roll * 1000.0f),
         (int)lroundf(pClassicData->IMU_Data.pitch * 1000.0f),

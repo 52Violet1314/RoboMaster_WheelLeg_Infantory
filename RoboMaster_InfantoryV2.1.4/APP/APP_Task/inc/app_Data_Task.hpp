@@ -8,6 +8,9 @@
 #include "bsp_UART.h"
 
 typedef struct {
+    /* 控制层 IMU 姿态：pitch/delta_pitch 为低头正；yaw/delta_yaw 保持
+     * 原始 HI14 方向（实车左转正）。原始 HI14 pitch 抬头正的翻转在
+     * app_INSTask.cpp 已完成，以下字段不再做“误差取反”。 */
     float roll;
     float delta_roll;
     float pitch;
@@ -66,6 +69,8 @@ typedef struct {
     Motor_Data_t Motor_Data;
 
     struct {
+        /* VMC 正运动学虚拟腿角（车身系）：后摆为正。仅用于 VMC/诊断；
+         * 它不是 LQR 的地面系 theta。 */
         float phi_0_L;
         float delta_phi_0_L;
         float phi_0_R;
@@ -99,6 +104,8 @@ typedef struct {
     } Contronller_Data;
 
     struct {
+        /* 供 LQR/Kalman 的估计状态。theta_L/R 是地面系腿角：前摆为正、
+         * 后摆为负；theta/d_theta 是固件 IMU pitch：低头为正。 */
         float X_pos;
         float d_X;
         float theta_L;

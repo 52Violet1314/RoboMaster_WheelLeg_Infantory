@@ -31,7 +31,10 @@ void app_INSTask(void *pvParameters) {
             int ret = hipnuc_input(&Hipnuc_HI14, rx_block.data[i]);
             if (ret == 1)
             {
-                /* HI14 输出的 roll/pitch/yaw 单位为度，需转换为弧度 */
+                /* HI14 原始姿态单位为度，先转为 rad。roll/yaw 不改号；
+                 * HI14 原始 pitch 是“抬头为正”，控制固件统一用“低头为正”，
+                 * 因而仅 pitch 在此处取反。这里是传感器安装/坐标约定转换，
+                 * 不是 LQR 的“当前减目标”误差取反。 */
                 imu_snapshot.data.roll  = angle_to_rad(Hipnuc_HI14.hi14data.roll);
                 /* HI14 原始陀螺仪单位为 deg/s，统一存为 rad/s。 */
                 const float deg_to_rad = 0.01745329251994329577f;
@@ -53,7 +56,9 @@ void app_INSTask(void *pvParameters) {
     }
     /*
      * e5b... 的 main.h 定义 USE_HIPNUC_GYRO_RATE=1：实际控制使用原始
-     * HI14 陀螺仪轴值，不做欧拉角差分或低通。只保留原始安装轴映射。
+     * HI14 陀螺仪轴值，不做欧拉角差分或低通。只保留原始安装轴映射：
+     * delta_pitch 与上面的 pitch 保持同一“低头为正”约定；delta_yaw
+     * 保持 HI14 原始 yaw 方向（实车左转为正）。
      */
     imu_snapshot.data.delta_roll = imu_snapshot.data.gyro[1];
     imu_snapshot.data.delta_pitch = -imu_snapshot.data.gyro[0];

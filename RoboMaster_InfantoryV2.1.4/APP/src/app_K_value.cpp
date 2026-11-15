@@ -297,6 +297,10 @@ void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                              float theta_l_ref, float d_theta_l_ref,
                              float theta_r_ref, float d_theta_r_ref) {
     const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos, -1.00f), 1.00f);
+    /* K 的反馈向量。除 yaw 两项外，均在此按“当前 - 参考”构造：
+     * theta_L/R 是地面系（前摆正）；最后 pitch 两项额外取负，是为了
+     * 匹配 MATLAB/LQR 模型的 pitch 正方向（抬头正），而固件原始
+     * States.theta 使用低头正。这不是把误差改成 reference-current。 */
     float states[10] = {
         x_pos_lqr, pClassicData->States_Data.d_x_err,
         pClassicData->States_Data.yaw_err, pClassicData->States_Data.d_yaw_err,

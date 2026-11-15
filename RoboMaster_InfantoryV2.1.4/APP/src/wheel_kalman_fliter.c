@@ -85,11 +85,11 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
  * @param u         控制输入 / 加速度 (m/s²)
  * @param vel       电机关节速度（预留，当前未使用）
  * @param dt        本轮实际时间步长 (s)
- * @param phi       腿摆角 phi (rad)
- * @param dot_phi   腿摆角速率 d(phi)/dt (rad/s)
+ * @param phi       地面参考腿摆角，滤波器内部约定后摆为正
+ * @param dot_phi   与 phi 同向的角速度
  * @param L         腿长 L (m)
  * @param dot_L     腿长变化率 dL/dt (m/s)
- * @param gy        车体陀螺仪角速度 (rad/s)
+ * @param gy        车体 pitch 角速度 (rad/s)，低头为正
  * @param wheel_vel 轮子电机角速度 (rad/s)，正方向为前进
  */
 void WheelKalman_Update(WheelKalmanFliter_t *kf,
@@ -104,8 +104,9 @@ void WheelKalman_Update(WheelKalmanFliter_t *kf,
     // 第〇步：构造测量向量 z（运动学模型合成）
     // ================================================================
 
-    /* 真实轮速 = (陀螺角速度 + 电机轮速) × 轮子半径
-     * gy 补偿了车体自身旋转对轮速读数的影响 */
+    /* 真实轮速 = (陀螺角速度 + 电机轮速) × 轮子半径。
+     * gy 是低头正；该加号是本运动学模型的物理补偿项，不是 LQR
+     * “当前减目标”的反馈符号。 */
     float wheel_vel_real = (gy + wheel_vel) * WHEEL_RADIUS;
 
     /* 车体质心速度 = 轮速 + 腿摆动线速度分量 + 腿伸缩线速度分量

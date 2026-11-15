@@ -60,11 +60,12 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
  * @param pos       电机关节位置（预留）
  * @param vel       电机关节速度（预留）
  * @param dt        本轮实际时间步长 (s)
- * @param phi       腿摆角 phi (rad)
- * @param dot_phi   腿摆角速率 d(phi)/dt (rad/s)
+ * @param phi       地面参考的腿摆角 phi (rad)，本滤波器约定后摆为正；
+ *                  调用处传入 -States.theta_L/R（theta 本身后摆为负）
+ * @param dot_phi   与 phi 同一正方向的腿摆角速率 (rad/s)
  * @param L         腿长 L (m)
  * @param dot_L     腿长变化率 dL/dt (m/s)
- * @param gy        车体陀螺仪角速度 (rad/s)
+ * @param gy        车体 pitch 角速度 (rad/s)，固件约定低头为正
  * @param wheel_vel 轮子电机角速度 (rad/s)，正方向定义为前进方向
  */
 void WheelKalman_Update(WheelKalmanFliter_t *kf,

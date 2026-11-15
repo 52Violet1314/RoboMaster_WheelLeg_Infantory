@@ -10,6 +10,9 @@ static float VMC_ClampSymmetric(float value, float limit) {
     return value;
 }
 
+/* VMC 虚拟腿正运动学。phi0 = atan2(yc, xc) 留在车身坐标约定中：
+ * 后摆为正。此处不引入 IMU pitch，故 phi0 不是地面系腿角；到
+ * CalculateTask.cpp 才与 IMU pitch 合成为地面系 theta。 */
 static VMC_LegKinematics_t VMC_ForwardLeg(float phi1, float phi4) {
     constexpr float l1 = 0.210f;
     constexpr float l2 = 0.250f;
