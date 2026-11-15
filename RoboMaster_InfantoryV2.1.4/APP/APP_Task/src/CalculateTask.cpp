@@ -44,6 +44,13 @@ float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
 static constexpr float kStateDerivativeFilterAlpha = 0.2f;
+/* 仅用于验证轮速反馈在 KF 运动学测量中的影响；保留正负方向，只缩小
+ * WheelKalman_Update 实际收到的 wheel_vel。确认物理方向后应恢复 1.0f。 */
+static constexpr float kWheelKalmanFeedbackScale = -1.0f;
+/* 诊断专用：本拍“有轮速 KF 更新”相对“wheel_vel=0”的后验差值。
+ * 它由副本 KF 计算，只用于串口打印，绝不回写真实滤波器。 */
+static float g_wheel_kf_input_delta_p = 0.0f;
+static float g_wheel_kf_input_delta_v = 0.0f;
 
 float angle_to_rad(float degrees);
 
@@ -71,6 +78,15 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
  * wheelVEL_L/R(轮轴rad/s原始), Fw_L/R(N)。
  * 后四列用于判断尖峰时刻是"反馈先动"还是"输出先动"、左右是否对称。 */
 void LQR_State_Data_Print(Classic_Data_t *pClassicData);
+
+/* FireWater CSV，专门检查 KF 坐标与进入 K 的纵向两列，顺序见函数实现。
+ * 所有 phi/dphi 都已是 WheelKalman_Update 实际收到的 KF 坐标，不是
+ * VMC phi0 或 LQR 的 theta 原值。 */
+void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt);
+
+/* FireWater CSV：前进指令、KF 速度、轮速 KF 输入、速度/摆腿状态对 Fw 的
+ * K 逐项贡献，以及 ControlTask 实际下发的左右轮毂电机力矩命令。 */
+void LQR_LongitudinalContribution_Print(Classic_Data_t *pClassicData);
 
 /* 仅供电机反馈超时/驱动故障恢复使用。
  * 先向当前受反馈状态机监管、且已初始化的电机下发零命令，再重发使能帧。
@@ -329,8 +345,35 @@ void CaculateTask(void *pvParameters) {
         /* KF 的 phi/dot_phi 特意再取负：地面系 theta 是“后摆负”，而
          * KF 运动学公式定义 phi 为“后摆正”。这只改变 KF 内部角度正向，
          * 不会把腿角转回车身系；IMU delta_pitch 仍保持低头为正。 */
-        WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L, pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
-        WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt, -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R, pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R, pClassicData->IMU_Data.delta_pitch,pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
+        const float wheel_vel_kf_l = pClassicData->Motor_Data.Left_Wheel_Motor_VEL *
+                                     kWheelKalmanFeedbackScale;
+        const float wheel_vel_kf_r = pClassicData->Motor_Data.Right_Wheel_Motor_VEL *
+                                     kWheelKalmanFeedbackScale;
+        /* 从本拍更新前的真实 KF 拷贝出“无轮速”反事实。两副本其余输入、
+         * 预测和协方差完全相同，所以真实后验减无轮速后验就是 wheel_vel
+         * 在本拍注入 p/v 的精确量；副本不会回写 Wheel_Kalman_L/R。 */
+        WheelKalmanFliter_t no_wheel_kf_l = Wheel_Kalman_L;
+        WheelKalmanFliter_t no_wheel_kf_r = Wheel_Kalman_R;
+        WheelKalman_Update(&no_wheel_kf_l, pClassicData->IMU_Data.accel_x, cal_dt,
+                           -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L,
+                           pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L,
+                           pClassicData->IMU_Data.delta_pitch, 0.0f);
+        WheelKalman_Update(&no_wheel_kf_r, pClassicData->IMU_Data.accel_x, cal_dt,
+                           -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R,
+                           pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R,
+                           pClassicData->IMU_Data.delta_pitch, 0.0f);
+        WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt,
+                           -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L,
+                           pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L,
+                           pClassicData->IMU_Data.delta_pitch, wheel_vel_kf_l);
+        WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt,
+                           -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R,
+                           pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R,
+                           pClassicData->IMU_Data.delta_pitch, wheel_vel_kf_r);
+        g_wheel_kf_input_delta_p = 0.5f * ((Wheel_Kalman_L.x[0] - no_wheel_kf_l.x[0]) +
+                                            (Wheel_Kalman_R.x[0] - no_wheel_kf_r.x[0]));
+        g_wheel_kf_input_delta_v = 0.5f * ((Wheel_Kalman_L.x[1] - no_wheel_kf_l.x[1]) +
+                                            (Wheel_Kalman_R.x[1] - no_wheel_kf_r.x[1]));
 
         /* Kalman 校正完成后先生成公共底盘速度；位置稳位误差在控制模式
          * 判断完成后由 ChassisPositionHold 统一生成。 */
@@ -539,17 +582,21 @@ void CaculateTask(void *pvParameters) {
                  * LQR_State_Data_Print   - 14 列：X,dX,yaw,dyaw,thetaL,dthetaL,thetaR,dthetaR,
                  *                         -pitch,-dpitch,轮速L,轮速R,Fw_L,Fw_R
                  *                         （LQR 误差 + 双轮原始反馈 + 双轮输出力；诊断速度环用）
-                 * WheelKalman_Print('L'/'R') - 5 列：该侧 Kalman 内部
-                 *                         （原始位置,原始速度,滤波位置,滤波速度）
+                 * Kalman_Data_Print    - 21 列：KF 实际输入、左右最终 p/v、
+                 *                         平均 p/v、K 实际使用的位置/速度两列；
+                 *                         具体列顺序见 Kalman_Data_Print 注释。
+                 * LQR_LongitudinalContribution_Print - 23 列：前进目标、KF 实际速度、
+                 *                         KF 轮速输入及其本拍贡献、速度/摆腿状态对 Fw 的 K 逐项贡献、
+                 *                         最终 Fw 与实际下发的左右轮毂电机力矩命令。
                  * */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);            // 腿长/腿角/腿速
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
                 // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
-                LQR_State_Data_Print(pClassicData);          // LQR 误差 + 轮速 + Fw（速度环诊断）
-                // WheelKalman_Print(&Wheel_Kalman_L, 'L'); // 左侧 Kalman 内部状态
-                // WheelKalman_Print(&Wheel_Kalman_R, 'R'); // 右侧 Kalman 内部状态
+                // LQR_State_Data_Print(pClassicData);       // LQR 误差 + 轮速 + Fw（速度环诊断）
+                // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
+                 LQR_LongitudinalContribution_Print(pClassicData); // 纵向位置/速度的 K 乘积贡献
                 xLastPrintTick = xNow;
             }
 
@@ -797,6 +844,138 @@ void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
                milli[11] < 0 ? '-' : ' ', abs(milli[11]) / 1000, abs(milli[11]) % 1000,
                milli[12] < 0 ? '-' : ' ', abs(milli[12]) / 1000, abs(milli[12]) % 1000,
                milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000);
+}
+
+void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {
+    /* FireWater 纯 CSV，所有值均为“已经实际送入/取自 KF”的数值，按列为：
+     *  0 accel_x, 1 dt, 2 delta_pitch(低头/前倾角速度正),
+     *  3 phiKF_L, 4 dphiKF_L, 5 L_L, 6 dL_L, 7 wheelVelKF_L,
+     *  8 phiKF_R, 9 dphiKF_R,10 L_R,11 dL_R,12 wheelVelKF_R,
+     * 13 pKF_L,14 vKF_L,15 pKF_R,16 vKF_R,
+     * 17 pKF_avg,18 vKF_avg,19 K_x_pos,20 K_d_x。
+     *
+     * phiKF/dphiKF 的“后摆正”与 WheelKalman_Update 的实参完全一致。
+     * K_x_pos / K_d_x 与 LQR_K_CalculateWithGain 的 states[0]/states[1]
+     * 完全一致：已经是最终送去乘 K 的数值，不会在后面再次取反。 */
+    const float k_x_pos = fminf(fmaxf(pClassicData->States_Data.X_pos,
+                                      -1.00f), 1.00f);
+    const float k_d_x = pClassicData->States_Data.d_x_err;
+    const float p_kf_avg = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
+    const float v_kf_avg = (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f;
+    const float values[21] = {
+        pClassicData->IMU_Data.accel_x,
+        cal_dt,
+        pClassicData->IMU_Data.delta_pitch,
+        -pClassicData->States_Data.theta_L,
+        -pClassicData->States_Data.d_theta_L,
+        pClassicData->Leg_Data.L0_L,
+        pClassicData->Leg_Data.d_L0_L,
+        pClassicData->Motor_Data.Left_Wheel_Motor_VEL * kWheelKalmanFeedbackScale,
+        -pClassicData->States_Data.theta_R,
+        -pClassicData->States_Data.d_theta_R,
+        pClassicData->Leg_Data.L0_R,
+        pClassicData->Leg_Data.d_L0_R,
+        pClassicData->Motor_Data.Right_Wheel_Motor_VEL * kWheelKalmanFeedbackScale,
+        Wheel_Kalman_L.x[0],
+        Wheel_Kalman_L.x[1],
+        Wheel_Kalman_R.x[0],
+        Wheel_Kalman_R.x[1],
+        p_kf_avg,
+        v_kf_avg,
+        k_x_pos,
+        k_d_x,
+    };
+
+    char line[512];
+    size_t used = 0U;
+    for (uint32_t index = 0; index < 21U; ++index) {
+        const int milli = (int)lroundf(values[index] * 1000.0f);
+        const int written = snprintf(line + used, sizeof(line) - used,
+                                     "%c%d.%03d%s",
+                                     milli < 0 ? '-' : ' ', abs(milli) / 1000,
+                                     abs(milli) % 1000,
+                                     (index == 20U) ? "\r\n" : ",");
+        if (written < 0 || (size_t)written >= (sizeof(line) - used)) {
+            return;  // 行缓冲不足时宁可丢弃本帧，避免输出截断 CSV
+        }
+        used += (size_t)written;
+    }
+    uart_print("%s", line);
+}
+
+void LQR_LongitudinalContribution_Print(Classic_Data_t *pClassicData) {
+    /* FireWater 纯 CSV：
+     * 0 v_cmd, 1 vKF_avg, 2 d_x_err=vKF-v_cmd,
+     * 3 wheelVelKF_L, 4 wheelVelKF_R,
+     * 5 delta_p_wheelKF, 6 delta_v_wheelKF,
+     * 7 wheelKF -> tauCmdL, 8 wheelKF -> tauCmdR,
+     * 9 K01*d_x -> tauCmdL, 10 K11*d_x -> tauCmdR,
+     * 11..14 (thetaL,dthetaL,thetaR,dthetaR) -> tauCmdL,
+     * 15..18 (thetaL,dthetaL,thetaR,dthetaR) -> tauCmdR,
+     * 19 Fw_L_final, 20 Fw_R_final,
+     * 21 tauCmdWheelL, 22 tauCmdWheelR。
+     *
+     * 5/6 是同一拍真实 KF 与 wheel_vel=0 副本 KF 的后验差；7/8 将该
+     * 差值乘 K 的 X/dX 两列，再按 ControlTask 的左右安装方向换算，是
+     * 轮速测量在本拍对最终轮毂力矩命令的精确贡献。
+     * 9..18 同样均已换算为最终轮毂力矩命令坐标；19/20 已经过 Fw 限幅和
+     * 离地屏蔽；21/22 与 ControlTask 实际写进左右轮毂 MIT 命令的力矩
+     * 完全相同（总使能关闭时为零）。 */
+    const float k_d_x = pClassicData->States_Data.d_x_err;
+    const float average_leg_length =
+            (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
+    K_Fixed_Leg_t current_gain;
+    LQR_K_GetInterpolated(average_leg_length, current_gain);
+    const float theta_l_err = pClassicData->States_Data.theta_L - theta_L_ref;
+    const float d_theta_l_err = pClassicData->States_Data.d_theta_L - d_theta_L_ref;
+    const float theta_r_err = pClassicData->States_Data.theta_R - theta_R_ref;
+    const float d_theta_r_err = pClassicData->States_Data.d_theta_R - d_theta_R_ref;
+    const float total_enable = (pClassicData->Contronller_Data.total_enable != 0U) ? 1.0f : 0.0f;
+    const float wheel_cmd_scale_l = 19.2f / 15.8f;
+    const float wheel_cmd_scale_r = -19.2f / 15.8f;
+    const float wheel_kf_to_fwl = current_gain[0][0] * g_wheel_kf_input_delta_p +
+                                  current_gain[0][1] * g_wheel_kf_input_delta_v;
+    const float wheel_kf_to_fwr = current_gain[1][0] * g_wheel_kf_input_delta_p +
+                                  current_gain[1][1] * g_wheel_kf_input_delta_v;
+    const float values[23] = {
+        pClassicData->Target_Data.Target_X_vel,
+        pClassicData->States_Data.d_X,
+        k_d_x,
+        pClassicData->Motor_Data.Left_Wheel_Motor_VEL * kWheelKalmanFeedbackScale,
+        pClassicData->Motor_Data.Right_Wheel_Motor_VEL * kWheelKalmanFeedbackScale,
+        g_wheel_kf_input_delta_p,
+        g_wheel_kf_input_delta_v,
+        wheel_cmd_scale_l * wheel_kf_to_fwl,
+        wheel_cmd_scale_r * wheel_kf_to_fwr,
+        wheel_cmd_scale_l * current_gain[0][1] * k_d_x,
+        wheel_cmd_scale_r * current_gain[1][1] * k_d_x,
+        wheel_cmd_scale_l * current_gain[0][4] * theta_l_err,
+        wheel_cmd_scale_l * current_gain[0][5] * d_theta_l_err,
+        wheel_cmd_scale_l * current_gain[0][6] * theta_r_err,
+        wheel_cmd_scale_l * current_gain[0][7] * d_theta_r_err,
+        wheel_cmd_scale_r * current_gain[1][4] * theta_l_err,
+        wheel_cmd_scale_r * current_gain[1][5] * d_theta_l_err,
+        wheel_cmd_scale_r * current_gain[1][6] * theta_r_err,
+        wheel_cmd_scale_r * current_gain[1][7] * d_theta_r_err,
+        pClassicData->Contronller_Data.Fw_L,
+        pClassicData->Contronller_Data.Fw_R,
+        total_enable * wheel_cmd_scale_l * pClassicData->Contronller_Data.Fw_L,
+        total_enable * wheel_cmd_scale_r * pClassicData->Contronller_Data.Fw_R,
+    };
+    char line[512];
+    size_t used = 0U;
+    for (uint32_t index = 0; index < 23U; ++index) {
+        const int written = snprintf(&line[used], sizeof(line) - used,
+                                     "%s%.3f", (index == 0U) ? "" : ",", values[index]);
+        if ((written < 0) || ((size_t)written >= (sizeof(line) - used))) break;
+        used += (size_t)written;
+    }
+    if (used < (sizeof(line) - 2U)) {
+        line[used++] = '\r';
+        line[used++] = '\n';
+        line[used] = '\0';
+    }
+    uart_print("%s", line);
 }
 
 void State_Data_Print(Classic_Data_t *pClassicData) {
