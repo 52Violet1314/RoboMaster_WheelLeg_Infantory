@@ -39,10 +39,10 @@ void MotorControlTask(void *pvParameters) {
                                  -Classic_Data->Contronller_Data.T2_R);
             DM_Motor_MIT_Control(
                 &DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f,
-                ((Classic_Data->Contronller_Data.Fw_L / 15.8f) * 19.2f));
+                ((Classic_Data->Contronller_Data.Fw_L / 15.8f) * 17.0f));
             DM_Motor_MIT_Control(
                 &DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f,
-                -((Classic_Data->Contronller_Data.Fw_R / 15.8f) * 19.2f));
+                -((Classic_Data->Contronller_Data.Fw_R / 15.8f) * 17.0f));
         }
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
