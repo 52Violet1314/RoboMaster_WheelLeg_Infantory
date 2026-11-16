@@ -8,7 +8,7 @@
  *
  * 测量值在函数内部由运动学模型自动计算：
  *   z[0] = 速度积分累积位置（每周期 body_vel_real * dt 累加）
- *   z[1] = 轮速 + 陀螺仪 + 腿长摆动补偿后的车体质心速度
+ *   z[1] = 轮速 + 腿摆动 + 腿伸缩补偿后的车体质心速度
  *
  * 卡尔曼滤波流程（五步标准公式）：
  *   第一步: 状态预测      x̂ₖ₋ = A·x̂ₖ₋₁ + B·u
@@ -69,8 +69,8 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
 
     /* 测量噪声协方差 R — 传感器不确定性
      * R[1][1] > R[0][0] -> 更信任位置测量、较少信任速度测量 */
-    kf->R[0][0] = 1.0f; kf->R[0][1] = 0.0f;
-    kf->R[1][0] = 0.0f; kf->R[1][1] = 1.0f;
+    kf->R[0][0] = 0.5f; kf->R[0][1] = 0.0f;
+    kf->R[1][0] = 0.0f; kf->R[1][1] = 0.5f;
 
     /* 测量向量清零 */
     kf->z[0] = 0.0f;
@@ -85,11 +85,10 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
  * @param u         控制输入 / 加速度 (m/s²)
  * @param vel       电机关节速度（预留，当前未使用）
  * @param dt        本轮实际时间步长 (s)
- * @param phi       地面参考腿摆角，滤波器内部约定后摆为正
+ * @param phi       VMC 正运动学车身系腿摆角，后摆为正
  * @param dot_phi   与 phi 同向的角速度
  * @param L         腿长 L (m)
  * @param dot_L     腿长变化率 dL/dt (m/s)
- * @param gy        车体 pitch 角速度 (rad/s)，低头为正
  * @param wheel_vel 轮子电机角速度 (rad/s)，正方向为前进
  */
 void WheelKalman_Update(WheelKalmanFliter_t *kf,
@@ -97,17 +96,15 @@ void WheelKalman_Update(WheelKalmanFliter_t *kf,
                         float dt,
                         float phi, float dot_phi,
                         float L, float dot_L,
-                        float gy,
                         float wheel_vel)
 {
     // ================================================================
     // 第〇步：构造测量向量 z（运动学模型合成）
     // ================================================================
 
-    /* 真实轮速 = (陀螺角速度 + 电机轮速) × 轮子半径。
-     * gy 是低头正；该加号是本运动学模型的物理补偿项，不是 LQR
-     * “当前减目标”的反馈符号。 */
-    float wheel_vel_real = (gy + wheel_vel) * WHEEL_RADIUS;
+    /* 轮端线速度 = 轮端角速度 × 轮半径。KF 不使用车身 pitch 或
+     * pitch 角速度；IMU 仅通过 u=accel_x 参与状态预测。 */
+    float wheel_vel_real = wheel_vel * WHEEL_RADIUS;
 
     /* 车体质心速度 = 轮速 + 腿摆动线速度分量 + 腿伸缩线速度分量
      *   L·φ̇·cos(φ)  — 腿绕关节转动的切向速度（cos 投影到水平方向）

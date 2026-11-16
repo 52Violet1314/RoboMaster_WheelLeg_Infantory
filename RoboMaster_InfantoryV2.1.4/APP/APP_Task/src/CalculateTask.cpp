@@ -78,9 +78,7 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
  * 后四列用于判断尖峰时刻是"反馈先动"还是"输出先动"、左右是否对称。 */
 void LQR_State_Data_Print(Classic_Data_t *pClassicData);
 
-/* FireWater CSV，专门检查 KF 坐标与进入 K 的纵向两列，顺序见函数实现。
- * 所有 phi/dphi 都已是 WheelKalman_Update 实际收到的 KF 坐标，不是
- * VMC phi0 或 LQR 的 theta 原值。 */
+/* FireWater CSV，专门检查 KF 输入、输出与进入 K 的纵向两列，顺序见函数实现。 */
 void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt);
 
 typedef struct {
@@ -335,18 +333,17 @@ void CaculateTask(void *pvParameters) {
         
         /* Kalman 的控制输入必须是带方向的前向加速度；accel_h 是幅值，
          * 会在静止/转向时持续向位置状态注入正向偏置。 */
-        /* KF 的 phi/dot_phi 特意再取负：地面系 theta 是“后摆负”，而
-         * KF 运动学公式定义 phi 为“后摆正”。这只改变 KF 内部角度正向，
-         * 不会把腿角转回车身系；IMU delta_pitch 仍保持低头为正。 */
+        /* KF 只使用 VMC 车身系腿摆角（后摆正）、腿长、轮端速度和 IMU
+         * 前向加速度；不使用车身 pitch 或 pitch 角速度。 */
         WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt,
-                           -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L,
+                           pClassicData->Leg_Data.phi_0_L,
+                           pClassicData->Leg_Data.delta_phi_0_L,
                            pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L,
-                           pClassicData->IMU_Data.delta_pitch,
                            pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
         WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt,
-                           -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R,
+                           pClassicData->Leg_Data.phi_0_R,
+                           pClassicData->Leg_Data.delta_phi_0_R,
                            pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R,
-                           pClassicData->IMU_Data.delta_pitch,
                            pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
         // ====== 起身状态机（左右腿共用一个状态）======
         StandState_Update(cal_dt,
@@ -552,8 +549,8 @@ void CaculateTask(void *pvParameters) {
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
                 // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
-                 LQR_State_Data_Print(pClassicData);       // LQR 误差 + 轮速 + Fw（速度环诊断）
-                // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
+                // LQR_State_Data_Print(pClassicData);       // LQR 误差 + 轮速 + Fw（速度环诊断）
+                 Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
                 xLastPrintTick = xNow;
             }
 
@@ -805,31 +802,27 @@ void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
 
 void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {
     /* FireWater 纯 CSV，所有值均为“已经实际送入/取自 KF”的数值，按列为：
-     *  0 accel_x, 1 dt, 2 delta_pitch(低头/前倾角速度正),
-     *  3 phiKF_L, 4 dphiKF_L, 5 L_L, 6 dL_L, 7 wheelVelKF_L,
-     *  8 phiKF_R, 9 dphiKF_R,10 L_R,11 dL_R,12 wheelVelKF_R,
-     * 13 pKF_L,14 vKF_L,15 pKF_R,16 vKF_R,
-     * 17 pKF_avg,18 vKF_avg,19 K_x_pos,20 K_d_x。
-     *
-     * phiKF/dphiKF 的“后摆正”与 WheelKalman_Update 的实参完全一致。
-     * K_x_pos / K_d_x 与 LQR_K_CalculateWithGain 的 states[0]/states[1]
-     * 完全一致：已经是最终送去乘 K 的数值，不会在后面再次取反。 */
-    const float k_x_pos = fminf(fmaxf(pClassicData->States_Data.X_pos,
-                                      -1.00f), 1.00f);
-    const float k_d_x = pClassicData->States_Data.d_x_err;
+     *  0 phiKF_L, 1 dphiKF_L, 2 L_L, 3 dL_L, 4 wheelVelKF_L,
+     *  5 phiKF_R, 6 dphiKF_R, 7 L_R, 8 dL_R, 9 wheelVelKF_R,
+     * 10 pKF_L,11 vKF_L,12 pKF_R,13 vKF_R,
+     * 14 pKF_avg,15 vKF_avg,
+     * 16 wheelLinear_L,17 wheelLinear_R,18 wheelLinear_avg。
+     * phiKF/dphiKF 是 VMC 车身系后摆正，KF 不使用 pitch 数据。
+     * wheelLinear 是仅用轮端角速度乘轮半径得到的线速度，不含腿项或 KF。 */
     const float p_kf_avg = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
     const float v_kf_avg = (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f;
-    const float values[21] = {
-        pClassicData->IMU_Data.accel_x,
-        cal_dt,
-        pClassicData->IMU_Data.delta_pitch,
-        -pClassicData->States_Data.theta_L,
-        -pClassicData->States_Data.d_theta_L,
+    const float wheel_linear_l =
+            pClassicData->Motor_Data.Left_Wheel_Motor_VEL * WHEEL_RADIUS;
+    const float wheel_linear_r =
+            pClassicData->Motor_Data.Right_Wheel_Motor_VEL * WHEEL_RADIUS;
+    const float values[19] = {
+        pClassicData->Leg_Data.phi_0_L,
+        pClassicData->Leg_Data.delta_phi_0_L,
         pClassicData->Leg_Data.L0_L,
         pClassicData->Leg_Data.d_L0_L,
         pClassicData->Motor_Data.Left_Wheel_Motor_VEL,
-        -pClassicData->States_Data.theta_R,
-        -pClassicData->States_Data.d_theta_R,
+        pClassicData->Leg_Data.phi_0_R,
+        pClassicData->Leg_Data.delta_phi_0_R,
         pClassicData->Leg_Data.L0_R,
         pClassicData->Leg_Data.d_L0_R,
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL,
@@ -839,19 +832,20 @@ void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {
         Wheel_Kalman_R.x[1],
         p_kf_avg,
         v_kf_avg,
-        k_x_pos,
-        k_d_x,
+        wheel_linear_l,
+        wheel_linear_r,
+        (wheel_linear_l + wheel_linear_r) * 0.5f,
     };
 
     char line[512];
     size_t used = 0U;
-    for (uint32_t index = 0; index < 21U; ++index) {
+    for (uint32_t index = 0; index < 19U; ++index) {
         const int milli = (int)lroundf(values[index] * 1000.0f);
         const int written = snprintf(line + used, sizeof(line) - used,
                                      "%c%d.%03d%s",
                                      milli < 0 ? '-' : ' ', abs(milli) / 1000,
                                      abs(milli) % 1000,
-                                     (index == 20U) ? "\r\n" : ",");
+                                     (index == 18U) ? "\r\n" : ",");
         if (written < 0 || (size_t)written >= (sizeof(line) - used)) {
             return;  // 行缓冲不足时宁可丢弃本帧，避免输出截断 CSV
         }

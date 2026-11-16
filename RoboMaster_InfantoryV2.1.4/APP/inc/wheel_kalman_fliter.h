@@ -13,11 +13,11 @@
  *   x[1] — 车体速度 (m/s)
  *
  * 控制输入 u:
- *   加速度 (m/s²)，由期望速度差分或遥控器指令给出
+ *   IMU 车体前向加速度 accel_x (m/s²)，仅用于状态预测
  *
  * 测量向量 z[2]:
  *   z[0] — 车体位置（运动学积分累积）
- *   z[1] — 车体速度（轮速 + 陀螺 + 腿运动学合成）
+ *   z[1] — 车体速度（轮速 + 腿摆动 + 腿伸缩运动学合成）
  */
 typedef struct {
     float x[2];        // 状态: [位置, 速度]
@@ -53,19 +53,17 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
  *
  * 测量值 z 在函数内部由运动学模型自动计算：
  *   z[0] = 速度积分累积位置
- *   z[1] = 轮速 + 陀螺仪 + 腿长变化合成车体速度
+ *   z[1] = 轮速 + 腿摆动 + 腿长变化合成车体速度
  *
  * @param kf        滤波器实例指针
  * @param u         控制输入 / 加速度 (m/s²)
  * @param pos       电机关节位置（预留）
  * @param vel       电机关节速度（预留）
  * @param dt        本轮实际时间步长 (s)
- * @param phi       地面参考的腿摆角 phi (rad)，本滤波器约定后摆为正；
- *                  调用处传入 -States.theta_L/R（theta 本身后摆为负）
+ * @param phi       VMC 正运动学的车身系腿摆角 phi (rad)，后摆为正
  * @param dot_phi   与 phi 同一正方向的腿摆角速率 (rad/s)
  * @param L         腿长 L (m)
  * @param dot_L     腿长变化率 dL/dt (m/s)
- * @param gy        车体 pitch 角速度 (rad/s)，固件约定低头为正
  * @param wheel_vel 轮子电机角速度 (rad/s)，正方向定义为前进方向
  */
 void WheelKalman_Update(WheelKalmanFliter_t *kf,
@@ -73,7 +71,6 @@ void WheelKalman_Update(WheelKalmanFliter_t *kf,
                         float dt,
                         float phi, float dot_phi,
                         float L, float dot_L,
-                        float gy,
                         float wheel_vel);
 
 /**
