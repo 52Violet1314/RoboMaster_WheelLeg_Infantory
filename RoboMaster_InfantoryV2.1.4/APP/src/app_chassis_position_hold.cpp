@@ -39,3 +39,16 @@ float ChassisPositionHold_Update(float current_position_m,
 
     return current_position_m - s_position_reference_m;
 }
+
+void ChassisLongitudinalState_Update(Classic_Data_t *data,
+                                     float left_position_m, float right_position_m,
+                                     float left_velocity_m_s, float right_velocity_m_s,
+                                     bool position_hold_enable) {
+    const float current_position_m = (left_position_m + right_position_m) * 0.5f;
+    data->States_Data.d_X = (left_velocity_m_s + right_velocity_m_s) * 0.5f;
+    data->States_Data.d_x_err =
+            data->States_Data.d_X - data->Target_Data.Target_X_vel;
+    data->States_Data.X_pos = ChassisPositionHold_Update(
+            current_position_m, data->Target_Data.Target_X_vel,
+            position_hold_enable);
+}

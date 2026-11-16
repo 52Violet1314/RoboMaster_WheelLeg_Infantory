@@ -34,6 +34,7 @@
 #include "app_step_climb_demo.hpp"
 #include "app_stand_state.hpp"
 #include "app_chassis_position_hold.hpp"
+#include "app_chassis_yaw_state.hpp"
 
 // 定义参考值（根据实际需求调整）
 float theta_ref = 0.0f; // 期望整体角度
@@ -329,17 +330,6 @@ void CaculateTask(void *pvParameters) {
          * 后面的 Kalman、起身判断、LQR、PID 与补偿都只使用本轮同一套腿状态。 */
         VMC_UpdateLegFeedback(pClassicData, &vmc_kinematics, cal_dt);
 
-        /* yaw 通道是遥控命令与 IMU 测量的既有组合约定：遥控 Target_yaw_vel
-         * 已按手柄方向预置符号，所以这里是“命令 + 实测”，不是通用的
-         * current - target。不要只改其中一项的符号；yaw_err 是对此量积分。 */
-        pClassicData->States_Data.d_yaw_err =
-                pClassicData->Target_Data.Target_yaw_vel + pClassicData->IMU_Data.delta_yaw;
-        pClassicData->States_Data.yaw_err +=
-                (pClassicData->States_Data.d_yaw_err) / 1000.f;//计算目标yaw角度误差
-        if (pClassicData->States_Data.yaw_err > 3.1415926f)
-          pClassicData->States_Data.yaw_err = 3.1415926f;
-        if (pClassicData->States_Data.yaw_err < -3.1415926f)
-          pClassicData->States_Data.yaw_err = -3.1415926f;//限制yaw的LQR角度差范围
         VMC_ConvertLegFeedbackToWorldState(pClassicData, cal_dt);
         //二阶导腿角加速度使用于离地检测
         
@@ -358,13 +348,6 @@ void CaculateTask(void *pvParameters) {
                            pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R,
                            pClassicData->IMU_Data.delta_pitch,
                            pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
-        /* Kalman 校正完成后先生成公共底盘速度；位置稳位误差在控制模式
-         * 判断完成后由 ChassisPositionHold 统一生成。 */
-        pClassicData->States_Data.d_X =
-                (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f; // 算出平均车身速度
-        pClassicData->States_Data.d_x_err =
-                pClassicData->States_Data.d_X - pClassicData->Target_Data.Target_X_vel;//计算速度误差
-        
         // ====== 起身状态机（左右腿共用一个状态）======
         StandState_Update(cal_dt,
                           pClassicData->States_Data.theta_L,
@@ -420,18 +403,14 @@ void CaculateTask(void *pvParameters) {
 #else
         const bool airborne_control_active = false;
 #endif
-        const float current_position_m =
-                (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
         const bool position_hold_enable =
                 leg_pid_enabled && lqr_enabled && stand_up &&
                 !airborne_control_active;
-        pClassicData->States_Data.X_pos = ChassisPositionHold_Update(
-                current_position_m,
-                pClassicData->Target_Data.Target_X_vel,
+        ChassisLongitudinalState_Update(
+                pClassicData, Wheel_Kalman_L.x[0], Wheel_Kalman_R.x[0],
+                Wheel_Kalman_L.x[1], Wheel_Kalman_R.x[1],
                 position_hold_enable);
-        if (!position_hold_enable) {
-            pClassicData->States_Data.yaw_err = 0.0f;
-        }
+        ChassisYawState_Update(pClassicData, position_hold_enable);
 
         /* LQR 仅由遥控成品开关 lqr_enable 控制，并用左右实际腿长均值查表。 */
         if (lqr_enabled) {
@@ -573,7 +552,7 @@ void CaculateTask(void *pvParameters) {
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
                 // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
-                // LQR_State_Data_Print(pClassicData);       // LQR 误差 + 轮速 + Fw（速度环诊断）
+                 LQR_State_Data_Print(pClassicData);       // LQR 误差 + 轮速 + Fw（速度环诊断）
                 // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
                 xLastPrintTick = xNow;
             }
