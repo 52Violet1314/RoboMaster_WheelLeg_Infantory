@@ -1,10 +1,13 @@
-function zju_export_firmware_tables(Qdiag, Rdiag)
+function zju_export_firmware_tables(Qdiag, Rdiag, export_theta_targets)
 %ZJU_EXPORT_FIRMWARE_TABLES Generate the deployed C++ K/theta tables.
 % This is the single export path for the exact 41-point schedule validated
 % by zju_firmware_schedule.  Do not manually edit individual table entries.
+% Set export_theta_targets=false to update only the marked K table.
 
 if nargin < 1, Qdiag = []; end
 if nargin < 2, Rdiag = []; end
+if nargin < 3, export_theta_targets = true; end
+validateattributes(export_theta_targets, {'logical','numeric'}, {'scalar'});
 schedule = zju_firmware_schedule(Qdiag, Rdiag, false);
 reference_parameters = zju_parameters_template(0.20);
 com_forward_m = reference_parameters.l_c * sin(reference_parameters.phi_c);
@@ -14,13 +17,20 @@ firmware_root = fullfile(this_dir, '..', '..', '..', '..', ...
     'RoboMaster_InfantoryV2.1.4', 'APP');
 write_k_table(fullfile(firmware_root, 'src', 'app_K_value.cpp'), schedule, ...
     schedule.Qdiag, schedule.Rdiag, com_forward_m);
-write_theta_table(fullfile(firmware_root, 'src', 'app_leg_angle_target.cpp'), ...
-    schedule, com_forward_m);
-write_theta_header(fullfile(firmware_root, 'inc', 'app_leg_angle_target.hpp'), ...
-    com_forward_m);
+if export_theta_targets
+    write_theta_table(fullfile(firmware_root, 'src', 'app_leg_angle_target.cpp'), ...
+        schedule, com_forward_m);
+    write_theta_header(fullfile(firmware_root, 'inc', 'app_leg_angle_target.hpp'), ...
+        com_forward_m);
+end
 
-fprintf('Exported 41 K tables and 41 theta targets for com_forward_m = %.6f mm.\n', ...
-    com_forward_m * 1e3);
+if export_theta_targets
+    fprintf('Exported 41 K tables and 41 theta targets for com_forward_m = %.6f mm.\n', ...
+        com_forward_m * 1e3);
+else
+    fprintf('Exported 41 K tables only for com_forward_m = %.6f mm.\n', ...
+        com_forward_m * 1e3);
+end
 end
 
 function write_k_table(path, schedule, Qdiag, Rdiag, com_forward_m)

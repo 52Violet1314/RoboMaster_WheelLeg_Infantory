@@ -44,13 +44,6 @@ float theta_L_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认 0 rad
 
 static constexpr float kStateDerivativeFilterAlpha = 0.2f;
-/* 仅用于验证轮速反馈在 KF 运动学测量中的影响；保留正负方向，只缩小
- * WheelKalman_Update 实际收到的 wheel_vel。确认物理方向后应恢复 1.0f。 */
-static constexpr float kWheelKalmanFeedbackScale = -1.0f;
-/* 诊断专用：本拍“有轮速 KF 更新”相对“wheel_vel=0”的后验差值。
- * 它由副本 KF 计算，只用于串口打印，绝不回写真实滤波器。 */
-static float g_wheel_kf_input_delta_p = 0.0f;
-static float g_wheel_kf_input_delta_v = 0.0f;
 
 float angle_to_rad(float degrees);
 
@@ -70,6 +63,11 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
                                      bool hip_driver_fault,
                                      const Motor_ControlSnapshot_t &motor_snapshot);
 
+/* VMC 正运动学输出的车身系虚拟腿角（后摆正）与 IMU pitch（低头正）
+ * 合成为 LQR 使用的地面系腿状态（前摆正、后摆负）。 */
+static void VMC_ConvertLegFeedbackToWorldState(Classic_Data_t *data,
+                                                float cal_dt);
+
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
@@ -84,17 +82,35 @@ void LQR_State_Data_Print(Classic_Data_t *pClassicData);
  * VMC phi0 或 LQR 的 theta 原值。 */
 void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt);
 
-/* FireWater CSV：前进指令、KF 速度、轮速 KF 输入、速度/摆腿状态对 Fw 的
- * K 逐项贡献，以及 ControlTask 实际下发的左右轮毂电机力矩命令。 */
-void LQR_LongitudinalContribution_Print(Classic_Data_t *pClassicData);
+typedef struct {
+    bool motor_feedback_fault;
+    bool hip_driver_fault;
+} MotorFeedbackHealth_t;
+
+/* 初始化六台底盘电机，并按原有启动顺序发送一次零扭矩。 */
+static void ChassisMotors_InitAndSendZero(void) {
+    DM_Motor_Init(&DM_8009P1, DM_MOTOR_MODEL_8009, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_8009P2, DM_MOTOR_MODEL_8009, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_8009P3, DM_MOTOR_MODEL_8009, 0x053, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_8009P4, DM_MOTOR_MODEL_8009, 0x054, DM_MOTOR_MODE_MIT, &hfdcan1);
+    DM_Motor_Init(&DM_3519L, DM_MOTOR_MODEL_3519, 0x055, DM_MOTOR_MODE_MIT, &hfdcan2);
+    DM_Motor_Init(&DM_3519R, DM_MOTOR_MODEL_3519, 0x056, DM_MOTOR_MODE_MIT, &hfdcan2);
+
+    DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+}
 
 /* 仅供电机反馈超时/驱动故障恢复使用。
  * 先向当前受反馈状态机监管、且已初始化的电机下发零命令，再重发使能帧。
- * 正常配置覆盖八台受监管电机；四髋接线调试仅覆盖已接的 P1~P4。 */
-static void DM_Motor_SafeZeroAndEnableAllMonitored(void) {
+ * 正常配置覆盖四髋和两轮毂；四髋接线调试仅覆盖已接的 P1~P4。 */
+static void ChassisMotors_RecoverFromFeedbackFault(void) {
     static DM_Motor_t *const motors[] = {
         &DM_8009P1, &DM_8009P2, &DM_8009P3, &DM_8009P4,
-        &DM_3519L, &DM_3519R, &DM_3507, &DM_4310,
+        &DM_3519L, &DM_3519R,
     };
     /* 正常模式只恢复四关节和两轮毂；3507/4310属于上装。 */
     uint32_t monitored_count = 6U;
@@ -103,7 +119,6 @@ static void DM_Motor_SafeZeroAndEnableAllMonitored(void) {
     monitored_count = 4U;
 #endif
     for (uint32_t i = 0; i < monitored_count; ++i) {
-        /* 3507/4310 在 RemoteTask 初始化；未初始化时 ID 为 0，不能发 ID 0。 */
         if (motors[i]->ID != 0U) {
             if (motors[i]->MODE == DM_MOTOR_MODE_MIT) {
                 DM_Motor_MIT_Control(motors[i], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
@@ -118,25 +133,87 @@ static void DM_Motor_SafeZeroAndEnableAllMonitored(void) {
         }
     }
 }
+
+static MotorFeedbackHealth_t MotorFeedback_EvaluateHealth(
+        const Motor_ControlSnapshot_t &snapshot) {
+    MotorFeedbackHealth_t health = {};
+    for (uint32_t i = 0; i < 4U; ++i) {
+        if (snapshot.driver_fault_state[i] != 0U) {
+            health.hip_driver_fault = true;
+            break;
+        }
+    }
+
+    bool chassis_driver_fault = health.hip_driver_fault;
+    for (uint32_t i = 4U; i < 6U && !chassis_driver_fault; ++i) {
+        if (snapshot.driver_fault_state[i] != 0U) {
+            chassis_driver_fault = true;
+        }
+    }
+#if DM_FOUR_HIP_COMMISSIONING_BYPASS
+    health.motor_feedback_fault =
+            (dm_motor_feedback_timeout_flag != 0U) || health.hip_driver_fault;
+#else
+    health.motor_feedback_fault =
+            (dm_motor_feedback_timeout_flag != 0U) || chassis_driver_fault;
+#endif
+    return health;
+}
+
+static bool ControlInputs_HaveTimeout(void) {
+    return (imu_data_timeout_flag != 0U) || (remote_data_timeout_flag != 0U);
+}
+
+static void ChassisControl_ClearOutputs(Classic_Data_t *data) {
+    data->Contronller_Data.Fw_L = 0.0f;
+    data->Contronller_Data.Fw_R = 0.0f;
+    data->Contronller_Data.Tp_L = 0.0f;
+    data->Contronller_Data.Tp_R = 0.0f;
+    data->Contronller_Data.T1_L = 0.0f;
+    data->Contronller_Data.T2_L = 0.0f;
+    data->Contronller_Data.T1_R = 0.0f;
+    data->Contronller_Data.T2_R = 0.0f;
+}
+
+static void VMC_ConvertLegFeedbackToWorldState(Classic_Data_t *data,
+                                                float cal_dt) {
+    /* phi0 是车身系“后摆正”。合成为地面系后 theta_L/R 为“前摆正、
+     * 后摆负”，进入 LQR 时再由调用处按 current - reference 构造误差。 */
+    data->States_Data.theta_L =
+            +1.5708f - data->Leg_Data.phi_0_L - data->IMU_Data.pitch;
+    data->States_Data.d_theta_L = -data->Leg_Data.delta_phi_0_L -
+                                  data->IMU_Data.delta_pitch;
+    data->States_Data.theta_R =
+            +1.5708f - data->Leg_Data.phi_0_R - data->IMU_Data.pitch;
+    data->States_Data.d_theta_R = -data->Leg_Data.delta_phi_0_R -
+                                  data->IMU_Data.delta_pitch;
+    data->States_Data.theta = data->IMU_Data.pitch;
+    data->States_Data.d_theta = data->IMU_Data.delta_pitch;
+
+    /* theta_L / theta_R 二阶导：后向差分 + 一阶低通，使用定时器 dt。 */
+    const float inv_dt = 1.0f / cal_dt;
+    const float raw_dd_theta_L =
+            (data->States_Data.d_theta_L - data->States_Data.d_last_d_theta_L) * inv_dt;
+    data->States_Data.dd_theta_L =
+            kStateDerivativeFilterAlpha * raw_dd_theta_L +
+            (1.0f - kStateDerivativeFilterAlpha) * data->States_Data.dd_theta_L;
+    data->States_Data.d_last_d_theta_L = data->States_Data.d_theta_L;
+
+    const float raw_dd_theta_R =
+            (data->States_Data.d_theta_R - data->States_Data.d_last_d_theta_R) * inv_dt;
+    data->States_Data.dd_theta_R =
+            kStateDerivativeFilterAlpha * raw_dd_theta_R +
+            (1.0f - kStateDerivativeFilterAlpha) * data->States_Data.dd_theta_R;
+    data->States_Data.d_last_d_theta_R = data->States_Data.d_theta_R;
+}
+
 void CaculateTask(void *pvParameters) {
     VMC_Kinematics_t vmc_kinematics;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     LegControl_Init();
     StandState_Init();
     StepClimb_Init();
-    // --- DM 电机初始化（从 Data Task 移入） ---
-    DM_Motor_Init(&DM_8009P1, DM_MOTOR_MODEL_8009, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_8009P2, DM_MOTOR_MODEL_8009, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_8009P3, DM_MOTOR_MODEL_8009, 0x053, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_8009P4, DM_MOTOR_MODEL_8009, 0x054, DM_MOTOR_MODE_MIT, &hfdcan1);
-    DM_Motor_Init(&DM_3519L, DM_MOTOR_MODEL_3519, 0x055, DM_MOTOR_MODE_MIT, &hfdcan2);
-    DM_Motor_Init(&DM_3519R, DM_MOTOR_MODEL_3519, 0x056, DM_MOTOR_MODE_MIT, &hfdcan2);
-    DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-    DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-    DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-    DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-    DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0);
-    DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+    ChassisMotors_InitAndSendZero();
     
     WheelKalman_Init(&Wheel_Kalman_L, 0.001f, 0.0f, 0.0f);
     WheelKalman_Init(&Wheel_Kalman_R, 0.001f, 0.0f, 0.0f);
@@ -183,20 +260,25 @@ void CaculateTask(void *pvParameters) {
 
         /* Classic_Data 从这里起由 Calculate 持有并使用本周期输入快照。 */
         pClassicData->IMU_Data = imu_snapshot.data;
+        pClassicData->Target_Data.Target_X_vel = remote_snapshot.target_x_vel;
+        pClassicData->Target_Data.Target_Y_vel = remote_snapshot.target_y_vel;
+        pClassicData->Target_Data.Target_yaw_vel = remote_snapshot.target_yaw_vel;
+        pClassicData->Target_Data.Target_Gimbal_Pitch_vel =
+                remote_snapshot.target_gimbal_pitch_vel;
+        pClassicData->Target_Data.Target_Gyro_Speed = remote_snapshot.target_gyro_speed;
+        pClassicData->Target_Data.gyro_mode_enable = remote_snapshot.gyro_mode_enable;
+        pClassicData->Contronller_Data.total_enable = remote_snapshot.total_enable;
         /*
          * 对前向命令先做统一死区，再供速度环与位置保持共同使用。只在
          * PositionHold 内判断会造成 X_pos 已锁定、d_x_err 却继续追逐
          * 遥控器/转向耦合残余速度，从而松杆后缓慢爬行。
          */
-        float effective_target_x_vel = remote_snapshot.target_x_vel;
+        float effective_target_x_vel = pClassicData->Target_Data.Target_X_vel;
         if (fabsf(effective_target_x_vel) <
             CHASSIS_POSITION_HOLD_VELOCITY_EPS_M_S) {
             effective_target_x_vel = 0.0f;
         }
         pClassicData->Target_Data.Target_X_vel = effective_target_x_vel;
-        pClassicData->Target_Data.Target_yaw_vel = remote_snapshot.target_yaw_vel;
-        pClassicData->Contronller_Data.total_enable =
-                (remote_snapshot.sbus_data.Channel[9] >= 100) ? 1U : 0U;
 
         /* 总使能关闭时，无论本轮随后等到完整反馈或超时，
          * F0 状态都不能保留上一拍的值。 */
@@ -215,46 +297,18 @@ void CaculateTask(void *pvParameters) {
          * 任一驱动状态码故障、IMU 超时或遥控超时都会令底盘输出清零。
          * 四髋接线调试配置只将电机健康范围收窄为 P1~P4；这四台的超时/故障
          * 仍会清零，IMU、遥控以及遥控总使能的保护不变。 */
-        bool hip_driver_fault = false;
-        for (uint32_t i = 0; i < 4U; ++i) {
-            if (motor_snapshot.driver_fault_state[i] != 0U) {
-                hip_driver_fault = true;
-                break;
-            }
-        }
-        bool chassis_driver_fault = hip_driver_fault;
-        for (uint32_t i = 4U; i < 6U && !chassis_driver_fault; ++i) {
-            if (motor_snapshot.driver_fault_state[i] != 0U) {
-                chassis_driver_fault = true;
-            }
-        }
-#if DM_FOUR_HIP_COMMISSIONING_BYPASS
-        const bool motor_feedback_fault =
-                (dm_motor_feedback_timeout_flag != 0U) || hip_driver_fault;
-#else
-        const bool motor_feedback_fault =
-                (dm_motor_feedback_timeout_flag != 0U) ||
-                chassis_driver_fault;
-#endif
+        const MotorFeedbackHealth_t motor_health =
+                MotorFeedback_EvaluateHealth(motor_snapshot);
         ControlHealth_Data_Print(imu_snapshot_updated, remote_snapshot_updated,
-                                 motor_snapshot_updated, motor_feedback_fault,
-                                 hip_driver_fault, motor_snapshot);
-        if (motor_feedback_fault ||
-            (imu_data_timeout_flag != 0U) ||
-            (remote_data_timeout_flag != 0U)) {
+                                 motor_snapshot_updated, motor_health.motor_feedback_fault,
+                                 motor_health.hip_driver_fault, motor_snapshot);
+        if (motor_health.motor_feedback_fault || ControlInputs_HaveTimeout()) {
             /* 同一段电机故障只尝试恢复一次，不能在 1 ms 控制周期反复刷使能帧。 */
-            if (motor_feedback_fault && !motor_fault_reenable_sent) {
-                DM_Motor_SafeZeroAndEnableAllMonitored();
+            if (motor_health.motor_feedback_fault && !motor_fault_reenable_sent) {
+                ChassisMotors_RecoverFromFeedbackFault();
                 motor_fault_reenable_sent = true;
             }
-            pClassicData->Contronller_Data.Fw_L = 0.0f;
-            pClassicData->Contronller_Data.Fw_R = 0.0f;
-            pClassicData->Contronller_Data.Tp_L = 0.0f;
-            pClassicData->Contronller_Data.Tp_R = 0.0f;
-            pClassicData->Contronller_Data.T1_L = 0.0f;
-            pClassicData->Contronller_Data.T2_L = 0.0f;
-            pClassicData->Contronller_Data.T1_R = 0.0f;
-            pClassicData->Contronller_Data.T2_R = 0.0f;
+            ChassisControl_ClearOutputs(pClassicData);
             xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
             vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
             continue;
@@ -267,28 +321,9 @@ void CaculateTask(void *pvParameters) {
         if (cal_dt <= 0.0f || cal_dt > 0.1f) cal_dt = 0.001f;  // 1ms 默认值
         last_cal_tick = now_tick;
         
-        // ====== 原 Data Task：读取电机数据 ======
-        /* 电机安装轴映射：右腿编码器与左腿机械正向相反，故 R1/R2 在
-         * 原始反馈进入 VMC 前取反；pi 常数是零位对齐。它们只是传感器
-         * 坐标统一，不是 LQR 的“当前减目标”反馈取号。 */
-        pClassicData->Motor_Data.L1_Motor_POS =
-                motor_snapshot.data[0].position_rad + 3.1415926f;
-        pClassicData->Motor_Data.L2_Motor_POS =
-                motor_snapshot.data[1].position_rad + 6.2831853f;
-        pClassicData->Motor_Data.R1_Motor_POS =
-                -motor_snapshot.data[3].position_rad - 3.1415926f;
-        pClassicData->Motor_Data.R2_Motor_POS =
-                -motor_snapshot.data[2].position_rad;
-        pClassicData->Motor_Data.L1_Motor_VEL = motor_snapshot.data[0].velocity_rad_s;
-        pClassicData->Motor_Data.L2_Motor_VEL = motor_snapshot.data[1].velocity_rad_s;
-        pClassicData->Motor_Data.R1_Motor_VEL = motor_snapshot.data[3].velocity_rad_s;
-        pClassicData->Motor_Data.R2_Motor_VEL = motor_snapshot.data[2].velocity_rad_s;
-        /* 左右轮电机安装方向相反；映射后两侧 wheel_vel 均统一为
-         * “车辆前进为正”，供 KF 使用，不是速度目标的符号处理。 */
-        pClassicData->Motor_Data.Left_Wheel_Motor_VEL =
-                -(motor_snapshot.data[4].velocity_rad_s / 19.2f);
-        pClassicData->Motor_Data.Right_Wheel_Motor_VEL =
-                +(motor_snapshot.data[5].velocity_rad_s / 19.2f);
+        /* CAN 电机反馈解算已完成安装坐标、零位和轮毂减速比换算；本周期
+         * 只取同一份队列快照，不重复整理，后续 VMC/KF 使用的值不变。 */
+        pClassicData->Motor_Data = motor_snapshot.chassis_motor_data;
 
         /* 本轮四个髋电机反馈已经就绪。先完成正运动学并写入 Leg_Data，
          * 后面的 Kalman、起身判断、LQR、PID 与补偿都只使用本轮同一套腿状态。 */
@@ -305,39 +340,7 @@ void CaculateTask(void *pvParameters) {
           pClassicData->States_Data.yaw_err = 3.1415926f;
         if (pClassicData->States_Data.yaw_err < -3.1415926f)
           pClassicData->States_Data.yaw_err = -3.1415926f;//限制yaw的LQR角度差范围
-        /* VMC phi0 是车身系“后摆正”。合成为地面系后 theta_L/R 为
-         * “前摆正、后摆负”，这正是 LQR 的腿角坐标；随后进入 K 时按
-         * 正常 current - reference 构造误差。 */
-        pClassicData->States_Data.theta_L =
-                +1.5708f - pClassicData->Leg_Data.phi_0_L - pClassicData->IMU_Data.pitch;
-        pClassicData->States_Data.d_theta_L = -pClassicData->Leg_Data.delta_phi_0_L -
-                                              pClassicData->IMU_Data.delta_pitch;
-        pClassicData->States_Data.theta_R =
-                +1.5708f - pClassicData->Leg_Data.phi_0_R - pClassicData->IMU_Data.pitch;
-        pClassicData->States_Data.d_theta_R = -pClassicData->Leg_Data.delta_phi_0_R -
-                                              pClassicData->IMU_Data.delta_pitch;
-        pClassicData->States_Data.theta = pClassicData->IMU_Data.pitch;          // 低头为正
-        pClassicData->States_Data.d_theta = pClassicData->IMU_Data.delta_pitch;  // 低头角速度为正
-
-        /* theta_L / theta_R 二阶导（角加速度）：后向差分 + 一阶低通，使用定时器 dt */
-        {
-            float inv_dt = 1.0f / cal_dt;
-            float raw_dd_theta_L = (pClassicData->States_Data.d_theta_L
-                                  - pClassicData->States_Data.d_last_d_theta_L) * inv_dt;
-            pClassicData->States_Data.dd_theta_L =
-                    kStateDerivativeFilterAlpha * raw_dd_theta_L +
-                    (1.0f - kStateDerivativeFilterAlpha) *
-                    pClassicData->States_Data.dd_theta_L;
-            pClassicData->States_Data.d_last_d_theta_L = pClassicData->States_Data.d_theta_L;
-
-            float raw_dd_theta_R = (pClassicData->States_Data.d_theta_R
-                                  - pClassicData->States_Data.d_last_d_theta_R) * inv_dt;
-            pClassicData->States_Data.dd_theta_R =
-                    kStateDerivativeFilterAlpha * raw_dd_theta_R +
-                    (1.0f - kStateDerivativeFilterAlpha) *
-                    pClassicData->States_Data.dd_theta_R;
-            pClassicData->States_Data.d_last_d_theta_R = pClassicData->States_Data.d_theta_R;
-        }
+        VMC_ConvertLegFeedbackToWorldState(pClassicData, cal_dt);
         //二阶导腿角加速度使用于离地检测
         
         /* Kalman 的控制输入必须是带方向的前向加速度；accel_h 是幅值，
@@ -345,36 +348,16 @@ void CaculateTask(void *pvParameters) {
         /* KF 的 phi/dot_phi 特意再取负：地面系 theta 是“后摆负”，而
          * KF 运动学公式定义 phi 为“后摆正”。这只改变 KF 内部角度正向，
          * 不会把腿角转回车身系；IMU delta_pitch 仍保持低头为正。 */
-        const float wheel_vel_kf_l = pClassicData->Motor_Data.Left_Wheel_Motor_VEL *
-                                     kWheelKalmanFeedbackScale;
-        const float wheel_vel_kf_r = pClassicData->Motor_Data.Right_Wheel_Motor_VEL *
-                                     kWheelKalmanFeedbackScale;
-        /* 从本拍更新前的真实 KF 拷贝出“无轮速”反事实。两副本其余输入、
-         * 预测和协方差完全相同，所以真实后验减无轮速后验就是 wheel_vel
-         * 在本拍注入 p/v 的精确量；副本不会回写 Wheel_Kalman_L/R。 */
-        WheelKalmanFliter_t no_wheel_kf_l = Wheel_Kalman_L;
-        WheelKalmanFliter_t no_wheel_kf_r = Wheel_Kalman_R;
-        WheelKalman_Update(&no_wheel_kf_l, pClassicData->IMU_Data.accel_x, cal_dt,
-                           -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L,
-                           pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L,
-                           pClassicData->IMU_Data.delta_pitch, 0.0f);
-        WheelKalman_Update(&no_wheel_kf_r, pClassicData->IMU_Data.accel_x, cal_dt,
-                           -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R,
-                           pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R,
-                           pClassicData->IMU_Data.delta_pitch, 0.0f);
         WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt,
                            -pClassicData->States_Data.theta_L, -pClassicData->States_Data.d_theta_L,
                            pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L,
-                           pClassicData->IMU_Data.delta_pitch, wheel_vel_kf_l);
+                           pClassicData->IMU_Data.delta_pitch,
+                           pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
         WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt,
                            -pClassicData->States_Data.theta_R, -pClassicData->States_Data.d_theta_R,
                            pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R,
-                           pClassicData->IMU_Data.delta_pitch, wheel_vel_kf_r);
-        g_wheel_kf_input_delta_p = 0.5f * ((Wheel_Kalman_L.x[0] - no_wheel_kf_l.x[0]) +
-                                            (Wheel_Kalman_R.x[0] - no_wheel_kf_r.x[0]));
-        g_wheel_kf_input_delta_v = 0.5f * ((Wheel_Kalman_L.x[1] - no_wheel_kf_l.x[1]) +
-                                            (Wheel_Kalman_R.x[1] - no_wheel_kf_r.x[1]));
-
+                           pClassicData->IMU_Data.delta_pitch,
+                           pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
         /* Kalman 校正完成后先生成公共底盘速度；位置稳位误差在控制模式
          * 判断完成后由 ChassisPositionHold 统一生成。 */
         pClassicData->States_Data.d_X =
@@ -386,11 +369,10 @@ void CaculateTask(void *pvParameters) {
         StandState_Update(cal_dt,
                           pClassicData->States_Data.theta_L,
                           pClassicData->States_Data.theta_R);
-        const bool total_enable = (remote_snapshot.sbus_data.Channel[9] >= 100);
-        const bool lqr_switch_enabled = (remote_snapshot.sbus_data.Channel[7] > 100);
+        const bool total_enable = (remote_snapshot.total_enable != 0U);
+        const bool lqr_switch_enabled = (remote_snapshot.lqr_enable != 0U);
 #if STEP_CLIMB_CONTROL_ENABLE
-        const bool step_detection_enabled =
-                (remote_snapshot.sbus_data.Channel[6] >= STEP_CLIMB_SWITCH_THRESHOLD);
+        const bool step_detection_enabled = (remote_snapshot.step_climb_enable != 0U);
         const StepClimbCommand_t step_cmd = StepClimb_Update(
                 cal_dt, step_detection_enabled, total_enable, lqr_switch_enabled,
                 StandState_IsUp(),
@@ -451,7 +433,7 @@ void CaculateTask(void *pvParameters) {
             pClassicData->States_Data.yaw_err = 0.0f;
         }
 
-        /* LQR 仅由 Channel[7] 控制，并用左右实际腿长均值查表。 */
+        /* LQR 仅由遥控成品开关 lqr_enable 控制，并用左右实际腿长均值查表。 */
         if (lqr_enabled) {
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
@@ -501,7 +483,7 @@ void CaculateTask(void *pvParameters) {
         const float swing_target_rad = step_cmd.swing_target_rad;
 #endif
         LegControl_Update(pClassicData, cal_dt, stand_up, leg_pid_enabled,
-                          remote_snapshot.sbus_data.Channel[5],
+                          remote_snapshot.leg_length_channel,
                           override_leg_target, override_leg_target_m,
                           swing_pid_enable, swing_target_rad);
 
@@ -585,9 +567,6 @@ void CaculateTask(void *pvParameters) {
                  * Kalman_Data_Print    - 21 列：KF 实际输入、左右最终 p/v、
                  *                         平均 p/v、K 实际使用的位置/速度两列；
                  *                         具体列顺序见 Kalman_Data_Print 注释。
-                 * LQR_LongitudinalContribution_Print - 23 列：前进目标、KF 实际速度、
-                 *                         KF 轮速输入及其本拍贡献、速度/摆腿状态对 Fw 的 K 逐项贡献、
-                 *                         最终 Fw 与实际下发的左右轮毂电机力矩命令。
                  * */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);            // 腿长/腿角/腿速
@@ -596,7 +575,6 @@ void CaculateTask(void *pvParameters) {
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
                 // LQR_State_Data_Print(pClassicData);       // LQR 误差 + 轮速 + Fw（速度环诊断）
                 // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
-                 LQR_LongitudinalContribution_Print(pClassicData); // 纵向位置/速度的 K 乘积贡献
                 xLastPrintTick = xNow;
             }
 
@@ -870,12 +848,12 @@ void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {
         -pClassicData->States_Data.d_theta_L,
         pClassicData->Leg_Data.L0_L,
         pClassicData->Leg_Data.d_L0_L,
-        pClassicData->Motor_Data.Left_Wheel_Motor_VEL * kWheelKalmanFeedbackScale,
+        pClassicData->Motor_Data.Left_Wheel_Motor_VEL,
         -pClassicData->States_Data.theta_R,
         -pClassicData->States_Data.d_theta_R,
         pClassicData->Leg_Data.L0_R,
         pClassicData->Leg_Data.d_L0_R,
-        pClassicData->Motor_Data.Right_Wheel_Motor_VEL * kWheelKalmanFeedbackScale,
+        pClassicData->Motor_Data.Right_Wheel_Motor_VEL,
         Wheel_Kalman_L.x[0],
         Wheel_Kalman_L.x[1],
         Wheel_Kalman_R.x[0],
@@ -899,81 +877,6 @@ void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {
             return;  // 行缓冲不足时宁可丢弃本帧，避免输出截断 CSV
         }
         used += (size_t)written;
-    }
-    uart_print("%s", line);
-}
-
-void LQR_LongitudinalContribution_Print(Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV：
-     * 0 v_cmd, 1 vKF_avg, 2 d_x_err=vKF-v_cmd,
-     * 3 wheelVelKF_L, 4 wheelVelKF_R,
-     * 5 delta_p_wheelKF, 6 delta_v_wheelKF,
-     * 7 wheelKF -> tauCmdL, 8 wheelKF -> tauCmdR,
-     * 9 K01*d_x -> tauCmdL, 10 K11*d_x -> tauCmdR,
-     * 11..14 (thetaL,dthetaL,thetaR,dthetaR) -> tauCmdL,
-     * 15..18 (thetaL,dthetaL,thetaR,dthetaR) -> tauCmdR,
-     * 19 Fw_L_final, 20 Fw_R_final,
-     * 21 tauCmdWheelL, 22 tauCmdWheelR。
-     *
-     * 5/6 是同一拍真实 KF 与 wheel_vel=0 副本 KF 的后验差；7/8 将该
-     * 差值乘 K 的 X/dX 两列，再按 ControlTask 的左右安装方向换算，是
-     * 轮速测量在本拍对最终轮毂力矩命令的精确贡献。
-     * 9..18 同样均已换算为最终轮毂力矩命令坐标；19/20 已经过 Fw 限幅和
-     * 离地屏蔽；21/22 与 ControlTask 实际写进左右轮毂 MIT 命令的力矩
-     * 完全相同（总使能关闭时为零）。 */
-    const float k_d_x = pClassicData->States_Data.d_x_err;
-    const float average_leg_length =
-            (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
-    K_Fixed_Leg_t current_gain;
-    LQR_K_GetInterpolated(average_leg_length, current_gain);
-    const float theta_l_err = pClassicData->States_Data.theta_L - theta_L_ref;
-    const float d_theta_l_err = pClassicData->States_Data.d_theta_L - d_theta_L_ref;
-    const float theta_r_err = pClassicData->States_Data.theta_R - theta_R_ref;
-    const float d_theta_r_err = pClassicData->States_Data.d_theta_R - d_theta_R_ref;
-    const float total_enable = (pClassicData->Contronller_Data.total_enable != 0U) ? 1.0f : 0.0f;
-    const float wheel_cmd_scale_l = 19.2f / 15.8f;
-    const float wheel_cmd_scale_r = -19.2f / 15.8f;
-    const float wheel_kf_to_fwl = current_gain[0][0] * g_wheel_kf_input_delta_p +
-                                  current_gain[0][1] * g_wheel_kf_input_delta_v;
-    const float wheel_kf_to_fwr = current_gain[1][0] * g_wheel_kf_input_delta_p +
-                                  current_gain[1][1] * g_wheel_kf_input_delta_v;
-    const float values[23] = {
-        pClassicData->Target_Data.Target_X_vel,
-        pClassicData->States_Data.d_X,
-        k_d_x,
-        pClassicData->Motor_Data.Left_Wheel_Motor_VEL * kWheelKalmanFeedbackScale,
-        pClassicData->Motor_Data.Right_Wheel_Motor_VEL * kWheelKalmanFeedbackScale,
-        g_wheel_kf_input_delta_p,
-        g_wheel_kf_input_delta_v,
-        wheel_cmd_scale_l * wheel_kf_to_fwl,
-        wheel_cmd_scale_r * wheel_kf_to_fwr,
-        wheel_cmd_scale_l * current_gain[0][1] * k_d_x,
-        wheel_cmd_scale_r * current_gain[1][1] * k_d_x,
-        wheel_cmd_scale_l * current_gain[0][4] * theta_l_err,
-        wheel_cmd_scale_l * current_gain[0][5] * d_theta_l_err,
-        wheel_cmd_scale_l * current_gain[0][6] * theta_r_err,
-        wheel_cmd_scale_l * current_gain[0][7] * d_theta_r_err,
-        wheel_cmd_scale_r * current_gain[1][4] * theta_l_err,
-        wheel_cmd_scale_r * current_gain[1][5] * d_theta_l_err,
-        wheel_cmd_scale_r * current_gain[1][6] * theta_r_err,
-        wheel_cmd_scale_r * current_gain[1][7] * d_theta_r_err,
-        pClassicData->Contronller_Data.Fw_L,
-        pClassicData->Contronller_Data.Fw_R,
-        total_enable * wheel_cmd_scale_l * pClassicData->Contronller_Data.Fw_L,
-        total_enable * wheel_cmd_scale_r * pClassicData->Contronller_Data.Fw_R,
-    };
-    char line[512];
-    size_t used = 0U;
-    for (uint32_t index = 0; index < 23U; ++index) {
-        const int written = snprintf(&line[used], sizeof(line) - used,
-                                     "%s%.3f", (index == 0U) ? "" : ",", values[index]);
-        if ((written < 0) || ((size_t)written >= (sizeof(line) - used))) break;
-        used += (size_t)written;
-    }
-    if (used < (sizeof(line) - 2U)) {
-        line[used++] = '\r';
-        line[used++] = '\n';
-        line[used] = '\0';
     }
     uart_print("%s", line);
 }

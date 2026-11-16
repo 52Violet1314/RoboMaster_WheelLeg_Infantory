@@ -42,8 +42,12 @@ typedef struct {
 
 typedef struct {
     float Target_X_vel;
+    float Target_Y_vel;              // CH3 横移目标，当前底盘无横移执行器，未接入控制
     float Target_yaw_vel;
+    float Target_Gimbal_Pitch_vel;   // CH1 云台俯仰速度预留，未接入控制
+    float Target_Gyro_Speed;         // CH4 小陀螺转速预留，未接入控制
     float Target_LegLong;
+    uint8_t gyro_mode_enable;        // CH8 小陀螺模式预留，未接入控制
 } Target_Data_t;
 
 /* Complete, by-value producer-to-Calculate snapshots. */
@@ -52,9 +56,17 @@ typedef struct {
 } IMU_ControlSnapshot_t;
 
 typedef struct {
-    SBUS_Data_t sbus_data;
-    float target_x_vel;
-    float target_yaw_vel;
+    /* RemoteTask 已完成摇杆/旋钮死区和比例换算；Calculate 直接消费。 */
+    float target_yaw_vel;             // CH0：右杆左右
+    float target_gimbal_pitch_vel;    // CH1：右杆前后，预留
+    float target_x_vel;               // CH2：左杆前后
+    float target_y_vel;               // CH3：左杆左右，预留
+    float target_gyro_speed;          // CH4：小陀螺旋钮，预留
+    int16_t leg_length_channel;       // CH5：腿长旋钮，保留给腿控标尺换算
+    uint8_t step_climb_enable;        // CH6
+    uint8_t lqr_enable;               // CH7
+    uint8_t gyro_mode_enable;         // CH8，预留
+    uint8_t total_enable;             // CH9
 } Remote_ControlSnapshot_t;
 
 #define MOTOR_CONTROL_SNAPSHOT_COUNT 8U
@@ -62,6 +74,9 @@ typedef struct {
     DM_Motor_Data_t data[MOTOR_CONTROL_SNAPSHOT_COUNT];
     uint8_t driver_fault_state[MOTOR_CONTROL_SNAPSHOT_COUNT];
     uint8_t driver_fault_flag;
+    /* 六台底盘电机已按底盘统一坐标整理的反馈。原始八电机 data 仍保留，
+     * 供故障诊断及上装电机使用；Calculate 不再重复做底盘反馈映射。 */
+    Motor_Data_t chassis_motor_data;
 } Motor_ControlSnapshot_t;
 
 typedef struct {

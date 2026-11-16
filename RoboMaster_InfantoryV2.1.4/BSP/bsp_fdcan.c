@@ -37,6 +37,26 @@ static TimerHandle_t dm_motor_timeout_timer = NULL;
  * 让旧反馈在队列中堆积。 */
 static Motor_ControlSnapshot_t motor_control_snapshot = {0};
 
+/* 将六台底盘电机的原始安装坐标整理为 VMC/KF 直接使用的统一坐标。
+ * 仅做零位、镜像方向及轮毂减速比换算；不计算腿长、腿角或任何控制量。 */
+static void motor_control_snapshot_update_chassis_feedback(
+    Motor_ControlSnapshot_t *snapshot) {
+  Motor_Data_t *const chassis = &snapshot->chassis_motor_data;
+
+  chassis->L1_Motor_POS = DM_8009P1.data.position_rad + 3.1415926f;
+  chassis->L2_Motor_POS = DM_8009P2.data.position_rad + 6.2831853f;
+  chassis->R1_Motor_POS = -DM_8009P4.data.position_rad - 3.1415926f;
+  chassis->R2_Motor_POS = -DM_8009P3.data.position_rad;
+  chassis->L1_Motor_VEL = DM_8009P1.data.velocity_rad_s;
+  chassis->L2_Motor_VEL = DM_8009P2.data.velocity_rad_s;
+  chassis->R1_Motor_VEL = DM_8009P4.data.velocity_rad_s;
+  chassis->R2_Motor_VEL = DM_8009P3.data.velocity_rad_s;
+
+  /* 左右轮安装方向相反；轮端正方向统一为车辆前进为正。 */
+  chassis->Left_Wheel_Motor_VEL = DM_3519L.data.velocity_rad_s / 17.0f;
+  chassis->Right_Wheel_Motor_VEL = -DM_3519R.data.velocity_rad_s / 17.0f;
+}
+
 static void motor_control_snapshot_publish_from_isr(void) {
   static DM_Motor_t *const motors[DM_MOTOR_FEEDBACK_COUNT] = {
       &DM_8009P1, &DM_8009P2, &DM_8009P3, &DM_8009P4,
@@ -50,6 +70,7 @@ static void motor_control_snapshot_publish_from_isr(void) {
         dm_motor_driver_fault_state[i];
   }
   motor_control_snapshot.driver_fault_flag = dm_motor_driver_fault_flag;
+  motor_control_snapshot_update_chassis_feedback(&motor_control_snapshot);
 
   if (Motor_ControlQueueHandle != NULL) {
     (void)xQueueOverwriteFromISR(Motor_ControlQueueHandle,

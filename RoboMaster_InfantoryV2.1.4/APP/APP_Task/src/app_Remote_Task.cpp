@@ -1,71 +1,56 @@
 #include "app_Remote_Task.hpp"
 #include "app_Data_Task.hpp"
-#include "CalculateTask.hpp"
 #include "FreeRTOS.h"
-#include "app_motor.h"
 #include "task.h"
-#include "event_groups.h"
-#include "main.h"
-#include "usart.h"
-#include "tim.h"
 #include "bsp_UART.h"
 #include <cstdint>
 
-float Gimbal_Yaw_Vel = 0.0f;
+static int16_t Remote_ApplyStickDeadzone(int16_t channel) {
+    return (channel > 5 || channel < -5) ? channel : 0;
+}
+
+static void Remote_ParseControlSnapshot(Remote_ControlSnapshot_t *snapshot,
+                                        const SBUS_Data_t *sbus) {
+    constexpr float kRemoteChannelFullScale = 783.0f;
+    constexpr float kCommandFullScale = 4.0f;
+
+    snapshot->target_yaw_vel =
+            Remote_ApplyStickDeadzone(sbus->Channel[0]) /
+            kRemoteChannelFullScale * kCommandFullScale;
+    snapshot->target_gimbal_pitch_vel =
+            Remote_ApplyStickDeadzone(sbus->Channel[1]) /
+            kRemoteChannelFullScale * kCommandFullScale;
+    snapshot->target_x_vel =
+            Remote_ApplyStickDeadzone(sbus->Channel[2]) /
+            kRemoteChannelFullScale * kCommandFullScale;
+    snapshot->target_y_vel =
+            Remote_ApplyStickDeadzone(sbus->Channel[3]) /
+            kRemoteChannelFullScale * kCommandFullScale;
+    snapshot->target_gyro_speed =
+            Remote_ApplyStickDeadzone(sbus->Channel[4]) /
+            kRemoteChannelFullScale * kCommandFullScale;
+    snapshot->leg_length_channel = sbus->Channel[5];
+    snapshot->step_climb_enable = (sbus->Channel[6] >= 100) ? 1U : 0U;
+    snapshot->lqr_enable = (sbus->Channel[7] > 100) ? 1U : 0U;
+    snapshot->gyro_mode_enable = (sbus->Channel[8] > 100) ? 1U : 0U;
+    snapshot->total_enable = (sbus->Channel[9] >= 100) ? 1U : 0U;
+}
 
 void app_Remote_Task(void *pvParameters) {
-    DM_Motor_Init(&DM_3507, DM_MOTOR_MODEL_3507, 0x057, DM_MOTOR_MODE_SPEED, &hfdcan2);
-    DM_Motor_Init(&DM_4310, DM_MOTOR_MODEL_J4310, 0x058, DM_MOTOR_MODE_SPEED, &hfdcan2);
     TickType_t xLastWakeTime = xTaskGetTickCount();
     Remote_ControlSnapshot_t remote_snapshot = {};
     (void)pvParameters;
     while (1) {
-        /* Like the gimbal InputTask, poll the raw ring buffer on this task's
-         * own cycle.  No complete frame means SBUS_Data stays at its last
-         * successfully parsed value. */
+        /* 本任务周期性取出 UART 环形缓冲中的完整 SBUS 帧；无新帧时保留
+         * 上一次有效遥控数据。 */
         bool remote_updated = false;
         while (SBUS_Frame_Parse_From_Buffer(&sbus_ring_buffer, &SBUS_Data) != 0U) {
             remote_updated = true;
         }
-        if(SBUS_Data.Channel[9] < -100)
-        {
-            DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
-            DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
-            DM_Motor_MIT_Control(&DM_8009P4, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
-            DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
-            DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
-            DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0); 
-        }
-        /* 底盘遥控死区：CH0 转向（右杆左右）、CH2 前后（左杆前后）。
-         * 实测排除法结论：CH1=右杆前后（用过），CH3=左杆左右（用过），
-         * 剩下左杆前后只能是 CH2。
-         * 云台 pitch 在云台板也走 CH2，本板不消费。 */
-        const int16_t chassis_yaw_channel =
-                (SBUS_Data.Channel[0] > 5 || SBUS_Data.Channel[0] < -5)
-                    ? SBUS_Data.Channel[0] : 0;
-        const int16_t chassis_x_channel =
-                (SBUS_Data.Channel[2] > 5 || SBUS_Data.Channel[2] < -5)
-                    ? SBUS_Data.Channel[2] : 0;
-        /* 前后和偏航是独立自由度：偏航由 LQR 的 yaw 状态形成左右轮差动，
-         * 不应再注入公共前向速度，否则纯转向也会驱动车体前后移动。 */
-        const float target_yaw_vel = chassis_yaw_channel / 783.0f * 4.0f;
-        const float target_x_vel = chassis_x_channel / 783.0f * 4.0f;
-        /* 云台 yaw 速度不再由本板解析：左杆前后已让给底盘前后。
-         * 此处保持云台 yaw 电机静止，等待后续云台板联调再接入。 */
-        Gimbal_Yaw_Vel = 0.0f;
-        if(SBUS_Data.Channel[4] > 100)
-        {
-            DM_Motor_Speed_Control(&DM_3507, 3.14f);
-        }
-        else
-        {
-            DM_Motor_Speed_Control(&DM_3507, 0.0f); 
-        }
-        DM_Motor_Speed_Control(&DM_4310, Gimbal_Yaw_Vel);
+        /* 此任务将 SBUS 帧解包成四摇杆、两旋钮、四开关的成品命令快照；
+         * CalculateTask 只消费快照并决定这些指令是否接入实际控制。 */
         if (remote_updated && (Remote_ControlQueueHandle != NULL)) {
-            remote_snapshot.sbus_data = SBUS_Data;
-            remote_snapshot.target_x_vel = target_x_vel;
-            remote_snapshot.target_yaw_vel = target_yaw_vel;
+            Remote_ParseControlSnapshot(&remote_snapshot, &SBUS_Data);
             if (xQueueOverwrite(Remote_ControlQueueHandle, &remote_snapshot) == pdPASS) {
                 DataTimeout_MarkRemoteValid();
             }
