@@ -574,7 +574,8 @@ void CaculateTask(void *pvParameters) {
             if ((xNow - xLastPrintTick) > pdMS_TO_TICKS(100)) {
                 /* 调试打印选择（100ms 一帧，FireWater 纯 CSV，一次只开一个）：
                  * Motor_Data_Print       - 8 列：四髋电机角度(rad)×4 + 速度(rad/s)×2 + 左右轮速
-                 * LEG_Data_Print         - 8 列：L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,dphi0_L,dphi0_R
+                 * LEG_Data_Print         - 10 列：L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,
+                 *                         rawDphi0_L,rawDphi0_R,kfDphi0_L,kfDphi0_R
                  *                         （VMC车身系腿角：后摆正，不是地面系 theta）
                  * LegLengthPID_Data_Print- 5 列：目标腿长,左L0,右L0,左F0,右F0（m,m,m,N,N）
                  *                         （腿长环跟踪与输出力）
@@ -679,26 +680,31 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
 
 void LEG_Data_Print(Classic_Data_t *pClassicData) {
     /* FireWater 纯 CSV，依次为：
-     * L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,dphi0_L,dphi0_R。
-     * phi0/dphi0 是 VMC 车身系量，后摆为正，尚未合成地面系 theta。
-     * dphi0 由左右两髋电机 CAN 速度按对称五连杆关系直接平均得到。
-     * 单位依次为 m,m,m/s,m/s,rad,rad,rad/s,rad/s。 */
-    const float values[8] = {
+     * L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,
+     * rawDphi0_L,rawDphi0_R,kfDphi0_L,kfDphi0_R。
+     * phi0、rawDphi0、kfDphi0 均为 VMC 车身系量，后摆为正，尚未合成
+     * 地面系 theta。rawDphi0 是两髋 CAN 速度平均值；kfDphi0 是独立腿摆
+     * 卡尔曼输出，也是当前真正进入 KF 和 LQR 的 delta_phi_0。
+     * 单位依次为 m,m,m/s,m/s,rad,rad,rad/s,rad/s,rad/s,rad/s。 */
+    const float values[10] = {
         pClassicData->Leg_Data.L0_L,
         pClassicData->Leg_Data.L0_R,
         pClassicData->Leg_Data.d_L0_L,
         pClassicData->Leg_Data.d_L0_R,
         pClassicData->Leg_Data.phi_0_L,
         pClassicData->Leg_Data.phi_0_R,
+        pClassicData->Leg_Data.raw_delta_phi_0_L,
+        pClassicData->Leg_Data.raw_delta_phi_0_R,
         pClassicData->Leg_Data.delta_phi_0_L,
         pClassicData->Leg_Data.delta_phi_0_R,
     };
-    int milli[8];
-    for (uint32_t index = 0; index < 8U; ++index)
+    int milli[10];
+    for (uint32_t index = 0; index < 10U; ++index)
         milli[index] = (int)lroundf(values[index] * 1000.0f);
 
     uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d\r\n",
                milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
                milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
                milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
@@ -706,7 +712,9 @@ void LEG_Data_Print(Classic_Data_t *pClassicData) {
                milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
                milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
                milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
-               milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000);
+               milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000,
+               milli[8] < 0 ? '-' : ' ', abs(milli[8]) / 1000, abs(milli[8]) % 1000,
+               milli[9] < 0 ? '-' : ' ', abs(milli[9]) / 1000, abs(milli[9]) % 1000);
 }
 
 

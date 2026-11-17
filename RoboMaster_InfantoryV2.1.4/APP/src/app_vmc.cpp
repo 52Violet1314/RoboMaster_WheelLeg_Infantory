@@ -1,4 +1,5 @@
 #include "app_vmc.hpp"
+#include "app_leg_angle_kalman.hpp"
 #include "arm_math.h"
 #include <math.h>
 
@@ -59,7 +60,7 @@ void VMC_UpdateLegFeedback(Classic_Data_t *data,
     float *last_dl0[2] = {&data->Leg_Data.d_last_L0_L, &data->Leg_Data.d_last_L0_R};
     float *dphi0[2] = {&data->Leg_Data.delta_phi_0_L, &data->Leg_Data.delta_phi_0_R};
     static float last_l0[2] = {0.0f, 0.0f};
-    static float filtered_dphi0[2] = {0.0f, 0.0f};
+    static LegAngleKalman_t leg_angle_kf[2] = {};
 
     for (uint32_t side = 0; side < 2U; ++side) {
         *l0[side] = legs[side]->L0;
@@ -76,16 +77,17 @@ void VMC_UpdateLegFeedback(Classic_Data_t *data,
 
     /* 对称五连杆（l1=l4、l2=l3）有 phi0=(phi1+phi4)/2，因此
      * dphi0=(dphi1+dphi4)/2。左侧电机反馈已是 VMC 角度方向；右侧
-     * 位置映射为负，故速度也同步镜像取负。直接使用电机回传速度，
-     * 不再对 VMC 解出的 phi0 做差分。 */
+     * 位置映射为负，故速度也同步镜像取负。电机速度平均值作为
+     * dphi0 的观测，VMC phi0 作为角度观测，经独立卡尔曼输出 dphi0。 */
     const float motor_dphi0[2] = {
         0.5f * (data->Motor_Data.L1_Motor_VEL + data->Motor_Data.L2_Motor_VEL),
         -0.5f * (data->Motor_Data.R1_Motor_VEL + data->Motor_Data.R2_Motor_VEL),
     };
+    data->Leg_Data.raw_delta_phi_0_L = motor_dphi0[0];
+    data->Leg_Data.raw_delta_phi_0_R = motor_dphi0[1];
     for (uint32_t side = 0; side < 2U; ++side) {
-        filtered_dphi0[side] += VMC_FEEDBACK_FILTER_A *
-                                (motor_dphi0[side] - filtered_dphi0[side]);
-        *dphi0[side] = filtered_dphi0[side];
+        LegAngleKalman_Update(&leg_angle_kf[side], dt, *phi0[side], motor_dphi0[side]);
+        *dphi0[side] = leg_angle_kf[side].x[1];
     }
 }
 

@@ -87,8 +87,12 @@ typedef struct {
         /* VMC 正运动学虚拟腿角（车身系）：后摆为正。仅用于 VMC/诊断；
          * 它不是 LQR 的地面系 theta。 */
         float phi_0_L;
+        /* 两髋电机 CAN 速度按对称五连杆关系平均后的原始腿摆角速度，
+         * 仅用于腿摆观测器输入与诊断，不直接进入控制。 */
+        float raw_delta_phi_0_L;
         float delta_phi_0_L;
         float phi_0_R;
+        float raw_delta_phi_0_R;
         float delta_phi_0_R;
         float theta_L;
         float delta_theta_L;
