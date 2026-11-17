@@ -104,10 +104,10 @@ static float Chassis_RateLimitRemoteXVelocity(float requested_velocity_m_s,
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
 
-/* FireWater CSV：LQR 十维误差 + 双轮转速原始反馈 + 双 Fw 输出，共 14 列：
+/* FireWater CSV：LQR 十维误差 + 双轮转速原始反馈 + 双 Fw 输出 + KF 速度对比，共 16 列：
  * X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, -pitch, -dpitch,
- * wheelVEL_L/R(轮轴rad/s原始), Fw_L/R(N)。
- * 后四列用于判断尖峰时刻是"反馈先动"还是"输出先动"、左右是否对称。 */
+ * wheelVEL_L/R(轮轴rad/s原始), Fw_L/R(N), zV_avg, vKF_avg。
+ * 末两列依次为 KF 实际速度观测和后验速度，用于同 dX 误差对比。 */
 void LQR_State_Data_Print(Classic_Data_t *pClassicData);
 
 /* FireWater CSV，专门检查 KF 输入、输出与进入 K 的纵向两列，顺序见函数实现。 */
@@ -813,9 +813,11 @@ void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
 
 void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
     /* 与 LQR_K_CalculateWithGain 内的 state[10] 完全一致的构造：
-     * 只读状态、不改变任何控制量。 */
+     * 只读状态、不改变任何控制量。
+     * 末尾两列用于与第 1 列 d_x_err 对比：KF 实际速度观测 z[1] 的
+     * 双侧平均值，以及 KF 后验速度状态 x[1] 的双侧平均值。 */
     const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos, -1.00f), 1.00f);
-    const float values[14] = {
+    const float values[16] = {
         x_pos_lqr,
         pClassicData->States_Data.d_x_err,
         pClassicData->States_Data.yaw_err,
@@ -830,14 +832,17 @@ void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
         pClassicData->Motor_Data.Right_Wheel_Motor_VEL,
         pClassicData->Contronller_Data.Fw_L,
         pClassicData->Contronller_Data.Fw_R,
+        (Wheel_Kalman_L.z[1] + Wheel_Kalman_R.z[1]) * 0.5f,
+        (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f,
     };
-    int milli[14];
-    for (uint32_t index = 0; index < 14U; ++index)
+    int milli[16];
+    for (uint32_t index = 0; index < 16U; ++index)
         milli[index] = (int)lroundf(values[index] * 1000.0f);
 
     uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
                "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d\r\n",
                milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
                milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
                milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
@@ -851,7 +856,9 @@ void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
                milli[10] < 0 ? '-' : ' ', abs(milli[10]) / 1000, abs(milli[10]) % 1000,
                milli[11] < 0 ? '-' : ' ', abs(milli[11]) / 1000, abs(milli[11]) % 1000,
                milli[12] < 0 ? '-' : ' ', abs(milli[12]) / 1000, abs(milli[12]) % 1000,
-               milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000);
+               milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000,
+               milli[14] < 0 ? '-' : ' ', abs(milli[14]) / 1000, abs(milli[14]) % 1000,
+               milli[15] < 0 ? '-' : ' ', abs(milli[15]) / 1000, abs(milli[15]) % 1000);
 }
 
 void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {

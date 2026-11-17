@@ -13,7 +13,7 @@
 
 /* 松杆后，实际 KF 平均速度低于该值才捕获当前位置作为位置保持参考。
  * 在此之前仅做 Target_X_vel=0 的速度刹车，减速路程不计入 X_pos。 */
-#define CHASSIS_POSITION_HOLD_CAPTURE_SPEED_M_S  0.007f
+#define CHASSIS_POSITION_HOLD_CAPTURE_SPEED_M_S  0.020f
 
 void ChassisPositionHold_Init(float current_position_m);
 float ChassisPositionHold_Update(float current_position_m,
