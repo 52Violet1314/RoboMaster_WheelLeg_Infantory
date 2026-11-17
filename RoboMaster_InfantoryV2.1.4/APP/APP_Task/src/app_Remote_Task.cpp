@@ -13,6 +13,7 @@ static void Remote_ParseControlSnapshot(Remote_ControlSnapshot_t *snapshot,
                                         const SBUS_Data_t *sbus) {
     constexpr float kRemoteChannelFullScale = 783.0f;
     constexpr float kCommandFullScale = 4.0f;
+    constexpr float kLongitudinalVelocityFullScaleMps = 1.5f;
 
     snapshot->target_yaw_vel =
             Remote_ApplyStickDeadzone(sbus->Channel[0]) /
@@ -22,7 +23,7 @@ static void Remote_ParseControlSnapshot(Remote_ControlSnapshot_t *snapshot,
             kRemoteChannelFullScale * kCommandFullScale;
     snapshot->target_x_vel =
             Remote_ApplyStickDeadzone(sbus->Channel[2]) /
-            kRemoteChannelFullScale * kCommandFullScale;
+            kRemoteChannelFullScale * kLongitudinalVelocityFullScaleMps;
     snapshot->target_y_vel =
             Remote_ApplyStickDeadzone(sbus->Channel[3]) /
             kRemoteChannelFullScale * kCommandFullScale;
