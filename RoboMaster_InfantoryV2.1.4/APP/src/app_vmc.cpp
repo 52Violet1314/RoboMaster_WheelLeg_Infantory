@@ -59,7 +59,8 @@ void VMC_UpdateLegFeedback(Classic_Data_t *data,
     float *last_dl0[2] = {&data->Leg_Data.d_last_L0_L, &data->Leg_Data.d_last_L0_R};
     float *dphi0[2] = {&data->Leg_Data.delta_phi_0_L, &data->Leg_Data.delta_phi_0_R};
     static float last_l0[2] = {0.0f, 0.0f};
-    static float last_phi0[2] = {0.0f, 0.0f};
+    static float filtered_dphi0[2] = {0.0f, 0.0f};
+
     for (uint32_t side = 0; side < 2U; ++side) {
         *l0[side] = legs[side]->L0;
         *phi0[side] = legs[side]->phi0;
@@ -70,11 +71,21 @@ void VMC_UpdateLegFeedback(Classic_Data_t *data,
         *ddl0[side] = VMC_FEEDBACK_FILTER_A * raw_ddl0 +
                        (1.0f - VMC_FEEDBACK_FILTER_A) * *ddl0[side];
         *last_dl0[side] = *dl0[side];
-        const float raw_dphi0 = (legs[side]->phi0 - last_phi0[side]) * 1000.0f;
-        *dphi0[side] = VMC_FEEDBACK_FILTER_A * raw_dphi0 +
-                        (1.0f - VMC_FEEDBACK_FILTER_A) * *dphi0[side];
         last_l0[side] = legs[side]->L0;
-        last_phi0[side] = legs[side]->phi0;
+    }
+
+    /* 对称五连杆（l1=l4、l2=l3）有 phi0=(phi1+phi4)/2，因此
+     * dphi0=(dphi1+dphi4)/2。左侧电机反馈已是 VMC 角度方向；右侧
+     * 位置映射为负，故速度也同步镜像取负。直接使用电机回传速度，
+     * 不再对 VMC 解出的 phi0 做差分。 */
+    const float motor_dphi0[2] = {
+        0.5f * (data->Motor_Data.L1_Motor_VEL + data->Motor_Data.L2_Motor_VEL),
+        -0.5f * (data->Motor_Data.R1_Motor_VEL + data->Motor_Data.R2_Motor_VEL),
+    };
+    for (uint32_t side = 0; side < 2U; ++side) {
+        filtered_dphi0[side] += VMC_FEEDBACK_FILTER_A *
+                                (motor_dphi0[side] - filtered_dphi0[side]);
+        *dphi0[side] = filtered_dphi0[side];
     }
 }
 

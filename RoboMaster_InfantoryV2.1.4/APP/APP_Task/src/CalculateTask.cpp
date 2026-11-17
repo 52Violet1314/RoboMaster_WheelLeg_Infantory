@@ -590,12 +590,12 @@ void CaculateTask(void *pvParameters) {
                  *                         具体列顺序见 Kalman_Data_Print 注释。
                  * */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
-                // LEG_Data_Print(pClassicData);            // 腿长/腿角/腿速
+                 LEG_Data_Print(pClassicData);            // 腿长/腿角/腿速
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
                 // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
                 // LQR_State_Data_Print(pClassicData);       // LQR 误差 + 轮速 + Fw（速度环诊断）
-                 Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
+                // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
                 xLastPrintTick = xNow;
             }
 
@@ -681,6 +681,7 @@ void LEG_Data_Print(Classic_Data_t *pClassicData) {
     /* FireWater 纯 CSV，依次为：
      * L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,dphi0_L,dphi0_R。
      * phi0/dphi0 是 VMC 车身系量，后摆为正，尚未合成地面系 theta。
+     * dphi0 由左右两髋电机 CAN 速度按对称五连杆关系直接平均得到。
      * 单位依次为 m,m,m/s,m/s,rad,rad,rad/s,rad/s。 */
     const float values[8] = {
         pClassicData->Leg_Data.L0_L,
