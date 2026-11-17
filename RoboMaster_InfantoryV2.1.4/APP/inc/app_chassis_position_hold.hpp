@@ -9,10 +9,15 @@
  * 位置保持，否则位置参考已锁定而速度环仍会追逐摇杆回中残余。
  * 4 m/s 满量程下约等于 12 个 SBUS 计数。
  */
-#define CHASSIS_POSITION_HOLD_VELOCITY_EPS_M_S  0.060f
+#define CHASSIS_POSITION_HOLD_VELOCITY_EPS_M_S  0.010f
+
+/* 松杆后，实际 KF 平均速度低于该值才捕获当前位置作为位置保持参考。
+ * 在此之前仅做 Target_X_vel=0 的速度刹车，减速路程不计入 X_pos。 */
+#define CHASSIS_POSITION_HOLD_CAPTURE_SPEED_M_S  0.007f
 
 void ChassisPositionHold_Init(float current_position_m);
 float ChassisPositionHold_Update(float current_position_m,
+                                 float current_velocity_m_s,
                                  float target_velocity_m_s,
                                  bool hold_enable);
 

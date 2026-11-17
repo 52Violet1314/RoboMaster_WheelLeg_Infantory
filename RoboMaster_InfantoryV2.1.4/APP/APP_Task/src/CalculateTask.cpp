@@ -46,6 +46,11 @@ float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 
 static constexpr float kStateDerivativeFilterAlpha = 0.2f;
 
+/* 仅限制遥控前后速度参考的变化率，不限制 KF 反馈或 LQR 输出。
+ * 推杆加速较缓，松杆与反向时优先快速回零，避免操作手给出速度阶跃。 */
+static constexpr float kRemoteXVelocityAccelLimitMps2 = 1.5f;
+static constexpr float kRemoteXVelocityDecelLimitMps2 = 8.0f;
+
 float angle_to_rad(float degrees);
 
 void LEG_Data_Print(Classic_Data_t *pClassicData);
@@ -68,6 +73,33 @@ static void ControlHealth_Data_Print(bool imu_snapshot_updated,
  * 合成为 LQR 使用的地面系腿状态（前摆正、后摆负）。 */
 static void VMC_ConvertLegFeedbackToWorldState(Classic_Data_t *data,
                                                 float cal_dt);
+
+static float Chassis_RateLimitRemoteXVelocity(float requested_velocity_m_s,
+                                               float previous_velocity_m_s,
+                                               float dt_s) {
+    if (!isfinite(requested_velocity_m_s) ||
+        !isfinite(previous_velocity_m_s) || !isfinite(dt_s) || dt_s <= 0.0f) {
+        return 0.0f;
+    }
+
+    const bool same_direction =
+            (requested_velocity_m_s * previous_velocity_m_s) >= 0.0f;
+    const bool increasing_speed = same_direction &&
+            (fabsf(requested_velocity_m_s) > fabsf(previous_velocity_m_s));
+    const float limit_mps2 = increasing_speed
+            ? kRemoteXVelocityAccelLimitMps2
+            : kRemoteXVelocityDecelLimitMps2;
+    const float max_step_m_s = limit_mps2 * dt_s;
+    const float delta_m_s = requested_velocity_m_s - previous_velocity_m_s;
+
+    if (delta_m_s > max_step_m_s) {
+        return previous_velocity_m_s + max_step_m_s;
+    }
+    if (delta_m_s < -max_step_m_s) {
+        return previous_velocity_m_s - max_step_m_s;
+    }
+    return requested_velocity_m_s;
+}
 
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData);
@@ -233,6 +265,7 @@ void CaculateTask(void *pvParameters) {
     Remote_ControlSnapshot_t remote_snapshot = {};
     Motor_ControlSnapshot_t motor_snapshot = {};
     bool motor_fault_reenable_sent = false;
+    float shaped_target_x_vel = 0.0f;
     while (1) {
         IMU_ControlSnapshot_t received_imu;
         Remote_ControlSnapshot_t received_remote;
@@ -307,6 +340,7 @@ void CaculateTask(void *pvParameters) {
                 ChassisMotors_RecoverFromFeedbackFault();
                 motor_fault_reenable_sent = true;
             }
+            shaped_target_x_vel = 0.0f;
             ChassisControl_ClearOutputs(pClassicData);
             xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
             vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
@@ -319,6 +353,17 @@ void CaculateTask(void *pvParameters) {
         float cal_dt = (float)(now_tick - last_cal_tick) * 1e-6f;
         if (cal_dt <= 0.0f || cal_dt > 0.1f) cal_dt = 0.001f;  // 1ms 默认值
         last_cal_tick = now_tick;
+
+        /* 速度参考在 Calculate 内整形，RemoteTask 仍只负责遥控原始数据
+         * 的死区和比例换算。总使能关闭时清零内部状态，避免再次使能时
+         * 沿用关机前的速度目标。 */
+        if (pClassicData->Contronller_Data.total_enable == 0U) {
+            shaped_target_x_vel = 0.0f;
+        } else {
+            shaped_target_x_vel = Chassis_RateLimitRemoteXVelocity(
+                    effective_target_x_vel, shaped_target_x_vel, cal_dt);
+        }
+        pClassicData->Target_Data.Target_X_vel = shaped_target_x_vel;
         
         /* CAN 电机反馈解算已完成安装坐标、零位和轮毂减速比换算；本周期
          * 只取同一份队列快照，不重复整理，后续 VMC/KF 使用的值不变。 */
@@ -806,7 +851,8 @@ void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {
      *  5 phiKF_R, 6 dphiKF_R, 7 L_R, 8 dL_R, 9 wheelVelKF_R,
      * 10 pKF_L,11 vKF_L,12 pKF_R,13 vKF_R,
      * 14 pKF_avg,15 vKF_avg,
-     * 16 wheelLinear_L,17 wheelLinear_R,18 wheelLinear_avg。
+     * 16 wheelLinear_L,17 wheelLinear_R,18 wheelLinear_avg,
+     * 19 X_pos(K 实际使用的位移误差),20 d_x_err(K 实际使用的速度误差)。
      * phiKF/dphiKF 是 VMC 车身系后摆正，KF 不使用 pitch 数据。
      * wheelLinear 是仅用轮端角速度乘轮半径得到的线速度，不含腿项或 KF。 */
     const float p_kf_avg = (Wheel_Kalman_L.x[0] + Wheel_Kalman_R.x[0]) * 0.5f;
@@ -815,7 +861,7 @@ void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {
             pClassicData->Motor_Data.Left_Wheel_Motor_VEL * WHEEL_RADIUS;
     const float wheel_linear_r =
             pClassicData->Motor_Data.Right_Wheel_Motor_VEL * WHEEL_RADIUS;
-    const float values[19] = {
+    const float values[21] = {
         pClassicData->Leg_Data.phi_0_L,
         pClassicData->Leg_Data.delta_phi_0_L,
         pClassicData->Leg_Data.L0_L,
@@ -835,17 +881,19 @@ void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {
         wheel_linear_l,
         wheel_linear_r,
         (wheel_linear_l + wheel_linear_r) * 0.5f,
+        pClassicData->States_Data.X_pos,
+        pClassicData->States_Data.d_x_err,
     };
 
     char line[512];
     size_t used = 0U;
-    for (uint32_t index = 0; index < 19U; ++index) {
+    for (uint32_t index = 0; index < 21U; ++index) {
         const int milli = (int)lroundf(values[index] * 1000.0f);
         const int written = snprintf(line + used, sizeof(line) - used,
                                      "%c%d.%03d%s",
                                      milli < 0 ? '-' : ' ', abs(milli) / 1000,
                                      abs(milli) % 1000,
-                                     (index == 18U) ? "\r\n" : ",");
+                                     (index == 20U) ? "\r\n" : ",");
         if (written < 0 || (size_t)written >= (sizeof(line) - used)) {
             return;  // 行缓冲不足时宁可丢弃本帧，避免输出截断 CSV
         }
