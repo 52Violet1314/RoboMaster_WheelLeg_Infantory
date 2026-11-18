@@ -13,7 +13,7 @@ if nargin < 1 || isempty(Qdiag)
     Qdiag = [200 4 400 1 6000 200 6000 200 50000 10];
 end
 if nargin < 2 || isempty(Rdiag)
-    Rdiag = [1000 1000 3 3];
+    Rdiag = [1000 1000 1 1];
 end
 if nargin < 3 || isempty(print_report)
     print_report = false;

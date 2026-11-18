@@ -18,7 +18,7 @@ if nargin < 1 || isempty(Qdiag)
 end
 if nargin < 2 || isempty(Rdiag)
     % 输入顺序：[Fw_L, Fw_R, Tp_L, Tp_R]。
-    Rdiag = [1000 1000 3 3];
+    Rdiag = [1000 1000 1 1];
 end
 if nargin < 3 || isempty(leg_length)
     leg_length = 0.20;
