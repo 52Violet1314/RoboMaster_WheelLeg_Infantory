@@ -10,10 +10,10 @@ function result = zju_firmware_schedule(Qdiag, Rdiag, print_report)
 if nargin < 1 || isempty(Qdiag)
     % [X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, pitch, dpitch]
     % 当前部署调参：提高 X 位置项与 dX 速度项，加强松杆后的制动与回位。
-    Qdiag = [60 3 400 1 40000 10 40000 10 30000 1];
+    Qdiag = [200 4 400 1 6000 200 6000 200 50000 10];
 end
 if nargin < 2 || isempty(Rdiag)
-    Rdiag = [35 35 1 1];
+    Rdiag = [1000 1000 3 3];
 end
 if nargin < 3 || isempty(print_report)
     print_report = false;

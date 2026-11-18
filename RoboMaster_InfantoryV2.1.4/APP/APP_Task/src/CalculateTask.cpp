@@ -46,8 +46,9 @@ float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 
 static constexpr float kStateDerivativeFilterAlpha = 0.2f;
 
-/* 仅限制同方向加速的遥控前后速度参考，不限制 KF 反馈或 LQR 输出。
- * 松杆或反向命令直接送入 LQR，使轮端立即进入制动/反向控制。 */
+/* 可选的同方向加速参考斜率限制。当前保留实现但不接入：加速、松杆和
+ * 反向均直接送入 LQR，使全部纵向动态由当前 K 矩阵决定。 */
+static constexpr bool kRemoteXVelocityAccelLimitEnabled = false;
 static constexpr float kRemoteXVelocityAccelLimitMps2 = 1.0f;
 
 float angle_to_rad(float degrees);
@@ -86,10 +87,9 @@ static float Chassis_RateLimitRemoteXVelocity(float requested_velocity_m_s,
     const bool increasing_speed = same_direction &&
             (fabsf(requested_velocity_m_s) > fabsf(previous_velocity_m_s));
     if (!increasing_speed) return requested_velocity_m_s;
-    const float limit_mps2 = kRemoteXVelocityAccelLimitMps2;
-    const float max_step_m_s = limit_mps2 * dt_s;
-    const float delta_m_s = requested_velocity_m_s - previous_velocity_m_s;
 
+    const float max_step_m_s = kRemoteXVelocityAccelLimitMps2 * dt_s;
+    const float delta_m_s = requested_velocity_m_s - previous_velocity_m_s;
     if (delta_m_s > max_step_m_s) {
         return previous_velocity_m_s + max_step_m_s;
     }
@@ -352,14 +352,15 @@ void CaculateTask(void *pvParameters) {
         if (cal_dt <= 0.0f || cal_dt > 0.1f) cal_dt = 0.001f;  // 1ms 默认值
         last_cal_tick = now_tick;
 
-        /* 速度参考在 Calculate 内整形，RemoteTask 仍只负责遥控原始数据
-         * 的死区和比例换算。总使能关闭时清零内部状态，避免再次使能时
-         * 沿用关机前的速度目标。 */
+        /* 加速斜率限制保留但当前不接入；RemoteTask 仅负责原始数据的死区
+         * 和比例换算。总使能关闭时清零内部状态。 */
         if (pClassicData->Contronller_Data.total_enable == 0U) {
             shaped_target_x_vel = 0.0f;
-        } else {
+        } else if (kRemoteXVelocityAccelLimitEnabled) {
             shaped_target_x_vel = Chassis_RateLimitRemoteXVelocity(
                     effective_target_x_vel, shaped_target_x_vel, cal_dt);
+        } else {
+            shaped_target_x_vel = effective_target_x_vel;
         }
         pClassicData->Target_Data.Target_X_vel = shaped_target_x_vel;
         

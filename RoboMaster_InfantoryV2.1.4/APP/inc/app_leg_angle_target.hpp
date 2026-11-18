@@ -1,7 +1,7 @@
 #ifndef __APP_LEG_ANGLE_TARGET_HPP__
 #define __APP_LEG_ANGLE_TARGET_HPP__
 
-/* Per-leg firmware theta target table, generated at a -25.000000 mm fore-aft CoM offset. */
+/* Per-leg firmware theta target table, generated at a -26.000000 mm fore-aft CoM offset. */
 #define LEG_ANGLE_TARGET_TABLE_COUNT 41U
 #define LEG_ANGLE_TARGET_MIN_LENGTH_M 0.150f
 #define LEG_ANGLE_TARGET_LENGTH_STEP_M 0.005f
