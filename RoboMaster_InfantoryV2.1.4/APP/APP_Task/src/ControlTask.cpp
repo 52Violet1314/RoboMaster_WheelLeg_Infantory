@@ -17,12 +17,10 @@
 #include <cstddef>
 
 namespace {
-/* 轮速反馈与轮毂力输出共用同一套轮端机械参数。
- * Fw 是 LQR 给出的轮地切向力(N)：先乘轮半径得到轮端扭矩，再除减速比
- * 得到 MIT 接口所需的电机轴扭矩(N·m)。 */
-constexpr float kWheelRadiusM = 0.0575f;
-constexpr float kWheelReductionRatio = 17.0f;
-constexpr float kWheelForceToMotorTorque = kWheelRadiusM / kWheelReductionRatio;
+/* LQR 的前两路输入实际是轮端力矩 Twl/Twr (N·m)，Fw_L/R 沿用旧字段名。
+ * 当前机械标定：wheel_speed = motor_speed * 19.2 / 15.76；理想传动下
+ * motor_torque = wheel_torque * 19.2 / 15.76。轮径只用于速度换算，不参与这里。 */
+constexpr float kWheelTorqueToMotorTorque = 19.2f / 15.76f;
 } // namespace
 
 void MotorControlTask(void *pvParameters) {
@@ -48,10 +46,10 @@ void MotorControlTask(void *pvParameters) {
                                  -Classic_Data->Contronller_Data.T2_R);
             DM_Motor_MIT_Control(
                 &DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f,
-                Classic_Data->Contronller_Data.Fw_L * kWheelForceToMotorTorque);
+                Classic_Data->Contronller_Data.Fw_L * kWheelTorqueToMotorTorque);
             DM_Motor_MIT_Control(
                 &DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f,
-                -(Classic_Data->Contronller_Data.Fw_R * kWheelForceToMotorTorque));
+                -(Classic_Data->Contronller_Data.Fw_R * kWheelTorqueToMotorTorque));
         }
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }

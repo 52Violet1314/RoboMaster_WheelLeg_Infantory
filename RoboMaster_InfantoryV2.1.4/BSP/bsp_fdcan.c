@@ -52,9 +52,12 @@ static void motor_control_snapshot_update_chassis_feedback(
   chassis->R1_Motor_VEL = DM_8009P4.data.velocity_rad_s;
   chassis->R2_Motor_VEL = DM_8009P3.data.velocity_rad_s;
 
-  /* 左右轮安装方向相反；轮端正方向统一为车辆前进为正。 */
-  chassis->Left_Wheel_Motor_VEL = DM_3519L.data.velocity_rad_s / 17.0f;
-  chassis->Right_Wheel_Motor_VEL = -DM_3519R.data.velocity_rad_s / 17.0f;
+  /* 轮毂速度按当前机械标定换算；左右轮安装方向相反，统一前进为正。
+   * 此处输出为轮端角速度 (rad/s)，线速度在 WheelKalman_Update 内乘 0.058 m。 */
+  chassis->Left_Wheel_Motor_VEL =
+      DM_3519L.data.velocity_rad_s * (19.2f / 15.76f);
+  chassis->Right_Wheel_Motor_VEL =
+      -DM_3519R.data.velocity_rad_s * (19.2f / 15.76f);
 }
 
 static void motor_control_snapshot_publish_from_isr(void) {
