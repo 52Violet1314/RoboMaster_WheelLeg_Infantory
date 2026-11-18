@@ -46,10 +46,9 @@ float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 
 static constexpr float kStateDerivativeFilterAlpha = 0.2f;
 
-/* 仅限制遥控前后速度参考的变化率，不限制 KF 反馈或 LQR 输出。
- * 推杆加速较缓，松杆与反向时优先快速回零，避免操作手给出速度阶跃。 */
-static constexpr float kRemoteXVelocityAccelLimitMps2 = 1.5f;
-static constexpr float kRemoteXVelocityDecelLimitMps2 = 8.0f;
+/* 仅限制同方向加速的遥控前后速度参考，不限制 KF 反馈或 LQR 输出。
+ * 松杆或反向命令直接送入 LQR，使轮端立即进入制动/反向控制。 */
+static constexpr float kRemoteXVelocityAccelLimitMps2 = 1.0f;
 
 float angle_to_rad(float degrees);
 
@@ -86,9 +85,8 @@ static float Chassis_RateLimitRemoteXVelocity(float requested_velocity_m_s,
             (requested_velocity_m_s * previous_velocity_m_s) >= 0.0f;
     const bool increasing_speed = same_direction &&
             (fabsf(requested_velocity_m_s) > fabsf(previous_velocity_m_s));
-    const float limit_mps2 = increasing_speed
-            ? kRemoteXVelocityAccelLimitMps2
-            : kRemoteXVelocityDecelLimitMps2;
+    if (!increasing_speed) return requested_velocity_m_s;
+    const float limit_mps2 = kRemoteXVelocityAccelLimitMps2;
     const float max_step_m_s = limit_mps2 * dt_s;
     const float delta_m_s = requested_velocity_m_s - previous_velocity_m_s;
 
@@ -815,9 +813,10 @@ void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
     /* 与 LQR_K_CalculateWithGain 内的 state[10] 完全一致的构造：
      * 只读状态、不改变任何控制量。
      * 末尾两列用于与第 1 列 d_x_err 对比：KF 实际速度观测 z[1] 的
-     * 双侧平均值，以及 KF 后验速度状态 x[1] 的双侧平均值。 */
-    const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos, -1.00f), 1.00f);
-    const float values[16] = {
+     * 双侧平均值，以及 KF 后验速度状态 x[1] 的双侧平均值；最后一列为
+     * 原始车身 pitch（IMU_Data.pitch），便于和第 9 列的带符号误差对照。 */
+    const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos, -4.00f), 4.00f);
+    const float values[17] = {
         x_pos_lqr,
         pClassicData->States_Data.d_x_err,
         pClassicData->States_Data.yaw_err,
@@ -834,15 +833,16 @@ void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
         pClassicData->Contronller_Data.Fw_R,
         (Wheel_Kalman_L.z[1] + Wheel_Kalman_R.z[1]) * 0.5f,
         (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]) * 0.5f,
+        pClassicData->IMU_Data.pitch,
     };
-    int milli[16];
-    for (uint32_t index = 0; index < 16U; ++index)
+    int milli[17];
+    for (uint32_t index = 0; index < 17U; ++index)
         milli[index] = (int)lroundf(values[index] * 1000.0f);
 
     uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
                "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
                "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-               "%c%d.%03d,%c%d.%03d\r\n",
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
                milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
                milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
                milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
@@ -858,7 +858,8 @@ void LQR_State_Data_Print(Classic_Data_t *pClassicData) {
                milli[12] < 0 ? '-' : ' ', abs(milli[12]) / 1000, abs(milli[12]) % 1000,
                milli[13] < 0 ? '-' : ' ', abs(milli[13]) / 1000, abs(milli[13]) % 1000,
                milli[14] < 0 ? '-' : ' ', abs(milli[14]) / 1000, abs(milli[14]) % 1000,
-               milli[15] < 0 ? '-' : ' ', abs(milli[15]) / 1000, abs(milli[15]) % 1000);
+               milli[15] < 0 ? '-' : ' ', abs(milli[15]) / 1000, abs(milli[15]) % 1000,
+               milli[16] < 0 ? '-' : ' ', abs(milli[16]) / 1000, abs(milli[16]) % 1000);
 }
 
 void Kalman_Data_Print(Classic_Data_t *pClassicData, float cal_dt) {

@@ -13,12 +13,12 @@ function result = zju_lqr_gain(Qdiag,Rdiag,leg_length)
 
 if nargin < 1 || isempty(Qdiag)
     % [X, dX, yaw, dyaw, thetaL, dthetaL, thetaR, dthetaR, pitch, dpitch]
-    % 当前部署调参：X=28，dX=3，dyaw=2，thetaL/R=35000，dthetaL/R=9，pitch=30000，dpitch=12。
-    Qdiag = [28 3 400 2 35000 9 35000 9 30000 12];
+    % 当前部署调参：提高 X 位置项与 dX 速度项，加强松杆后的制动与回位。
+    Qdiag = [60 3 400 1 40000 10 40000 10 30000 1];
 end
 if nargin < 2 || isempty(Rdiag)
     % 输入顺序：[Fw_L, Fw_R, Tp_L, Tp_R]。
-    Rdiag = [31 31 1 1];
+    Rdiag = [35 35 1 1];
 end
 if nargin < 3 || isempty(leg_length)
     leg_length = 0.20;

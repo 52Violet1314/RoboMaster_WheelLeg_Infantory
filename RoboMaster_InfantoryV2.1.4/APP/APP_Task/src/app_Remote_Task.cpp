@@ -13,7 +13,7 @@ static void Remote_ParseControlSnapshot(Remote_ControlSnapshot_t *snapshot,
                                         const SBUS_Data_t *sbus) {
     constexpr float kRemoteChannelFullScale = 783.0f;
     constexpr float kCommandFullScale = 4.0f;
-    constexpr float kLongitudinalVelocityFullScaleMps = 1.5f;
+    constexpr float kLongitudinalVelocityFullScaleMps = 4.0f;
 
     snapshot->target_yaw_vel =
             Remote_ApplyStickDeadzone(sbus->Channel[0]) /
