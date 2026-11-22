@@ -13,6 +13,17 @@
 #include "Hipnuv_hi14.h"
 #define GRAVITY 9.81f  // 重力加速度 (m/s²)
 
+void HI14_ApplyURFR24Configuration(void) {
+    /* HI14 用户坐标：X 向右、Y 向前、Z 向上。配置命令在重启后加载。 */
+    static const uint8_t kUrfr24Command[] = "CONFIG IMU URFR 24\r\n";
+    static const uint8_t kSaveCommand[] = "SAVECONFIG\r\n";
+
+    (void)HAL_UART_Transmit(&huart7, (uint8_t *)kUrfr24Command,
+                            sizeof(kUrfr24Command) - 1U, 100U);
+    (void)HAL_UART_Transmit(&huart7, (uint8_t *)kSaveCommand,
+                            sizeof(kSaveCommand) - 1U, 100U);
+}
+
 void app_INSTask(void *pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     IMU_ControlSnapshot_t imu_snapshot = {};

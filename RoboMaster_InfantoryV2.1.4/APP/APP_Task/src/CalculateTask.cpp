@@ -1,5 +1,6 @@
 #include "CalculateTask.hpp"
 #include "ControlTask.hpp"
+#include "app_INSTask.hpp"
 #include "FreeRTOS.h"
 #include "POWER.h"
 #include "Power.h"
@@ -246,6 +247,9 @@ void CaculateTask(void *pvParameters) {
     StandState_Init();
     StepClimb_Init();
     ChassisMotors_InitAndSendZero();
+#if HI14_APPLY_URFR24_ON_BOOT
+    HI14_ApplyURFR24Configuration();
+#endif
     
     WheelKalman_Init(&Wheel_Kalman_L, 0.001f, 0.0f, 0.0f);
     WheelKalman_Init(&Wheel_Kalman_R, 0.001f, 0.0f, 0.0f);
