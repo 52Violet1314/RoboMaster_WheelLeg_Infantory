@@ -601,9 +601,9 @@ void CaculateTask(void *pvParameters) {
                 // LEG_Data_Print(pClassicData);           // 腿长/腿角/腿速
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
                 // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
-                // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
+                 State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
                 // LQR_State_Data_Print(pClassicData);         // LQR 误差 + 轮速 + Fw（震荡定位）
-                 Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
+                // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
                 xLastPrintTick = xNow;
             }
 
