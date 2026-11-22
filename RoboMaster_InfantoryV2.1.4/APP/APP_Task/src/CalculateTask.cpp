@@ -384,16 +384,17 @@ void CaculateTask(void *pvParameters) {
         
         /* Kalman 的控制输入必须是带方向的前向加速度；accel_h 是幅值，
          * 会在静止/转向时持续向位置状态注入正向偏置。 */
-        /* KF 只使用 VMC 车身系腿摆角（后摆正）、腿长、轮端速度和 IMU
-         * 前向加速度；不使用车身 pitch 或 pitch 角速度。 */
+        /* KF 使用上方刚合成的地面系腿角（前摆正、后摆负）、腿长、轮端
+         * 速度和 IMU 前向加速度。theta 已含 pitch，因此不可再额外叠加
+         * pitch 或 pitch 角速度。 */
         WheelKalman_Update(&Wheel_Kalman_L, pClassicData->IMU_Data.accel_x, cal_dt,
-                           pClassicData->Leg_Data.phi_0_L,
-                           pClassicData->Leg_Data.delta_phi_0_L,
+                           pClassicData->States_Data.theta_L,
+                           pClassicData->States_Data.d_theta_L,
                            pClassicData->Leg_Data.L0_L, pClassicData->Leg_Data.d_L0_L,
                            pClassicData->Motor_Data.Left_Wheel_Motor_VEL);
         WheelKalman_Update(&Wheel_Kalman_R, pClassicData->IMU_Data.accel_x, cal_dt,
-                           pClassicData->Leg_Data.phi_0_R,
-                           pClassicData->Leg_Data.delta_phi_0_R,
+                           pClassicData->States_Data.theta_R,
+                           pClassicData->States_Data.d_theta_R,
                            pClassicData->Leg_Data.L0_R, pClassicData->Leg_Data.d_L0_R,
                            pClassicData->Motor_Data.Right_Wheel_Motor_VEL);
         // ====== 起身状态机（左右腿共用一个状态）======
@@ -599,10 +600,10 @@ void CaculateTask(void *pvParameters) {
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);           // 腿长/腿角/腿速
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
-                 IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
+                // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
                 // LQR_State_Data_Print(pClassicData);         // LQR 误差 + 轮速 + Fw（震荡定位）
-                // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
+                 Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
                 xLastPrintTick = xNow;
             }
 

@@ -17,7 +17,7 @@
  *
  * 测量向量 z[2]:
  *   z[0] — 车体位置（运动学积分累积）
- *   z[1] — 车体速度（轮速 + 腿摆动 + 腿伸缩运动学合成）
+ *   z[1] — 车体速度（轮速、世界系腿摆和腿伸缩运动学合成）
  */
 typedef struct {
     float x[2];        // 状态: [位置, 速度]
@@ -53,15 +53,15 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
  *
  * 测量值 z 在函数内部由运动学模型自动计算：
  *   z[0] = 速度积分累积位置
- *   z[1] = 轮速 + 腿摆动 + 腿长变化合成车体速度
+ *   z[1] = 轮速 - L*dtheta*cos(theta) - dL*sin(theta)
  *
  * @param kf        滤波器实例指针
  * @param u         控制输入 / 加速度 (m/s²)
  * @param pos       电机关节位置（预留）
  * @param vel       电机关节速度（预留）
  * @param dt        本轮实际时间步长 (s)
- * @param phi       VMC 正运动学的车身系腿摆角 phi (rad)，后摆为正
- * @param dot_phi   与 phi 同一正方向的腿摆角速率 (rad/s)
+ * @param theta     地面系腿摆角 theta (rad)，前摆为正、后摆为负
+ * @param dot_theta 与 theta 同一正方向的腿摆角速率 (rad/s)
  * @param L         腿长 L (m)
  * @param dot_L     腿长变化率 dL/dt (m/s)
  * @param wheel_vel 轮子电机角速度 (rad/s)，正方向定义为前进方向
@@ -69,7 +69,7 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
 void WheelKalman_Update(WheelKalmanFliter_t *kf,
                         float u,
                         float dt,
-                        float phi, float dot_phi,
+                        float theta, float dot_theta,
                         float L, float dot_L,
                         float wheel_vel);
 

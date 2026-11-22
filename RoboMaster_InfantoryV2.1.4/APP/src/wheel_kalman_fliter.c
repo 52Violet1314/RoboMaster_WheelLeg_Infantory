@@ -8,7 +8,7 @@
  *
  * 测量值在函数内部由运动学模型自动计算：
  *   z[0] = 速度积分累积位置（每周期 body_vel_real * dt 累加）
- *   z[1] = 轮速 + 腿摆动 + 腿伸缩补偿后的车体质心速度
+ *   z[1] = 轮速 - 世界系腿摆动 - 世界系腿伸缩补偿后的车体质心速度
  *
  * 卡尔曼滤波流程（五步标准公式）：
  *   第一步: 状态预测      x̂ₖ₋ = A·x̂ₖ₋₁ + B·u
@@ -85,8 +85,8 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
  * @param u         控制输入 / 加速度 (m/s²)
  * @param vel       电机关节速度（预留，当前未使用）
  * @param dt        本轮实际时间步长 (s)
- * @param phi       VMC 正运动学车身系腿摆角，后摆为正
- * @param dot_phi   与 phi 同向的角速度
+ * @param theta     地面系腿摆角，前摆为正、后摆为负
+ * @param dot_theta 与 theta 同向的角速度
  * @param L         腿长 L (m)
  * @param dot_L     腿长变化率 dL/dt (m/s)
  * @param wheel_vel 轮子电机角速度 (rad/s)，正方向为前进
@@ -94,7 +94,7 @@ void WheelKalman_Init(WheelKalmanFliter_t *kf, float dt, float init_pos, float i
 void WheelKalman_Update(WheelKalmanFliter_t *kf,
                         float u,
                         float dt,
-                        float phi, float dot_phi,
+                        float theta, float dot_theta,
                         float L, float dot_L,
                         float wheel_vel)
 {
@@ -106,12 +106,12 @@ void WheelKalman_Update(WheelKalmanFliter_t *kf,
      * pitch 角速度；IMU 仅通过 u=accel_x 参与状态预测。 */
     float wheel_vel_real = wheel_vel * WHEEL_RADIUS;
 
-    /* 车体质心速度 = 轮速 + 腿摆动线速度分量 + 腿伸缩线速度分量
-     *   L·φ̇·cos(φ)  — 腿绕关节转动的切向速度（cos 投影到水平方向）
-     *   L̇·sin(φ)     — 腿伸缩带来的径向速度（sin 投影到水平方向）*/
+    /* 地面系腿角 theta 以竖直方向为零：前摆为正、后摆为负。车身相对
+     * 轮轴的位置为 -L·sin(theta)，故前进为正的车体速度为：
+     *   轮速 - L·theta_dot·cos(theta) - L_dot·sin(theta)。 */
     float body_vel_real = wheel_vel_real
-                        + L * dot_phi * arm_cos_f32(phi)
-                        + dot_L * arm_sin_f32(phi);
+                        - L * dot_theta * arm_cos_f32(theta)
+                        - dot_L * arm_sin_f32(theta);
 
     /* z[0] = 速度积分累积位置（以运动学模型为基准）*/
     kf->z[0] += body_vel_real * dt;
