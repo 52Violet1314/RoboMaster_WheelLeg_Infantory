@@ -13,7 +13,8 @@ static void Remote_ParseControlSnapshot(Remote_ControlSnapshot_t *snapshot,
                                         const SBUS_Data_t *sbus) {
     constexpr float kRemoteChannelFullScale = 783.0f;
     constexpr float kCommandFullScale = 4.0f;
-    constexpr float kLongitudinalVelocityFullScaleMps = 4.0f;
+    /* 3519 额定轮端转速对应约 2.40 m/s；遥控满杆不能要求超过持续能力。 */
+    constexpr float kLongitudinalVelocityFullScaleMps = 2.4f;
 
     snapshot->target_yaw_vel =
             Remote_ApplyStickDeadzone(sbus->Channel[0]) /

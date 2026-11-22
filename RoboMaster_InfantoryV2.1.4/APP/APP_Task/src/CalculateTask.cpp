@@ -47,9 +47,8 @@ float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 
 static constexpr float kStateDerivativeFilterAlpha = 0.2f;
 
-/* 可选的同方向加速参考斜率限制。当前保留实现但不接入：加速、松杆和
- * 反向均直接送入 LQR，使全部纵向动态由当前 K 矩阵决定。 */
-static constexpr bool kRemoteXVelocityAccelLimitEnabled = false;
+/* 仅限制同方向加速的遥控速度参考；松杆和反向直接进入 LQR 制动。 */
+static constexpr bool kRemoteXVelocityAccelLimitEnabled = true;
 static constexpr float kRemoteXVelocityAccelLimitMps2 = 1.0f;
 
 float angle_to_rad(float degrees);
@@ -359,8 +358,7 @@ void CaculateTask(void *pvParameters) {
         if (cal_dt <= 0.0f || cal_dt > 0.1f) cal_dt = 0.001f;  // 1ms 默认值
         last_cal_tick = now_tick;
 
-        /* 加速斜率限制保留但当前不接入；RemoteTask 仅负责原始数据的死区
-         * 和比例换算。总使能关闭时清零内部状态。 */
+        /* 仅同方向加速使用斜率限制；总使能关闭时清零内部状态。 */
         if (pClassicData->Contronller_Data.total_enable == 0U) {
             shaped_target_x_vel = 0.0f;
         } else if (kRemoteXVelocityAccelLimitEnabled) {
@@ -515,8 +513,13 @@ void CaculateTask(void *pvParameters) {
                           override_leg_target, override_leg_target_m,
                           swing_pid_enable, swing_target_rad);
 
-        /* F0 已在 LegControl 内限幅；Tp 是 VMC 的虚拟输入，在 VMC 模块限幅。 */
-        VMC_LimitVirtualPitchTorque(pClassicData, 4.0f);
+        /* 以当前腿形的雅可比、F0 和重力补偿计算 Tp 可用范围，保证任一
+         * 髋关节不因 Tp 而超过额定 20 Nm。 */
+        VMC_LimitVirtualPitchTorqueByJointCapacity(
+                pClassicData, &vmc_kinematics,
+                pClassicData->Contronller_Data.F0_L,
+                pClassicData->Contronller_Data.F0_R,
+                gravity_tp_l, gravity_tp_r);
         // ====== VMC 力矩分配 ======
         VMC_MapForceToJointTorques(
                 pClassicData, &vmc_kinematics,

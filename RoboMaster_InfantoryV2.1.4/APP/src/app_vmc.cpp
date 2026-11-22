@@ -121,11 +121,67 @@ void VMC_MapForceToJointTorques(Classic_Data_t *data,
     data->Contronller_Data.Tp_R = TpR;
 }
 
-void VMC_LimitVirtualPitchTorque(Classic_Data_t *data, float limit_nm) {
-    data->Contronller_Data.Tp_L = VMC_ClampSymmetric(
-            data->Contronller_Data.Tp_L, limit_nm);
-    data->Contronller_Data.Tp_R = VMC_ClampSymmetric(
-            data->Contronller_Data.Tp_R, limit_nm);
+static bool VMC_IntersectTpInterval(float coefficient, float force_torque,
+                                    float *lower, float *upper) {
+    constexpr float kCoefficientEpsilon = 1.0e-6f;
+    if (fabsf(coefficient) < kCoefficientEpsilon) {
+        return fabsf(force_torque) <= VMC_JOINT_TORQUE_LIMIT_NM;
+    }
+    float endpoint_a = (-VMC_JOINT_TORQUE_LIMIT_NM - force_torque) / coefficient;
+    float endpoint_b = (+VMC_JOINT_TORQUE_LIMIT_NM - force_torque) / coefficient;
+    if (endpoint_a > endpoint_b) {
+        const float temporary = endpoint_a;
+        endpoint_a = endpoint_b;
+        endpoint_b = temporary;
+    }
+    if (endpoint_a > *lower) *lower = endpoint_a;
+    if (endpoint_b < *upper) *upper = endpoint_b;
+    return *lower <= *upper;
+}
+
+void VMC_LimitVirtualPitchTorqueByJointCapacity(
+        Classic_Data_t *data, const VMC_Kinematics_t *kinematics,
+        float F0L, float F0R, float gravity_tp_l, float gravity_tp_r) {
+    if (data == nullptr || kinematics == nullptr) return;
+    const VMC_LegKinematics_t *legs[2] = {&kinematics->left, &kinematics->right};
+    const float f0[2] = {F0L, F0R};
+    const float gravity_tp[2] = {gravity_tp_l, gravity_tp_r};
+    float *tp[2] = {&data->Contronller_Data.Tp_L, &data->Contronller_Data.Tp_R};
+    constexpr float l1 = 0.210f;
+    constexpr float l4 = 0.210f;
+
+    for (uint32_t side = 0U; side < 2U; ++side) {
+        const VMC_LegKinematics_t *leg = legs[side];
+        const float sin32 = arm_sin_f32(leg->phi3 - leg->phi2);
+        if (fabsf(leg->L0 * sin32) < 1.0e-6f) {
+            *tp[side] = 0.0f;
+            continue;
+        }
+        const float j11 = l1 * arm_sin_f32(leg->phi0 - leg->phi3) *
+                          arm_sin_f32(leg->phi1 - leg->phi2) / sin32;
+        const float j12 = l1 * arm_cos_f32(leg->phi0 - leg->phi3) *
+                          arm_sin_f32(leg->phi1 - leg->phi2) / (leg->L0 * sin32);
+        const float j21 = l4 * arm_sin_f32(leg->phi0 - leg->phi2) *
+                          arm_sin_f32(leg->phi3 - leg->phi4) / sin32;
+        const float j22 = l4 * arm_cos_f32(leg->phi0 - leg->phi2) *
+                          arm_sin_f32(leg->phi3 - leg->phi4) / (leg->L0 * sin32);
+
+        float lower = -1.0e6f;
+        float upper = +1.0e6f;
+        const bool joint_1_valid = VMC_IntersectTpInterval(j12, j11 * f0[side],
+                                                            &lower, &upper);
+        const bool joint_2_valid = joint_1_valid &&
+                VMC_IntersectTpInterval(j22, j21 * f0[side], &lower, &upper);
+        if (!joint_2_valid) {
+            /* F0 已耗尽两个髋关节的共同余量时，不再由 Tp 加重饱和。 */
+            *tp[side] = -gravity_tp[side];
+            continue;
+        }
+        const float total_tp = *tp[side] + gravity_tp[side];
+        *tp[side] = VMC_ClampSymmetric(total_tp < lower ? lower :
+                                        (total_tp > upper ? upper : total_tp),
+                                        1.0e6f) - gravity_tp[side];
+    }
 }
 
 void VMC_LimitJointTorques(Classic_Data_t *data) {

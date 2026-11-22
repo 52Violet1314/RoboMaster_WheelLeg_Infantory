@@ -15,8 +15,9 @@ typedef struct
 #define LQR_K_SCHEDULE_MIN_LENGTH_M  0.150f
 #define LQR_K_SCHEDULE_STEP_M        0.005f
 
-/* LQR 的两路轮端虚拟力输出保护，单位 N。轮端输出不经过 VMC。 */
-#define LQR_WHEEL_FORCE_LIMIT_N       6.0f
+/* LQR 的两路轮端虚拟力矩保护，单位 Nm。ControlTask 按 19.2/15.76
+ * 换成 3519 电机侧扭矩；2.8729167 Nm 恰对应电机额定 3.5 Nm。 */
+#define LQR_WHEEL_FORCE_LIMIT_N       2.8729167f
 
 extern const LQR_K_Schedule_t LQR_K_Schedule[LQR_K_SCHEDULE_COUNT];
 
