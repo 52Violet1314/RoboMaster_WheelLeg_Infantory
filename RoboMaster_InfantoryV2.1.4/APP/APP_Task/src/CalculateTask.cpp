@@ -47,7 +47,8 @@ float theta_R_ref = 0.0f; // 由左右各自腿长目标表实时更新，默认
 
 static constexpr float kStateDerivativeFilterAlpha = 0.2f;
 
-/* 仅限制同方向加速的遥控速度参考；松杆和反向直接进入 LQR 制动。 */
+/* 仅限制速度绝对值增大的过程；减小绝对速度（含回零）立即进入 LQR 制动。
+ * 换向时先直接减速到零，再从零按相同加速度限制建立反向速度。 */
 static constexpr bool kRemoteXVelocityAccelLimitEnabled = true;
 static constexpr float kRemoteXVelocityAccelLimitMps2 = 1.0f;
 
@@ -82,21 +83,26 @@ static float Chassis_RateLimitRemoteXVelocity(float requested_velocity_m_s,
         return 0.0f;
     }
 
-    const bool same_direction =
-            (requested_velocity_m_s * previous_velocity_m_s) >= 0.0f;
-    const bool increasing_speed = same_direction &&
-            (fabsf(requested_velocity_m_s) > fabsf(previous_velocity_m_s));
-    if (!increasing_speed) return requested_velocity_m_s;
-
     const float max_step_m_s = kRemoteXVelocityAccelLimitMps2 * dt_s;
-    const float delta_m_s = requested_velocity_m_s - previous_velocity_m_s;
-    if (delta_m_s > max_step_m_s) {
-        return previous_velocity_m_s + max_step_m_s;
+    const float requested_speed_m_s = fabsf(requested_velocity_m_s);
+    const float previous_speed_m_s = fabsf(previous_velocity_m_s);
+    const bool reversing =
+            (requested_velocity_m_s * previous_velocity_m_s) < 0.0f;
+
+    /* 换向包含“无斜率限制地减速到零”和“从零受限加速”两个阶段。 */
+    if (reversing) {
+        const float limited_speed_m_s = fminf(requested_speed_m_s, max_step_m_s);
+        return copysignf(limited_speed_m_s, requested_velocity_m_s);
     }
-    if (delta_m_s < -max_step_m_s) {
-        return previous_velocity_m_s - max_step_m_s;
+
+    /* 绝对速度减小不限制，保证松杆和主动减速的响应。 */
+    if (requested_speed_m_s <= previous_speed_m_s) {
+        return requested_velocity_m_s;
     }
-    return requested_velocity_m_s;
+
+    const float limited_speed_m_s =
+            fminf(requested_speed_m_s, previous_speed_m_s + max_step_m_s);
+    return copysignf(limited_speed_m_s, requested_velocity_m_s);
 }
 
 /* FireWater CSV：目标L0、左L0、右L0、左误差、右误差、左F0、右F0。 */
@@ -358,7 +364,7 @@ void CaculateTask(void *pvParameters) {
         if (cal_dt <= 0.0f || cal_dt > 0.1f) cal_dt = 0.001f;  // 1ms 默认值
         last_cal_tick = now_tick;
 
-        /* 仅同方向加速使用斜率限制；总使能关闭时清零内部状态。 */
+        /* 仅绝对速度增大使用斜率限制；减速不限制，总使能关闭时清零状态。 */
         if (pClassicData->Contronller_Data.total_enable == 0U) {
             shaped_target_x_vel = 0.0f;
         } else if (kRemoteXVelocityAccelLimitEnabled) {
