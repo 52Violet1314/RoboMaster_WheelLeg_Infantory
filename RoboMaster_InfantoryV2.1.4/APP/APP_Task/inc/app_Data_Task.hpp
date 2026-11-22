@@ -119,6 +119,8 @@ typedef struct {
         float Fw_R;
         float Tp_L;
         float Tp_R;
+        /* 拨弹 3507 的输出轴速度指令，rad/s；由拨弹控制逻辑写入。 */
+        float Feeder_Speed_Command_Rad_S;
         uint8_t total_enable;
     } Contronller_Data;
 

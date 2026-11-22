@@ -65,14 +65,14 @@ extern volatile DM_Motor_Fault_Record_t dm_motor_fault_record;
 /* 八台电机各自的驱动状态故障锁存；任一非零时总标志置位。 */
 extern volatile uint8_t dm_motor_driver_fault_state[8];
 extern volatile uint8_t dm_motor_driver_fault_flag;
-/* 八台底盘达妙电机任一台超过 10 ms 未收到有效反馈时置位。 */
+/* 六台底盘达妙电机任一台超过 10 ms 未收到有效反馈时置位。 */
 extern volatile uint8_t dm_motor_feedback_timeout_flag;
 
 /*
  * 临时四髋电机接线调试开关。
  *
- * 置 1 时，反馈健康门只要求 P1~P4（数组 0~3）四台髋电机；两台轮毂和
- * RemoteTask 中的 3507/4310 可以不接，不会因其超时或状态码而让底盘输出
+ * 置 1 时，反馈健康门只要求 P1~P4（数组 0~3）四台髋电机；两台轮毂、
+ * 3507 和 4310 可以不接，不会因其超时或状态码而让底盘输出
  * 清零。P1~P4 任一台超时/驱动故障仍保持原有的清零保护，遥控器和 IMU
  * 超时、遥控总使能关闭也完全不受影响。完成四髋检查后必须恢复为 0。
  */

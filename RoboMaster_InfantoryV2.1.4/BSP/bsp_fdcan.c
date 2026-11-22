@@ -25,6 +25,7 @@ volatile uint8_t dm_motor_driver_fault_flag = 0U;
 volatile uint8_t dm_motor_feedback_timeout_flag = 1U;
 
 #define DM_MOTOR_FEEDBACK_COUNT       8U
+/* 安全门只监管四髋和两轮毂；拨弹、云台均为独立上装。 */
 #define DM_CHASSIS_FEEDBACK_COUNT     6U
 #define DM_MOTOR_FEEDBACK_TIMEOUT_MS  10U
 

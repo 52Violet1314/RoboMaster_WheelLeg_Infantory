@@ -35,6 +35,7 @@ void MotorControlTask(void *pvParameters) {
             DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f, 0);
             DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0);
             DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0);
+            DM_Motor_Speed_Control(&DM_3507, 0.0f);
         } else {
             DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f,
                                  Classic_Data->Contronller_Data.T1_L);
@@ -50,6 +51,9 @@ void MotorControlTask(void *pvParameters) {
             DM_Motor_MIT_Control(
                 &DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f,
                 -(Classic_Data->Contronller_Data.Fw_R * kWheelTorqueToMotorTorque));
+            DM_Motor_Speed_Control(
+                &DM_3507,
+                Classic_Data->Contronller_Data.Feeder_Speed_Command_Rad_S);
         }
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }

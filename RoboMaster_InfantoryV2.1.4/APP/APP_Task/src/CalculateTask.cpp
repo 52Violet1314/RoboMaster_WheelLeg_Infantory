@@ -116,7 +116,7 @@ typedef struct {
     bool hip_driver_fault;
 } MotorFeedbackHealth_t;
 
-/* 初始化六台底盘电机，并按原有启动顺序发送一次零扭矩。 */
+/* 初始化六台底盘电机和拨弹 3507，并按原有启动顺序发送安全零指令。 */
 static void ChassisMotors_InitAndSendZero(void) {
     DM_Motor_Init(&DM_8009P1, DM_MOTOR_MODEL_8009, 0x051, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_8009P2, DM_MOTOR_MODEL_8009, 0x052, DM_MOTOR_MODE_MIT, &hfdcan1);
@@ -124,6 +124,7 @@ static void ChassisMotors_InitAndSendZero(void) {
     DM_Motor_Init(&DM_8009P4, DM_MOTOR_MODEL_8009, 0x054, DM_MOTOR_MODE_MIT, &hfdcan1);
     DM_Motor_Init(&DM_3519L, DM_MOTOR_MODEL_3519, 0x055, DM_MOTOR_MODE_MIT, &hfdcan2);
     DM_Motor_Init(&DM_3519R, DM_MOTOR_MODEL_3519, 0x056, DM_MOTOR_MODE_MIT, &hfdcan2);
+    DM_Motor_Init(&DM_3507, DM_MOTOR_MODEL_3507, 0x057, DM_MOTOR_MODE_SPEED, &hfdcan2);
 
     DM_Motor_MIT_Control(&DM_8009P1, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     DM_Motor_MIT_Control(&DM_8009P2, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
@@ -131,6 +132,7 @@ static void ChassisMotors_InitAndSendZero(void) {
     DM_Motor_MIT_Control(&DM_8009P3, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     DM_Motor_MIT_Control(&DM_3519L, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     DM_Motor_MIT_Control(&DM_3519R, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    DM_Motor_Speed_Control(&DM_3507, 0.0f);
 }
 
 /* 仅供电机反馈超时/驱动故障恢复使用。
@@ -141,7 +143,7 @@ static void ChassisMotors_RecoverFromFeedbackFault(void) {
         &DM_8009P1, &DM_8009P2, &DM_8009P3, &DM_8009P4,
         &DM_3519L, &DM_3519R,
     };
-    /* 正常模式只恢复四关节和两轮毂；3507/4310属于上装。 */
+    /* 正常模式只恢复四关节和两轮毂；3507/4310属于独立上装。 */
     uint32_t monitored_count = 6U;
 #if DM_FOUR_HIP_COMMISSIONING_BYPASS
     /* 四髋接线调试只触及已接的 P1~P4，绝不向未接电机反复广播使能。 */
@@ -202,6 +204,7 @@ static void ChassisControl_ClearOutputs(Classic_Data_t *data) {
     data->Contronller_Data.T2_L = 0.0f;
     data->Contronller_Data.T1_R = 0.0f;
     data->Contronller_Data.T2_R = 0.0f;
+    data->Contronller_Data.Feeder_Speed_Command_Rad_S = 0.0f;
 }
 
 static void VMC_ConvertLegFeedbackToWorldState(Classic_Data_t *data,
@@ -592,14 +595,17 @@ void CaculateTask(void *pvParameters) {
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);           // 腿长/腿角/腿速
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
-                // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
+                 IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
-                 LQR_State_Data_Print(pClassicData);         // LQR 误差 + 轮速 + Fw（震荡定位）
+                // LQR_State_Data_Print(pClassicData);         // LQR 误差 + 轮速 + Fw（震荡定位）
                 // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
                 xLastPrintTick = xNow;
             }
 
         }
+        /* 拨弹固定速度测试：单位为输出轴 rad/s，直接修改此数值即可。 */
+        pClassicData->Contronller_Data.Feeder_Speed_Command_Rad_S = 0.0f;
+
         xEventGroupSetBits(ControlEventGroup, Calculate_OK_BIT);
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
