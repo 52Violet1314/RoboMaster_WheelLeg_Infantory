@@ -33,3 +33,6 @@ Simmulation/serial_leg_simulink/**/slprj/
 
 # 本机工具配置
 .claude/settings.local.json
+
+# 本机 Codex/配置扩展生成的工具技能，不纳入固件仓库
+RoboMaster_InfantoryV2.1.4/.agents/
