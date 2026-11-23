@@ -11,7 +11,6 @@ static Float_PID_Typedef leg_length_pid_l;
 static Float_PID_Typedef leg_length_pid_r;
 static Float_PID_Typedef leg_swing_pid_l;
 static Float_PID_Typedef leg_swing_pid_r;
-static float last_leg_target = 0.0f;
 static float length_pid_force_l_n = 0.0f;
 static float length_pid_force_r_n = 0.0f;
 
@@ -140,8 +139,7 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     }
     const float leg_err_l = leg_target_l - pClassicData->Leg_Data.L0_L;
     const float leg_err_r = leg_target_r - pClassicData->Leg_Data.L0_R;
-    /* 仅用于腿长 PID 的误差死区。保留原始误差给调试和目标切换判断；
-     * 死区内不产生新的 P/I/D 修正，但不清已有积分维持力。 */
+    /* 死区内误差置零，保留已有积分维持力；D 仍按实际腿速提供阻尼。 */
     constexpr float leg_pid_deadband_m = LEG_LENGTH_PID_DEADBAND_M;
     float leg_pid_current_r = pClassicData->Leg_Data.L0_R;
 #if !LEG_CONTROL_TEST_MODE
@@ -152,14 +150,6 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
 #endif
     if (fabsf(leg_err_r) <= leg_pid_deadband_m) {
         leg_pid_current_r = leg_target_r;
-    }
-    if (fabsf(leg_target_r - last_leg_target) > 0.001f) {//发生换档
-        /* 目标切换不清积分，连续调节旋钮时保持已有持力；仅更新微分历史。 */
-        leg_length_pid_l.Last_Error = leg_err_l;
-        leg_length_pid_r.Last_Error = leg_err_r;//更新误差长度
-        leg_length_pid_l.Last_Dout = 0.0f;
-        leg_length_pid_r.Last_Dout = 0.0f;//清输出
-        last_leg_target = leg_target_r;
     }
     /* 总使能前禁止积分；限幅直接使用积分输出单位 N。 */
     constexpr float leg_pid_iout_limit_n = LEG_LENGTH_PID_I_OUTPUT_LIMIT_N;
@@ -184,13 +174,13 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     leg_length_pid_l.Last_Error = 0.0f;
     leg_length_pid_l.Last_Dout = 0.0f;
 #else
-    leg_l_out = PID_Max_Float_Dt(&leg_length_pid_l, leg_target_l,
-                                 leg_pid_current_l,
-                                 leg_l_iout_limit_n, leg_l_out_limit, dt);
+    leg_l_out = PID_Max_Float_Measurement_Dt(
+            &leg_length_pid_l, leg_target_l, leg_pid_current_l,
+            leg_l_iout_limit_n, leg_l_out_limit, dt, pClassicData->Leg_Data.d_L0_L);
 #endif
-    float leg_r_out = PID_Max_Float_Dt(&leg_length_pid_r, leg_target_r,
-                                       leg_pid_current_r,
-                                       leg_r_iout_limit_n, leg_r_out_limit, dt);
+    float leg_r_out = PID_Max_Float_Measurement_Dt(
+            &leg_length_pid_r, leg_target_r, leg_pid_current_r,
+            leg_r_iout_limit_n, leg_r_out_limit, dt, pClassicData->Leg_Data.d_L0_R);
     leg_length_pid_l.Ki = leg_l_ki;
     leg_length_pid_r.Ki = leg_r_ki;
     length_pid_force_l_n = leg_l_out;

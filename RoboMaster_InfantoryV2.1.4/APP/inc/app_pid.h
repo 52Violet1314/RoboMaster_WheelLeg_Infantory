@@ -25,6 +25,10 @@ void Float_PID_Init(Float_PID_Typedef *pid, float Kp, float Ki, float Kd);
  * 内部 Err_Int 仍保存为 error·s，调用者不应再按其单位设置限幅。 */
 float PID_Max_Float_Dt(Float_PID_Typedef *PID, float Target, float Current,
                        float Iout_Max, float Res_Max, float dt);
+/* 微分只用实际测量值的变化率，不能传目标变化率。 */
+float PID_Max_Float_Measurement_Dt(Float_PID_Typedef *PID, float Target, float Current,
+                                   float Iout_Max, float Res_Max, float dt,
+                                   float measurement_rate);
 
 #ifdef __cplusplus
 }
