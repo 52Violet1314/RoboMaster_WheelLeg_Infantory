@@ -597,8 +597,7 @@ void CaculateTask(void *pvParameters) {
                  *                         （腿长环跟踪与输出力）
                  * IMU_Data_Print         - 6 列：roll,pitch,yaw,droll,dpitch,dyaw
                  *                         （已完成原始HI14轴映射：pitch低头正，yaw左转正）
-                 * State_Data_Print       - 14 列：10 个 LQR 状态 + P1/P2raw/phi1/phi4 关节角(度)
-                 *                         （全状态总览，角度类为度）
+                 * State_Data_Print       - 12 列：10 个 LQR 状态 + 左右轮端扭矩指令 (N·m)
                  * LQR_State_Data_Print   - 14 列：X,dX,yaw,dyaw,thetaL,dthetaL,thetaR,dthetaR,
                  *                         -pitch,-dpitch,轮速L,轮速R,Fw_L,Fw_R
                  *                         （LQR 误差 + 双轮原始反馈 + 双轮输出力；诊断速度环用）
@@ -610,7 +609,7 @@ void CaculateTask(void *pvParameters) {
                 // LEG_Data_Print(pClassicData);           // 腿长/腿角/腿速
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
                 // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
-                 State_Data_Print(pClassicData);          // LQR 全状态 + 关节角
+                 State_Data_Print(pClassicData);          // LQR 全状态 + 左右轮端扭矩指令
                 // LQR_State_Data_Print(pClassicData);         // LQR 误差 + 轮速 + Fw（震荡定位）
                 // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
                 xLastPrintTick = xNow;
@@ -989,15 +988,9 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
     int theta_dec = (int) (theta_abs * 1000) % 1000;
     int d_theta_dec = (int) (d_theta_abs * 1000) % 1000;
 
-    /* 后四列统一放在 State_Data_Print 的 CSV 行中，单位为度：
-     * P1/P2raw 是达妙直接反馈；phi1/phi4 是加偏置后送入 VMC 的角。 */
-    const float rad_to_mdeg = 180000.0f / PI;
-    const int p1_raw_mdeg = (int)lroundf(
-            (pClassicData->Motor_Data.L1_Motor_POS - 3.1415926f) * rad_to_mdeg);
-    const int p2_raw_mdeg = (int)lroundf(
-            (pClassicData->Motor_Data.L2_Motor_POS - 6.2831853f) * rad_to_mdeg);
-    const int phi1_mdeg = (int)lroundf(pClassicData->Motor_Data.L1_Motor_POS * rad_to_mdeg);
-    const int phi4_mdeg = (int)lroundf(pClassicData->Motor_Data.L2_Motor_POS * rad_to_mdeg);
+    // 限幅后的轮端扭矩指令，使用底盘坐标，单位 N·m。
+    const int fw_l_milli = (int)lroundf(pClassicData->Contronller_Data.Fw_L * 1000.0f);
+    const int fw_r_milli = (int)lroundf(pClassicData->Contronller_Data.Fw_R * 1000.0f);
 
     // 处理符号：当整数部分为0但原始值为负时，手动输出负号
     char x_pos_sign =
@@ -1033,7 +1026,7 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
 
     // 打印输出，手动处理负号
     uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%"
-               "c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               "c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
                x_pos_sign, x_pos_int, x_pos_dec, d_x_sign, d_x_int, d_x_dec,
                yaw_sign, yaw_int, yaw_dec, d_yaw_sign, d_yaw_int, d_yaw_dec,
                theta_l_sign, theta_l_int, theta_l_dec, d_theta_l_sign,
@@ -1041,8 +1034,6 @@ void State_Data_Print(Classic_Data_t *pClassicData) {
                theta_r_dec, d_theta_r_sign, d_theta_r_int, d_theta_r_dec,
                theta_sign, theta_int, theta_dec, d_theta_sign, d_theta_int,
                d_theta_dec,
-               p1_raw_mdeg < 0 ? '-' : ' ', abs(p1_raw_mdeg) / 1000, abs(p1_raw_mdeg) % 1000,
-               p2_raw_mdeg < 0 ? '-' : ' ', abs(p2_raw_mdeg) / 1000, abs(p2_raw_mdeg) % 1000,
-               phi1_mdeg < 0 ? '-' : ' ', abs(phi1_mdeg) / 1000, abs(phi1_mdeg) % 1000,
-               phi4_mdeg < 0 ? '-' : ' ', abs(phi4_mdeg) / 1000, abs(phi4_mdeg) % 1000);
+               fw_l_milli < 0 ? '-' : ' ', abs(fw_l_milli) / 1000, abs(fw_l_milli) % 1000,
+               fw_r_milli < 0 ? '-' : ' ', abs(fw_r_milli) / 1000, abs(fw_r_milli) % 1000);
 }
