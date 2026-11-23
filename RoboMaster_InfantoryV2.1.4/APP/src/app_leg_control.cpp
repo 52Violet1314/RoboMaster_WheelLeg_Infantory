@@ -12,8 +12,17 @@ static Float_PID_Typedef leg_length_pid_r;
 static Float_PID_Typedef leg_swing_pid_l;
 static Float_PID_Typedef leg_swing_pid_r;
 static float last_leg_target = 0.0f;
+static float length_pid_force_l_n = 0.0f;
+static float length_pid_force_r_n = 0.0f;
+
+void LegControl_GetLengthPidForce(float *left_n, float *right_n) {
+    *left_n = length_pid_force_l_n;
+    *right_n = length_pid_force_r_n;
+}
 
 void LegControl_Init(void) {
+    length_pid_force_l_n = 0.0f;
+    length_pid_force_r_n = 0.0f;
 #if LEG_CONTROL_TEST_MODE
     Float_PID_Init(&leg_length_pid_l, 0.0f, 0.0f, 0.0f);
 #else
@@ -99,10 +108,12 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
 
     const bool roll_stability_enabled =
             leg_pid_enabled && !LEG_CONTROL_TEST_MODE;
+    // 每单位 Roll 修正请求两倍腿长差，最大腿长差就是完整站立行程。
+    const float roll_travel_m = 0.5f * (leg_knob_stand_max_m - leg_knob_stand_min_m);
     const RollStabilityOutput_t roll_output = RollStability_Update(
             pClassicData->IMU_Data.roll,
             pClassicData->IMU_Data.delta_roll,
-            dt, roll_stability_enabled, stand_up);
+            dt, roll_stability_enabled, stand_up, roll_travel_m);
 
     /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
     float leg_target_l = pClassicData->Target_Data.Target_LegLong +
@@ -110,10 +121,17 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     float leg_target_r = pClassicData->Target_Data.Target_LegLong -
                          roll_output.leg_length_delta_m;
     if (stand_up && !LEG_CONTROL_TEST_MODE) {
-        if (leg_target_l < leg_knob_stand_min_m) leg_target_l = leg_knob_stand_min_m;
-        if (leg_target_l > leg_knob_stand_max_m) leg_target_l = leg_knob_stand_max_m;
-        if (leg_target_r < leg_knob_stand_min_m) leg_target_r = leg_knob_stand_min_m;
-        if (leg_target_r > leg_knob_stand_max_m) leg_target_r = leg_knob_stand_max_m;
+        const auto clamp_leg_target = [&](float target_m) {
+            return fminf(fmaxf(target_m, leg_knob_stand_min_m), leg_knob_stand_max_m);
+        };
+        const float target_m = clamp_leg_target(leg_knob_target_m);
+        const float left_requested_m = target_m + roll_output.leg_length_delta_m;
+        const float right_requested_m = target_m - roll_output.leg_length_delta_m;
+        const float left_overflow_m = left_requested_m - clamp_leg_target(left_requested_m);
+        const float right_overflow_m = right_requested_m - clamp_leg_target(right_requested_m);
+        // 一侧到限位后，把该侧裁掉的修正以反向补到另一侧。
+        leg_target_l = clamp_leg_target(left_requested_m - right_overflow_m);
+        leg_target_r = clamp_leg_target(right_requested_m - left_overflow_m);
     } else {
         if (leg_target_l < leg_knob_full_min_m) leg_target_l = leg_knob_full_min_m;
         if (leg_target_l > leg_knob_full_max_m) leg_target_l = leg_knob_full_max_m;
@@ -175,9 +193,11 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
                                        leg_r_iout_limit_n, leg_r_out_limit, dt);
     leg_length_pid_l.Ki = leg_l_ki;
     leg_length_pid_r.Ki = leg_r_ki;
-    /* 仅已起身时保留原有 +10 N F0 预输出；未起身不再叠加写死的预输出。 */
-    const float stand_offset_l = (stand_up && !LEG_CONTROL_TEST_MODE) ? 10.0f : 0.0f;
-    const float stand_offset_r = (stand_up && !LEG_CONTROL_TEST_MODE) ? 10.0f : 0.0f;
+    length_pid_force_l_n = leg_l_out;
+    length_pid_force_r_n = leg_r_out;
+    /* 起身后按 18.46 kg 左右均分，单腿支撑偏置为 90.55 N。 */
+    const float stand_offset_l = (stand_up && !LEG_CONTROL_TEST_MODE) ? 60.55f : 0.0f;
+    const float stand_offset_r = (stand_up && !LEG_CONTROL_TEST_MODE) ? 60.55f : 0.0f;
     pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
             + stand_offset_l
             + roll_output.support_force_delta_n;

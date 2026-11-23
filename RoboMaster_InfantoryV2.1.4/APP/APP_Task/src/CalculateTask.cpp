@@ -593,7 +593,7 @@ void CaculateTask(void *pvParameters) {
                  * LEG_Data_Print         - 10 列：L0_L,L0_R,dL0_L,dL0_R,phi0_L,phi0_R,
                  *                         rawDphi0_L,rawDphi0_R,kfDphi0_L,kfDphi0_R
                  *                         （VMC车身系腿角：后摆正，不是地面系 theta）
-                 * LegLengthPID_Data_Print- 5 列：目标腿长,左L0,右L0,左F0,右F0（m,m,m,N,N）
+                 * LegLengthPID_Data_Print- 7 列：目标腿长,左L0,右L0,左F0,右F0,左纯PID,右纯PID
                  *                         （腿长环跟踪与输出力）
                  * IMU_Data_Print         - 6 列：roll,pitch,yaw,droll,dpitch,dyaw
                  *                         （已完成原始HI14轴映射：pitch低头正，yaw左转正）
@@ -607,9 +607,9 @@ void CaculateTask(void *pvParameters) {
                  * */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);           // 腿长/腿角/腿速
-                // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
+                 LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
                 // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
-                 State_Data_Print(pClassicData);          // LQR 全状态 + 左右轮端扭矩指令
+                // State_Data_Print(pClassicData);          // LQR 全状态 + 左右轮端扭矩指令
                 // LQR_State_Data_Print(pClassicData);         // LQR 误差 + 轮速 + Fw（震荡定位）
                 // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
                 xLastPrintTick = xNow;
@@ -808,25 +808,30 @@ void IMU_Data_Print(Classic_Data_t *pClassicData) {
 }
 
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {
-    /* FireWater 纯 CSV：目标L0、左L0、右L0、左F0、右F0；单位 m,m,m,N,N。 */
-    const float target = pClassicData->Target_Data.Target_LegLong;
-    const float values[5] = {
-        target,
+    /* FireWater CSV：目标L0、左L0、右L0、左F0、右F0、左纯PID、右纯PID。前3列 m，其余 N。 */
+    float pid_left_n, pid_right_n;
+    LegControl_GetLengthPidForce(&pid_left_n, &pid_right_n);
+    const float values[] = {
+        pClassicData->Target_Data.Target_LegLong,
         pClassicData->Leg_Data.L0_L,
         pClassicData->Leg_Data.L0_R,
         pClassicData->Contronller_Data.F0_L,
         pClassicData->Contronller_Data.F0_R,
+        pid_left_n,
+        pid_right_n,
     };
-    int milli[5];
-    for (uint32_t index = 0; index < 5U; ++index)
+    int milli[7];
+    for (uint32_t index = 0; index < 7U; ++index)
         milli[index] = (int)lroundf(values[index] * 1000.0f);
 
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
                milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
                milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
                milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
                milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
-               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000);
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
+               milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
+               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
 }
 
 void LQR_State_Data_Print(Classic_Data_t *pClassicData) {

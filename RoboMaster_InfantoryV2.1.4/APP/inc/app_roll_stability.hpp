@@ -8,8 +8,6 @@
 #define ROLL_ANGLE_LENGTH_PID_KP_M_PER_RAD        0.050f
 #define ROLL_ANGLE_LENGTH_PID_KI_M_PER_RAD_S      0.010f
 #define ROLL_ANGLE_LENGTH_PID_KD_M_S_PER_RAD      0.000f
-#define ROLL_ANGLE_LENGTH_PID_I_LIMIT_M           0.020f
-#define ROLL_ANGLE_LENGTH_PID_OUTPUT_LIMIT_M      0.020f
 
 /* roll 角速度环：输出左右腿 F0 支持力差。 */
 #define ROLL_RATE_FORCE_PID_ENABLE                 0
@@ -30,6 +28,7 @@ RollStabilityOutput_t RollStability_Update(float roll_rad,
                                            float roll_rate_rad_s,
                                            float dt_s,
                                            bool enabled,
-                                           bool stand_up);
+                                           bool stand_up,
+                                           float angle_travel_m);
 
 #endif
