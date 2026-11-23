@@ -32,7 +32,8 @@ void RollStability_Init(void) {
 RollStabilityOutput_t RollStability_Update(float roll_rad,
                                            float roll_rate_rad_s,
                                            float dt_s,
-                                           bool enabled) {
+                                           bool enabled,
+                                           bool stand_up) {
     RollStabilityOutput_t output = {};
     if (!enabled || !std::isfinite(roll_rad) ||
         !std::isfinite(roll_rate_rad_s) || !std::isfinite(dt_s) ||
@@ -42,23 +43,27 @@ RollStabilityOutput_t RollStability_Update(float roll_rad,
     }
 
 #if ROLL_ANGLE_LENGTH_PID_ENABLE
-    const float angle_error_rad = -roll_rad;
-    const float previous_angle_iout_m = s_angle_iout_m;
-    s_angle_iout_m += ROLL_ANGLE_LENGTH_PID_KI_M_PER_RAD_S *
-                      angle_error_rad * dt_s;
-    s_angle_iout_m = ClampSymmetric(
-            s_angle_iout_m, ROLL_ANGLE_LENGTH_PID_I_LIMIT_M);
+    if (stand_up) {
+        const float angle_error_rad = -roll_rad;
+        const float previous_angle_iout_m = s_angle_iout_m;
+        s_angle_iout_m += ROLL_ANGLE_LENGTH_PID_KI_M_PER_RAD_S *
+                          angle_error_rad * dt_s;
+        s_angle_iout_m = ClampSymmetric(
+                s_angle_iout_m, ROLL_ANGLE_LENGTH_PID_I_LIMIT_M);
 
-    const float angle_raw_m =
-            ROLL_ANGLE_LENGTH_PID_KP_M_PER_RAD * angle_error_rad +
-            s_angle_iout_m -
-            ROLL_ANGLE_LENGTH_PID_KD_M_S_PER_RAD * roll_rate_rad_s;
-    output.leg_length_delta_m = ClampSymmetric(
-            angle_raw_m, ROLL_ANGLE_LENGTH_PID_OUTPUT_LIMIT_M);
-    if (SaturationPushesSameDirection(
-            angle_raw_m, ROLL_ANGLE_LENGTH_PID_OUTPUT_LIMIT_M,
-            angle_error_rad)) {
-        s_angle_iout_m = previous_angle_iout_m;
+        const float angle_raw_m =
+                ROLL_ANGLE_LENGTH_PID_KP_M_PER_RAD * angle_error_rad +
+                s_angle_iout_m -
+                ROLL_ANGLE_LENGTH_PID_KD_M_S_PER_RAD * roll_rate_rad_s;
+        output.leg_length_delta_m = ClampSymmetric(
+                angle_raw_m, ROLL_ANGLE_LENGTH_PID_OUTPUT_LIMIT_M);
+        if (SaturationPushesSameDirection(
+                angle_raw_m, ROLL_ANGLE_LENGTH_PID_OUTPUT_LIMIT_M,
+                angle_error_rad)) {
+            s_angle_iout_m = previous_angle_iout_m;
+        }
+    } else {
+        s_angle_iout_m = 0.0f;
     }
 #else
     s_angle_iout_m = 0.0f;

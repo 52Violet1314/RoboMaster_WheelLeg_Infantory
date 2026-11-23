@@ -102,7 +102,7 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     const RollStabilityOutput_t roll_output = RollStability_Update(
             pClassicData->IMU_Data.roll,
             pClassicData->IMU_Data.delta_roll,
-            dt, roll_stability_enabled);
+            dt, roll_stability_enabled, stand_up);
 
     /* 腿长 PID。积分按输出限幅，避免长期悬空时累积。 */
     float leg_target_l = pClassicData->Target_Data.Target_LegLong +
