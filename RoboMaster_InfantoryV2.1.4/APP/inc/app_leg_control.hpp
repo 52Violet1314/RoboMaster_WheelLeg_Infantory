@@ -28,7 +28,7 @@
  * 起身状态机仍由 CalculateTask 维护；本模块只使用其本轮判定结果。 */
 void LegControl_Init(void);
 void LegControl_Update(Classic_Data_t *pClassicData, float dt,
-                       bool stand_up, bool leg_pid_enabled,
+                       bool stand_up, bool leg_pid_enabled, bool airborne,
                        int16_t leg_knob_channel, bool override_leg_target,
                        float override_leg_target_m, bool swing_pid_enable,
                        float swing_target_rad);

@@ -36,7 +36,7 @@ void LegControl_Init(void) {
 }
 
 void LegControl_Update(Classic_Data_t *pClassicData, float dt,
-                       bool stand_up, bool leg_pid_enabled,
+                       bool stand_up, bool leg_pid_enabled, bool airborne,
                        int16_t leg_knob_channel, bool override_leg_target,
                        float override_leg_target_m, bool swing_pid_enable,
                        float swing_target_rad) {
@@ -185,9 +185,11 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     leg_length_pid_r.Ki = leg_r_ki;
     length_pid_force_l_n = leg_l_out;
     length_pid_force_r_n = leg_r_out;
-    /* 起身后每腿叠加 54.55 N 的车身支撑偏置。 */
-    const float stand_offset_l = (stand_up && !LEG_CONTROL_TEST_MODE) ? 54.55f : 0.0f;
-    const float stand_offset_r = (stand_up && !LEG_CONTROL_TEST_MODE) ? 54.55f : 0.0f;
+    /* 双腿确认离地后暂停车重偏置，接地后恢复。 */
+    const bool body_weight_enabled = stand_up && !LEG_CONTROL_TEST_MODE &&
+                                     !airborne;
+    const float stand_offset_l = body_weight_enabled ? 54.55f : 0.0f;
+    const float stand_offset_r = body_weight_enabled ? 54.55f : 0.0f;
     pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
             + stand_offset_l
             + roll_output.support_force_delta_n;

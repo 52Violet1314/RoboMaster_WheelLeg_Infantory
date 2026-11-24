@@ -15,9 +15,9 @@
 #define GD_FN_FILTER_A          0.15f
 
 /* 离地/落地阈值（N）。先按“静态 Fn 的一半”预置，必须上板实测后改。 */
-#define GD_FN_OFF_THRESHOLD_N   15.0f
-/* 落地迟滞：必须回到 阈值*1.5 以上才认为重新触地 */
-#define GD_FN_ON_RATIO          1.5f
+#define GD_FN_OFF_THRESHOLD_N   30.0f
+/* 落地阈值独立设置，须高于离地阈值以形成迟滞。 */
+#define GD_FN_ON_THRESHOLD_N    50.0f
 
 /* 连续确认拍数（1ms 一拍） */
 #define GD_CONFIRM_OFF_TICKS    10U
@@ -136,8 +136,8 @@ float GroundDetection_Update(uint8_t side,
             st->cnt = 0U;
         }
     } else {
-        /* 当前判为离地：Fn 回到 阈值*1.5 以上并持续 M 拍 -> 触地 */
-        if (st->fn_filt > GD_FN_OFF_THRESHOLD_N * GD_FN_ON_RATIO) {
+        /* 当前判为离地：Fn 超过落地阈值并持续 M 拍 -> 触地 */
+        if (st->fn_filt > GD_FN_ON_THRESHOLD_N) {
             if (st->cnt < GD_CONFIRM_ON_TICKS) st->cnt++;
             if (st->cnt >= GD_CONFIRM_ON_TICKS) {
                 st->off_ground = 0U;

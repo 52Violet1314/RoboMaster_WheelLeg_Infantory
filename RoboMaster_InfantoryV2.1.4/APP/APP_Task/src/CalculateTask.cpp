@@ -521,6 +521,7 @@ void CaculateTask(void *pvParameters) {
         const float swing_target_rad = step_cmd.swing_target_rad;
 #endif
         LegControl_Update(pClassicData, cal_dt, stand_up, leg_pid_enabled,
+                          airborne_control_active,
                           remote_snapshot.leg_length_channel,
                           override_leg_target, override_leg_target_m,
                           swing_pid_enable, swing_target_rad);
@@ -643,7 +644,7 @@ float angle_to_rad(float degrees) { return degrees * (PI / 180.0f); }
 
 static void GroundDetection_Data_Print(const Classic_Data_t *data, bool active) {
     /* CSV: 检测门控, 左右样本有效, 左右离地, 双离地,
-     * 车身竖直加速度, 左右轮心加速度, 左右原始 Fn, 左右滤波 Fn。
+     * 车身竖直加速度, 左右轮心加速度, 左右原始 Fn, 左右滤波 Fn, 左右实际腿长(m)。
      * 加速度 m/s²（向下为正），力 N（地面对轮向上为正）。 */
     const float values[] = {
         data->IMU_Data.accel_v,
@@ -653,14 +654,16 @@ static void GroundDetection_Data_Print(const Classic_Data_t *data, bool active) 
         GroundDetection_GetRawFn(GD_SIDE_RIGHT),
         GroundDetection_GetFn(GD_SIDE_LEFT),
         GroundDetection_GetFn(GD_SIDE_RIGHT),
+        data->Leg_Data.L0_L,
+        data->Leg_Data.L0_R,
     };
-    int milli[7];
-    for (uint32_t index = 0; index < 7U; ++index) {
+    int milli[9];
+    for (uint32_t index = 0; index < 9U; ++index) {
         milli[index] = (int)lroundf(values[index] * 1000.0f);
     }
     uart_print("%u,%u,%u,%u,%u,%u,"
                "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
-               "%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
                (unsigned)active,
                (unsigned)GroundDetection_IsValid(GD_SIDE_LEFT),
                (unsigned)GroundDetection_IsValid(GD_SIDE_RIGHT),
@@ -673,7 +676,9 @@ static void GroundDetection_Data_Print(const Classic_Data_t *data, bool active) 
                milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
                milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
                milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
-               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
+               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000,
+               milli[7] < 0 ? '-' : ' ', abs(milli[7]) / 1000, abs(milli[7]) % 1000,
+               milli[8] < 0 ? '-' : ' ', abs(milli[8]) / 1000, abs(milli[8]) % 1000);
 }
 
 static void ControlHealth_Data_Print(bool imu_snapshot_updated,
