@@ -550,7 +550,7 @@ void CaculateTask(void *pvParameters) {
             const float fn_left = GroundDetection_Update(
                     GD_SIDE_LEFT,
                     pClassicData->Contronller_Data.F0_L,
-                    pClassicData->Contronller_Data.Tp_L + gravity_tp_l,
+                    pClassicData->Contronller_Data.Tp_L,
                     pClassicData->Leg_Data.L0_L,
                     pClassicData->Leg_Data.d_L0_L,
                     pClassicData->Leg_Data.dd_L0_L,
@@ -561,7 +561,7 @@ void CaculateTask(void *pvParameters) {
             const float fn_right = GroundDetection_Update(
                     GD_SIDE_RIGHT,
                     pClassicData->Contronller_Data.F0_R,
-                    pClassicData->Contronller_Data.Tp_R + gravity_tp_r,
+                    pClassicData->Contronller_Data.Tp_R,
                     pClassicData->Leg_Data.L0_R,
                     pClassicData->Leg_Data.d_L0_R,
                     pClassicData->Leg_Data.dd_L0_R,
