@@ -461,6 +461,11 @@ void CaculateTask(void *pvParameters) {
 #else
         const bool airborne_control_active = false;
 #endif
+        /* 双腿离地时以地面系竖直向下为目标；接地时使用腿长偏置表。 */
+        if (airborne_control_active) {
+            theta_L_ref = 0.0f;
+            theta_R_ref = 0.0f;
+        }
         const bool position_hold_enable =
                 leg_pid_enabled && lqr_enabled && stand_up &&
                 !airborne_control_active;
