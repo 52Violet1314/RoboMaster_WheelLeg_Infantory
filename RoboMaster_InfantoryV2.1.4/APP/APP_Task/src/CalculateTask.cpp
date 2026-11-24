@@ -248,6 +248,8 @@ static void VMC_ConvertLegFeedbackToWorldState(Classic_Data_t *data,
 
 void CaculateTask(void *pvParameters) {
     constexpr float kLqrEnableMaxLegLengthM = 0.200f;
+    constexpr float kAirborneForwardLegAngleRad = 0.17453293f; // 前摆 10°
+    float airborne_leg_target_rad = 0.0f;
     bool lqr_switch_previous = false;
     bool lqr_length_qualified = false;
     VMC_Kinematics_t vmc_kinematics;
@@ -482,10 +484,10 @@ void CaculateTask(void *pvParameters) {
 #else
         const bool airborne_control_active = false;
 #endif
-        /* 双腿离地时以地面系竖直向下为目标；接地时使用腿长偏置表。 */
+        /* 空中保持离地瞬间选定的地面系腿角；接地使用腿长偏置表。 */
         if (airborne_control_active) {
-            theta_L_ref = 0.0f;
-            theta_R_ref = 0.0f;
+            theta_L_ref = airborne_leg_target_rad;
+            theta_R_ref = airborne_leg_target_rad;
         }
         const bool position_hold_enable =
                 leg_pid_enabled && lqr_enabled && stand_up &&
@@ -579,6 +581,7 @@ void CaculateTask(void *pvParameters) {
          * 迟滞及连续拍确认；不再用上一轮命令或重复叠加重力补偿。 */
 #if GROUND_DETECTION_ENABLE || GROUND_DETECTION_OBSERVE_ENABLE
         if (ground_detection_active) {
+            const bool was_airborne = GroundDetection_IsAirborne() != 0U;
             const float fn_left = GroundDetection_Update(
                     GD_SIDE_LEFT,
                     pClassicData->Contronller_Data.F0_L,
@@ -603,6 +606,12 @@ void CaculateTask(void *pvParameters) {
                     pClassicData->States_Data.dd_theta_R);
             (void)fn_left;
             (void)fn_right;
+            if (!was_airborne && GroundDetection_IsAirborne() != 0U) {
+                const float takeoff_velocity_m_s =
+                        0.5f * (Wheel_Kalman_L.x[1] + Wheel_Kalman_R.x[1]);
+                airborne_leg_target_rad = takeoff_velocity_m_s > 0.0f
+                        ? kAirborneForwardLegAngleRad : 0.0f;
+            }
         } else {
             /* 工作角外不运行、不累计确认时间，也不保留旧离地状态。 */
             GroundDetection_Reset();
