@@ -21,7 +21,7 @@ typedef struct {
     float last_pitch;
     float last_yaw;
     float gyro[3];
-    float accel[3];
+    float accel[3];  // HI91 原始加速度，单位 g
     float accel_v;
     float accel_x;
     float accel_h;

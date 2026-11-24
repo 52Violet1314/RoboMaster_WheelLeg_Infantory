@@ -595,7 +595,7 @@ void CaculateTask(void *pvParameters) {
                  *                         （VMC车身系腿角：后摆正，不是地面系 theta）
                  * LegLengthPID_Data_Print- 7 列：目标腿长,左L0,右L0,左F0,右F0,左纯PID,右纯PID
                  *                         （腿长环跟踪与输出力）
-                 * IMU_Data_Print         - 6 列：roll,pitch,yaw,droll,dpitch,dyaw
+                 * IMU_Data_Print         - 10 列：roll,pitch,yaw,droll,dpitch,dyaw,ax,ay,az,accel_v
                  *                         （已完成原始HI14轴映射：pitch低头正，yaw左转正）
                  * State_Data_Print       - 12 列：10 个 LQR 状态 + 左右轮端扭矩指令 (N·m)
                  * LQR_State_Data_Print   - 14 列：X,dX,yaw,dyaw,thetaL,dthetaL,thetaR,dthetaR,
@@ -607,8 +607,8 @@ void CaculateTask(void *pvParameters) {
                  * */
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);           // 腿长/腿角/腿速
-                 LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
-                // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
+                // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
+                 IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 左右轮端扭矩指令
                 // LQR_State_Data_Print(pClassicData);         // LQR 误差 + 轮速 + Fw（震荡定位）
                 // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
@@ -787,24 +787,34 @@ void Motor_Data_Print(Classic_Data_t *pClassicData) {
 }
 
 void IMU_Data_Print(Classic_Data_t *pClassicData) {
-    /* FireWater: 纯 CSV，依次为 roll,pitch,yaw,droll,dpitch,dyaw。
+    /* FireWater CSV: roll,pitch,yaw,droll,dpitch,dyaw,ax,ay,az,accel_v。
      * 这是安装轴映射后的控制数据，不是 HI14 原始字段：pitch/ dpitch
-     * 为低头正；yaw/dyaw 不取反，实车左转正。 */
-    const int value_milli[6] = {
+     * 为低头正；yaw/dyaw 不取反，实车左转正。
+     * ax/ay/az 为 HI91 原始三轴加速度（g）；accel_v 为旋转并减重力后的竖直加速度（m/s²）。 */
+    const int value_milli[10] = {
         (int)lroundf(pClassicData->IMU_Data.roll * 1000.0f),
         (int)lroundf(pClassicData->IMU_Data.pitch * 1000.0f),
         (int)lroundf(pClassicData->IMU_Data.yaw * 1000.0f),
         (int)lroundf(pClassicData->IMU_Data.delta_roll * 1000.0f),
         (int)lroundf(pClassicData->IMU_Data.delta_pitch * 1000.0f),
         (int)lroundf(pClassicData->IMU_Data.delta_yaw * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.accel[0] * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.accel[1] * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.accel[2] * 1000.0f),
+        (int)lroundf(pClassicData->IMU_Data.accel_v * 1000.0f),
     };
-    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+    uart_print("%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
                value_milli[0] < 0 ? '-' : ' ', abs(value_milli[0]) / 1000, abs(value_milli[0]) % 1000,
                value_milli[1] < 0 ? '-' : ' ', abs(value_milli[1]) / 1000, abs(value_milli[1]) % 1000,
                value_milli[2] < 0 ? '-' : ' ', abs(value_milli[2]) / 1000, abs(value_milli[2]) % 1000,
                value_milli[3] < 0 ? '-' : ' ', abs(value_milli[3]) / 1000, abs(value_milli[3]) % 1000,
                value_milli[4] < 0 ? '-' : ' ', abs(value_milli[4]) / 1000, abs(value_milli[4]) % 1000,
-               value_milli[5] < 0 ? '-' : ' ', abs(value_milli[5]) / 1000, abs(value_milli[5]) % 1000);
+               value_milli[5] < 0 ? '-' : ' ', abs(value_milli[5]) / 1000, abs(value_milli[5]) % 1000,
+               value_milli[6] < 0 ? '-' : ' ', abs(value_milli[6]) / 1000, abs(value_milli[6]) % 1000,
+               value_milli[7] < 0 ? '-' : ' ', abs(value_milli[7]) / 1000, abs(value_milli[7]) % 1000,
+               value_milli[8] < 0 ? '-' : ' ', abs(value_milli[8]) / 1000, abs(value_milli[8]) % 1000,
+               value_milli[9] < 0 ? '-' : ' ', abs(value_milli[9]) / 1000, abs(value_milli[9]) % 1000);
 }
 
 void LegLengthPID_Data_Print(Classic_Data_t *pClassicData) {

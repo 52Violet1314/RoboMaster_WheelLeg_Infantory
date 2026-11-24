@@ -11,7 +11,7 @@
 #include "app_motor.h"
 #include "tim.h"
 #include "Hipnuv_hi14.h"
-#define GRAVITY 9.81f  // 重力加速度 (m/s²)
+#define GRAVITY 9.80665f  // 标准重力加速度 (m/s²)
 
 void HI14_ApplyURFR24Configuration(void) {
     /* HI14 用户坐标：X 向右、Y 向前、Z 向上。配置命令在重启后加载。 */
@@ -52,7 +52,7 @@ void app_INSTask(void *pvParameters) {
                 imu_snapshot.data.gyro[0] = Hipnuc_HI14.hi14data.gyr[0] * deg_to_rad;
                 imu_snapshot.data.gyro[1] = Hipnuc_HI14.hi14data.gyr[1] * deg_to_rad;
                 imu_snapshot.data.gyro[2] = Hipnuc_HI14.hi14data.gyr[2] * deg_to_rad;
-                /* HI14 加速度 (m/s²) 直接存储 */
+                /* HI91 加速度原始单位为 g，保留原值供查看。 */
                 imu_snapshot.data.accel[0] = Hipnuc_HI14.hi14data.acc[0];
                 imu_snapshot.data.accel[1] = Hipnuc_HI14.hi14data.acc[1];
                 imu_snapshot.data.accel[2] = Hipnuc_HI14.hi14data.acc[2];
@@ -97,9 +97,10 @@ void app_INSTask(void *pvParameters) {
         float sr = arm_sin_f32(imu_snapshot.data.roll);
         float cr = arm_cos_f32(imu_snapshot.data.roll);
 
-        float ax = imu_snapshot.data.accel[0];
-        float ay = imu_snapshot.data.accel[1];
-        float az = imu_snapshot.data.accel[2];
+        /* HI91 以 g 输出，旋转和去重力前统一转换为 m/s²。 */
+        float ax = imu_snapshot.data.accel[0] * GRAVITY;
+        float ay = imu_snapshot.data.accel[1] * GRAVITY;
+        float az = imu_snapshot.data.accel[2] * GRAVITY;
 
         /* world = Ry(pitch) * Rx(roll) * body */
         float wx =  cp * ax + sp * sr * ay + sp * cr * az;
