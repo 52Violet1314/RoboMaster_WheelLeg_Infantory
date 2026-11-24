@@ -17,11 +17,11 @@
 /* 离地/落地阈值（N）。先按“静态 Fn 的一半”预置，必须上板实测后改。 */
 #define GD_FN_OFF_THRESHOLD_N   30.0f
 /* 落地阈值独立设置，须高于离地阈值以形成迟滞。 */
-#define GD_FN_ON_THRESHOLD_N    50.0f
+#define GD_FN_ON_THRESHOLD_N    35.0f
 
 /* 连续确认拍数（1ms 一拍） */
 #define GD_CONFIRM_OFF_TICKS    10U
-#define GD_CONFIRM_ON_TICKS     15U
+#define GD_CONFIRM_ON_TICKS     10U
 
 /* ==================== 内部状态 ==================== */
 typedef struct {
