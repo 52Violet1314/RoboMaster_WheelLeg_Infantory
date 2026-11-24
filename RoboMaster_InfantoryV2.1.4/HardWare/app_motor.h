@@ -19,7 +19,7 @@
 #define V_MAX_RAD_S_3519 45.553f
 #define T_MAX_NM_3519 7.8f
 #define OUTPUT_V_MAX_RAD_S_3519 41.364305f
-#define OUTPUT_T_MAX_NM_3519 3.5f
+#define OUTPUT_T_MAX_NM_3519 7.8f
 
 /* DM-J3507-2EC (24 V)：MIT 映射使用手册的最大物理范围；正常指令
  * 只允许额定速度/额定扭矩，避免将峰值能力作为持续工作点。 */

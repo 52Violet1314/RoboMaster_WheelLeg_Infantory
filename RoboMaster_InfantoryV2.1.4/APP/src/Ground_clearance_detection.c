@@ -21,7 +21,7 @@
 
 /* 连续确认拍数（1ms 一拍） */
 #define GD_CONFIRM_OFF_TICKS    10U
-#define GD_CONFIRM_ON_TICKS     10U
+#define GD_CONFIRM_ON_TICKS     5U
 
 /* ==================== 内部状态 ==================== */
 typedef struct {

@@ -248,7 +248,7 @@ static void VMC_ConvertLegFeedbackToWorldState(Classic_Data_t *data,
 
 void CaculateTask(void *pvParameters) {
     constexpr float kLqrEnableMaxLegLengthM = 0.200f;
-    constexpr float kAirborneForwardLegAngleRad = 0.17453293f; // 前摆 10°
+    constexpr float kAirborneForwardLegAngleRad = 0.22689280f; // 前摆 13°
     float airborne_leg_target_rad = 0.0f;
     bool lqr_switch_previous = false;
     bool lqr_length_qualified = false;
