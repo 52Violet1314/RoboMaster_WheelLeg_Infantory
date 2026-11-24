@@ -26,17 +26,20 @@
 /* ==================== 内部状态 ==================== */
 typedef struct {
     float   fn_filt;
+    float   fn_raw;
+    float   wheel_accel;
     uint16_t cnt;
     uint8_t  off_ground;
     uint8_t  init;
+    uint8_t  valid;
 } GroundDetection_State_t;
 
 static GroundDetection_State_t s_state[2];
 
 /* ==================== 纯观测器 ==================== */
-float Ground_Clearance_Detection(float f0_without_spring_n, float tp_vmc_nm, float L0,
+static float Ground_Calculate(float f0_without_spring_n, float tp_vmc_nm, float L0,
                                  float d_L0, float dd_L0, float dd_zm,
-                                 float phi, float d_phi, float dd_phi)
+                                 float phi, float d_phi, float dd_phi, float *wheel_accel)
 {
     if (!isfinite(f0_without_spring_n) || !isfinite(tp_vmc_nm) ||
         !isfinite(L0) || !isfinite(d_L0) || !isfinite(dd_L0) ||
@@ -59,10 +62,19 @@ float Ground_Clearance_Detection(float f0_without_spring_n, float tp_vmc_nm, flo
                        - 2.0f * d_L0 * d_phi * sin_phi
                        - L0 * dd_phi * sin_phi
                        - L0 * d_phi * d_phi * cos_phi;
+    if (wheel_accel != NULL) *wheel_accel = dd_z_w;
 
     /* N 为地面对轮子的向上反力，竖直向下为正：
      * m*a_down = m*g + P_down - N。 */
     return p_down_n + GD_MASS_WHEEL_KG * (GD_G - dd_z_w);
+}
+
+float Ground_Clearance_Detection(float f0_without_spring_n, float tp_vmc_nm, float L0,
+                                 float d_L0, float dd_L0, float dd_zm,
+                                 float phi, float d_phi, float dd_phi)
+{
+    return Ground_Calculate(f0_without_spring_n, tp_vmc_nm, L0,
+                            d_L0, dd_L0, dd_zm, phi, d_phi, dd_phi, NULL);
 }
 
 /* ==================== 带状态检测 ==================== */
@@ -80,6 +92,7 @@ float GroundDetection_Update(uint8_t side,
         !isfinite(dd_phi) || L0 <= 0.0f) {
         /* 无效样本不允许污染滤波器，也不推进连续确认计数。 */
         st->cnt = 0U;
+        st->valid = 0U;
         return st->init ? st->fn_filt : 0.0f;
     }
 
@@ -94,9 +107,11 @@ float GroundDetection_Update(uint8_t side,
     const float spring_force_n = -LegForceCompensation_GetFittedF0(L0);
     const float f0_without_spring_n = f0_command_n + spring_force_n;
 
-    const float fn_raw = Ground_Clearance_Detection(f0_without_spring_n, tp_vmc_nm, L0,
+    const float fn_raw = Ground_Calculate(f0_without_spring_n, tp_vmc_nm, L0,
                                                     d_L0, dd_L0, dd_zm,
-                                                    phi, d_phi, dd_phi);
+                                                    phi, d_phi, dd_phi, &st->wheel_accel);
+    st->fn_raw = fn_raw;
+    st->valid = 1U;
 
     if (!st->init) {
         st->fn_filt = fn_raw;
@@ -140,6 +155,18 @@ float GroundDetection_GetFn(uint8_t side) {
     return (side > 1U) ? 0.0f : s_state[side].fn_filt;
 }
 
+float GroundDetection_GetRawFn(uint8_t side) {
+    return (side > 1U) ? 0.0f : s_state[side].fn_raw;
+}
+
+float GroundDetection_GetWheelAccel(uint8_t side) {
+    return (side > 1U) ? 0.0f : s_state[side].wheel_accel;
+}
+
+uint8_t GroundDetection_IsValid(uint8_t side) {
+    return (side > 1U) ? 0U : s_state[side].valid;
+}
+
 uint8_t GroundDetection_IsOffGround(uint8_t side) {
     return (side > 1U) ? 0U : s_state[side].off_ground;
 }
@@ -152,8 +179,11 @@ uint8_t GroundDetection_IsAirborne(void) {
 void GroundDetection_Reset(void) {
     for (uint8_t i = 0U; i < 2U; ++i) {
         s_state[i].fn_filt = 0.0f;
+        s_state[i].fn_raw = 0.0f;
+        s_state[i].wheel_accel = 0.0f;
         s_state[i].cnt = 0U;
         s_state[i].off_ground = 0U;
         s_state[i].init = 0U;
+        s_state[i].valid = 0U;
     }
 }

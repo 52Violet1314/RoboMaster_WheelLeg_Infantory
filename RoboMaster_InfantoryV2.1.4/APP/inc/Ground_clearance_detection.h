@@ -4,7 +4,9 @@
 #include <stdint.h>
 
 /* 控制离地观测器及其并行控制覆盖是否在 CalculateTask 中运行。 */
-#define GROUND_DETECTION_ENABLE  0
+#define GROUND_DETECTION_ENABLE  1
+/* 仅运行观测和串口打印，不启用离地控制覆盖。 */
+#define GROUND_DETECTION_OBSERVE_ENABLE  1
 
 /* 双腿确认离地后的腿长目标。仅在起身工作角内允许离地状态接管。 */
 #define GROUND_DETECTION_LEG_TARGET_M  0.350f
@@ -37,6 +39,9 @@ float GroundDetection_Update(uint8_t side,
 
 /* 查询接口 */
 float   GroundDetection_GetFn(uint8_t side);        /* 滤波后 Fn(N) */
+float   GroundDetection_GetRawFn(uint8_t side);     /* 滤波前 Fn(N) */
+float   GroundDetection_GetWheelAccel(uint8_t side); /* 轮心竖直加速度，向下为正 m/s² */
+uint8_t GroundDetection_IsValid(uint8_t side);      /* 最近一拍输入有效 */
 uint8_t GroundDetection_IsOffGround(uint8_t side);  /* 1 = 该腿离地 */
 uint8_t GroundDetection_IsAirborne(void);           /* 1 = 双腿都离地 */
 void    GroundDetection_Reset(void);

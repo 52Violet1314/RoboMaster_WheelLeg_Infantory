@@ -59,6 +59,7 @@ void LEG_Data_Print(Classic_Data_t *pClassicData);
 void Motor_Data_Print(Classic_Data_t *pClassicData);
 
 void IMU_Data_Print(Classic_Data_t *pClassicData);
+static void GroundDetection_Data_Print(const Classic_Data_t *data, bool active);
 
 void State_Data_Print(Classic_Data_t *pClassicData);
 
@@ -441,7 +442,7 @@ void CaculateTask(void *pvParameters) {
         const bool lqr_enabled = !LEG_CONTROL_TEST_MODE && lqr_switch_enabled &&
                                  step_cmd.allow_lqr;
         const bool leg_pid_enabled = total_enable;
-#if GROUND_DETECTION_ENABLE
+#if GROUND_DETECTION_ENABLE || GROUND_DETECTION_OBSERVE_ENABLE
         /* 离地检测只在正常起身工作角内运行。角度仅作为运行门限；真正的
          * 离地判据仍是左右腿各自的法向力 Fn 及原有连续确认时间。 */
         const bool ground_detection_active =
@@ -450,9 +451,13 @@ void CaculateTask(void *pvParameters) {
                  STAND_UP_ENTER_ANGLE_ABS_RAD) &&
                 (fabsf(pClassicData->States_Data.theta_R) <
                  STAND_UP_ENTER_ANGLE_ABS_RAD);
+#if GROUND_DETECTION_ENABLE
         const bool airborne_control_active =
                 ground_detection_active &&
                 (GroundDetection_IsAirborne() != 0U);
+#else
+        const bool airborne_control_active = false;
+#endif
 #else
         const bool airborne_control_active = false;
 #endif
@@ -545,7 +550,7 @@ void CaculateTask(void *pvParameters) {
         /* 离地检测使用本轮最终 F0 与真正送入 VMC 的 Tp。
          * GroundDetection_Update 内部只剔除弹簧内部抵消项，并完成滤波、
          * 迟滞及连续拍确认；不再用上一轮命令或重复叠加重力补偿。 */
-#if GROUND_DETECTION_ENABLE
+#if GROUND_DETECTION_ENABLE || GROUND_DETECTION_OBSERVE_ENABLE
         if (ground_detection_active) {
             const float fn_left = GroundDetection_Update(
                     GD_SIDE_LEFT,
@@ -577,10 +582,12 @@ void CaculateTask(void *pvParameters) {
         }
 
         /* 确认离地当拍立即禁止轮毂；下一拍 LQR 仅使用腿角及角速度误差。 */
+#if GROUND_DETECTION_ENABLE
         if (ground_detection_active && GroundDetection_IsAirborne()) {
             pClassicData->Contronller_Data.Fw_L = 0.0f;
             pClassicData->Contronller_Data.Fw_R = 0.0f;
         }
+#endif
 #endif
 
         {
@@ -608,7 +615,10 @@ void CaculateTask(void *pvParameters) {
                 // Motor_Data_Print(pClassicData);          // 四髋电机角度/速度 + 左右轮速
                 // LEG_Data_Print(pClassicData);           // 腿长/腿角/腿速
                 // LegLengthPID_Data_Print(pClassicData);   // 腿长PID跟踪
-                 IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
+                // IMU_Data_Print(pClassicData);            // IMU 姿态与加速度
+#if GROUND_DETECTION_ENABLE || GROUND_DETECTION_OBSERVE_ENABLE
+                GroundDetection_Data_Print(pClassicData, ground_detection_active);
+#endif
                 // State_Data_Print(pClassicData);          // LQR 全状态 + 左右轮端扭矩指令
                 // LQR_State_Data_Print(pClassicData);         // LQR 误差 + 轮速 + Fw（震荡定位）
                 // Kalman_Data_Print(pClassicData, cal_dt);  // KF 输入/输出 + K 实际纵向两列
@@ -630,6 +640,41 @@ void CaculateTask(void *pvParameters) {
  * @return float 转换后的弧度值
  */
 float angle_to_rad(float degrees) { return degrees * (PI / 180.0f); }
+
+static void GroundDetection_Data_Print(const Classic_Data_t *data, bool active) {
+    /* CSV: 检测门控, 左右样本有效, 左右离地, 双离地,
+     * 车身竖直加速度, 左右轮心加速度, 左右原始 Fn, 左右滤波 Fn。
+     * 加速度 m/s²（向下为正），力 N（地面对轮向上为正）。 */
+    const float values[] = {
+        data->IMU_Data.accel_v,
+        GroundDetection_GetWheelAccel(GD_SIDE_LEFT),
+        GroundDetection_GetWheelAccel(GD_SIDE_RIGHT),
+        GroundDetection_GetRawFn(GD_SIDE_LEFT),
+        GroundDetection_GetRawFn(GD_SIDE_RIGHT),
+        GroundDetection_GetFn(GD_SIDE_LEFT),
+        GroundDetection_GetFn(GD_SIDE_RIGHT),
+    };
+    int milli[7];
+    for (uint32_t index = 0; index < 7U; ++index) {
+        milli[index] = (int)lroundf(values[index] * 1000.0f);
+    }
+    uart_print("%u,%u,%u,%u,%u,%u,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d,%c%d.%03d,"
+               "%c%d.%03d,%c%d.%03d,%c%d.%03d\r\n",
+               (unsigned)active,
+               (unsigned)GroundDetection_IsValid(GD_SIDE_LEFT),
+               (unsigned)GroundDetection_IsValid(GD_SIDE_RIGHT),
+               (unsigned)GroundDetection_IsOffGround(GD_SIDE_LEFT),
+               (unsigned)GroundDetection_IsOffGround(GD_SIDE_RIGHT),
+               (unsigned)GroundDetection_IsAirborne(),
+               milli[0] < 0 ? '-' : ' ', abs(milli[0]) / 1000, abs(milli[0]) % 1000,
+               milli[1] < 0 ? '-' : ' ', abs(milli[1]) / 1000, abs(milli[1]) % 1000,
+               milli[2] < 0 ? '-' : ' ', abs(milli[2]) / 1000, abs(milli[2]) % 1000,
+               milli[3] < 0 ? '-' : ' ', abs(milli[3]) / 1000, abs(milli[3]) % 1000,
+               milli[4] < 0 ? '-' : ' ', abs(milli[4]) / 1000, abs(milli[4]) % 1000,
+               milli[5] < 0 ? '-' : ' ', abs(milli[5]) / 1000, abs(milli[5]) % 1000,
+               milli[6] < 0 ? '-' : ' ', abs(milli[6]) / 1000, abs(milli[6]) % 1000);
+}
 
 static void ControlHealth_Data_Print(bool imu_snapshot_updated,
                                      bool remote_snapshot_updated,
