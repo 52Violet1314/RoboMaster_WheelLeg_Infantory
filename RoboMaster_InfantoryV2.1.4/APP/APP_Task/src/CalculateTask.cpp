@@ -247,6 +247,9 @@ static void VMC_ConvertLegFeedbackToWorldState(Classic_Data_t *data,
 }
 
 void CaculateTask(void *pvParameters) {
+    constexpr float kLqrEnableMaxLegLengthM = 0.200f;
+    bool lqr_switch_previous = false;
+    bool lqr_length_qualified = false;
     VMC_Kinematics_t vmc_kinematics;
     Classic_Data_t *pClassicData = (Classic_Data_t *) pvParameters;
     LegControl_Init();
@@ -311,6 +314,12 @@ void CaculateTask(void *pvParameters) {
         pClassicData->Target_Data.Target_Gyro_Speed = remote_snapshot.target_gyro_speed;
         pClassicData->Target_Data.gyro_mode_enable = remote_snapshot.gyro_mode_enable;
         pClassicData->Contronller_Data.total_enable = remote_snapshot.total_enable;
+        const bool lqr_switch_now = remote_snapshot.lqr_enable != 0U;
+        const bool lqr_switch_rising = lqr_switch_now && !lqr_switch_previous;
+        lqr_switch_previous = lqr_switch_now;
+        if (!lqr_switch_now || pClassicData->Contronller_Data.total_enable == 0U) {
+            lqr_length_qualified = false;
+        }
         /*
          * 对前向命令先做统一死区，再供速度环与位置保持共同使用。只在
          * PositionHold 内判断会造成 X_pos 已锁定、d_x_err 却继续追逐
@@ -346,6 +355,7 @@ void CaculateTask(void *pvParameters) {
                                  motor_snapshot_updated, motor_health.motor_feedback_fault,
                                  motor_health.hip_driver_fault, motor_snapshot);
         if (motor_health.motor_feedback_fault || ControlInputs_HaveTimeout()) {
+            lqr_length_qualified = false;
             /* 同一段电机故障只尝试恢复一次，不能在 1 ms 控制周期反复刷使能帧。 */
             if (motor_health.motor_feedback_fault && !motor_fault_reenable_sent) {
                 ChassisMotors_RecoverFromFeedbackFault();
@@ -408,6 +418,16 @@ void CaculateTask(void *pvParameters) {
                           pClassicData->States_Data.theta_R);
         const bool total_enable = (remote_snapshot.total_enable != 0U);
         const bool lqr_switch_enabled = (remote_snapshot.lqr_enable != 0U);
+        /* 仅开关上升沿检查实际腿长；不合格时须关闭开关后重新使能。 */
+        if (lqr_switch_rising && total_enable &&
+            isfinite(pClassicData->Leg_Data.L0_L) &&
+            isfinite(pClassicData->Leg_Data.L0_R) &&
+            pClassicData->Leg_Data.L0_L > 0.0f &&
+            pClassicData->Leg_Data.L0_R > 0.0f &&
+            pClassicData->Leg_Data.L0_L < kLqrEnableMaxLegLengthM &&
+            pClassicData->Leg_Data.L0_R < kLqrEnableMaxLegLengthM) {
+            lqr_length_qualified = true;
+        }
 #if STEP_CLIMB_CONTROL_ENABLE
         const bool step_detection_enabled = (remote_snapshot.step_climb_enable != 0U);
         const StepClimbCommand_t step_cmd = StepClimb_Update(
@@ -440,6 +460,7 @@ void CaculateTask(void *pvParameters) {
         theta_R_ref = LegAngleTarget_GetTheta(pClassicData->Leg_Data.L0_R);
 
         const bool lqr_enabled = !LEG_CONTROL_TEST_MODE && lqr_switch_enabled &&
+                                 lqr_length_qualified &&
                                  step_cmd.allow_lqr;
         const bool leg_pid_enabled = total_enable;
 #if GROUND_DETECTION_ENABLE || GROUND_DETECTION_OBSERVE_ENABLE
@@ -475,7 +496,7 @@ void CaculateTask(void *pvParameters) {
                 position_hold_enable);
         ChassisYawState_Update(pClassicData, position_hold_enable);
 
-        /* LQR 仅由遥控成品开关 lqr_enable 控制，并用左右实际腿长均值查表。 */
+        /* LQR 使能需满足腿长启动保护，并用左右实际腿长均值查表。 */
         if (lqr_enabled) {
             const float average_leg_length =
                     (pClassicData->Leg_Data.L0_L + pClassicData->Leg_Data.L0_R) * 0.5f;
