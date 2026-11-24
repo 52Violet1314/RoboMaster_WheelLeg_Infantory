@@ -13,8 +13,8 @@
  * I_OUTPUT_LIMIT 是积分“输出项”的限幅（N），不是 Err_Int 内部的 m·s。
  * 左右腿使用同一组参数。 */
 #define LEG_LENGTH_PID_KP                 600.0f  // N/m
-#define LEG_LENGTH_PID_KI                 250.0f  // N/(m·s)
-#define LEG_LENGTH_PID_KD                   1.0f  // N·s/m，乘负的实际腿长速度 (m/s)
+#define LEG_LENGTH_PID_KI                 300.0f  // N/(m·s)
+#define LEG_LENGTH_PID_KD                   70.0f  // N·s/m，乘负的实际腿长速度 (m/s)
 #define LEG_LENGTH_PID_DEADBAND_M           0.0001f
 #define LEG_LENGTH_PID_I_OUTPUT_LIMIT_N     20.0f
 #define LEG_LENGTH_PID_OUTPUT_LIMIT_N      100.0f

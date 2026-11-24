@@ -29,7 +29,8 @@ void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                              K_Fixed_Leg_t gain,
                              float theta_ref, float d_theta_ref,
                              float theta_l_ref, float d_theta_l_ref,
-                             float theta_r_ref, float d_theta_r_ref);
+                             float theta_r_ref, float d_theta_r_ref,
+                             bool airborne_leg_only = false);
 
 /* 仅限制 LQR 的 Fw_L/Fw_R；Tp 由 VMC 模块作为虚拟腿力矩统一限幅。 */
 void LQR_LimitWheelForces(Classic_Data_t *pClassicData);

@@ -475,7 +475,8 @@ void CaculateTask(void *pvParameters) {
             LQR_K_CalculateWithGain(pClassicData, scheduled_gain,
                                     theta_ref, d_theta_ref,
                                     theta_L_ref, d_theta_L_ref,
-                                    theta_R_ref, d_theta_R_ref);
+                                    theta_R_ref, d_theta_R_ref,
+                                    airborne_control_active);
         }
         /* LQR 自己负责不经 VMC 的轮端虚拟力 Fw 限幅。 */
         LQR_LimitWheelForces(pClassicData);
@@ -575,8 +576,7 @@ void CaculateTask(void *pvParameters) {
             GroundDetection_Reset();
         }
 
-        /* 双腿均确认离地时只禁止轮毂扭矩输出。LQR 本身继续计算，腿长 PID、
-         * 气弹簧补偿、腿重力补偿及两套 roll 补偿均保持原运行条件。 */
+        /* 确认离地当拍立即禁止轮毂；下一拍 LQR 仅使用腿角及角速度误差。 */
         if (ground_detection_active && GroundDetection_IsAirborne()) {
             pClassicData->Contronller_Data.Fw_L = 0.0f;
             pClassicData->Contronller_Data.Fw_R = 0.0f;

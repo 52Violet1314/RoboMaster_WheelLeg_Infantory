@@ -5,9 +5,9 @@
 
 /* roll 角度环：输出左右腿长目标差。单位为 rad、m、s。 */
 #define ROLL_ANGLE_LENGTH_PID_ENABLE              1
-#define ROLL_ANGLE_LENGTH_PID_KP_M_PER_RAD        0.300f
-#define ROLL_ANGLE_LENGTH_PID_KI_M_PER_RAD_S      0.090f
-#define ROLL_ANGLE_LENGTH_PID_KD_M_S_PER_RAD      0.000f
+#define ROLL_ANGLE_LENGTH_PID_KP_M_PER_RAD        0.700f
+#define ROLL_ANGLE_LENGTH_PID_KI_M_PER_RAD_S      0.200f
+#define ROLL_ANGLE_LENGTH_PID_KD_M_S_PER_RAD      0.080f
 
 /* roll 角速度环：输出左右腿 F0 支持力差。 */
 #define ROLL_RATE_FORCE_PID_ENABLE                 0

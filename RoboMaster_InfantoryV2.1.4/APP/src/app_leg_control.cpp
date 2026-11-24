@@ -185,9 +185,9 @@ void LegControl_Update(Classic_Data_t *pClassicData, float dt,
     leg_length_pid_r.Ki = leg_r_ki;
     length_pid_force_l_n = leg_l_out;
     length_pid_force_r_n = leg_r_out;
-    /* 起身后按 18.46 kg 左右均分，单腿支撑偏置为 90.55 N。 */
-    const float stand_offset_l = (stand_up && !LEG_CONTROL_TEST_MODE) ? 60.55f : 0.0f;
-    const float stand_offset_r = (stand_up && !LEG_CONTROL_TEST_MODE) ? 60.55f : 0.0f;
+    /* 起身后每腿叠加 54.55 N 的车身支撑偏置。 */
+    const float stand_offset_l = (stand_up && !LEG_CONTROL_TEST_MODE) ? 54.55f : 0.0f;
+    const float stand_offset_r = (stand_up && !LEG_CONTROL_TEST_MODE) ? 54.55f : 0.0f;
     pClassicData->Contronller_Data.F0_L = leg_l_out + spring_preload_f0_l
             + stand_offset_l
             + roll_output.support_force_delta_n;

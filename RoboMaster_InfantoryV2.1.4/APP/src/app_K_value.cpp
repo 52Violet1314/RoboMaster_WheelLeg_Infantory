@@ -411,7 +411,8 @@ void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
                              K_Fixed_Leg_t gain,
                              float theta_ref, float d_theta_ref,
                              float theta_l_ref, float d_theta_l_ref,
-                             float theta_r_ref, float d_theta_r_ref) {
+                             float theta_r_ref, float d_theta_r_ref,
+                             bool airborne_leg_only) {
     const float x_pos_lqr = fminf(fmaxf(pClassicData->States_Data.X_pos, -4.00f), 4.00f);
     /* K 的反馈向量。除 yaw 两项外，均在此按“当前 - 参考”构造：
      * theta_L/R 是地面系（前摆正）；最后 pitch 两项额外取负，是为了
@@ -425,13 +426,17 @@ void LQR_K_CalculateWithGain(Classic_Data_t *pClassicData,
         -(pClassicData->States_Data.theta - theta_ref),
         -(pClassicData->States_Data.d_theta - d_theta_ref)
     };
+    if (airborne_leg_only) {
+        states[0] = states[1] = states[2] = states[3] = 0.0f;
+        states[8] = states[9] = 0.0f;
+    }
     float control[4] = {0.0f};
     arm_matrix_instance_f32 K = {4, 10, &gain[0][0]};
     arm_matrix_instance_f32 state = {10, 1, states};
     arm_matrix_instance_f32 output = {4, 1, control};
     arm_mat_mult_f32(&K, &state, &output);
-    pClassicData->Contronller_Data.Fw_L = control[0];
-    pClassicData->Contronller_Data.Fw_R = control[1];
+    pClassicData->Contronller_Data.Fw_L = airborne_leg_only ? 0.0f : control[0];
+    pClassicData->Contronller_Data.Fw_R = airborne_leg_only ? 0.0f : control[1];
     pClassicData->Contronller_Data.Tp_L = control[2];
     pClassicData->Contronller_Data.Tp_R = control[3];
 }
